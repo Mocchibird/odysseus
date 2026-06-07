@@ -1,9 +1,10 @@
 import asyncio
+import importlib.util
 import sys
 from unittest.mock import MagicMock
 
 
-if "bs4" not in sys.modules:
+if "bs4" not in sys.modules and importlib.util.find_spec("bs4") is None:
     sys.modules["bs4"] = MagicMock()
 
 from services.memory.skills import QUIZ_SPOILER_MARKDOWN_SKILL_NAME, SkillsManager

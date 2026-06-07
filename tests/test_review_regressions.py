@@ -270,18 +270,20 @@ def test_preset_manager_persists_inject_fields(tmp_path):
     assert reloaded.presets["custom"]["inject_suffix"] == "SUFFIX"
 
 
-def test_preset_manager_default_custom_preset_starts_disabled(tmp_path):
+def test_preset_manager_default_custom_preset_is_iris(tmp_path):
     manager = PresetManager(str(tmp_path))
 
     custom = manager.presets["custom"]
 
-    assert custom["enabled"] is False
-    assert custom["system_prompt"] == ""
-    assert custom["temperature"] == 1.0
+    assert custom["enabled"] is True
+    assert custom["name"] == "Iris"
+    assert custom["character_name"] == "Iris"
+    assert "You are Iris" in custom["system_prompt"]
+    assert custom["temperature"] == 0.9
     assert custom["max_tokens"] == 0
 
 
-def test_preset_manager_migrates_legacy_default_custom_preset_disabled(tmp_path):
+def test_preset_manager_migrates_legacy_default_custom_preset_to_iris(tmp_path):
     presets_file = tmp_path / "presets.json"
     presets_file.write_text(
         json.dumps({
@@ -298,9 +300,11 @@ def test_preset_manager_migrates_legacy_default_custom_preset_disabled(tmp_path)
     manager = PresetManager(str(tmp_path))
     custom = manager.presets["custom"]
 
-    assert custom["enabled"] is False
-    assert custom["system_prompt"] == ""
-    assert custom["temperature"] == 1.0
+    assert custom["enabled"] is True
+    assert custom["name"] == "Iris"
+    assert custom["character_name"] == "Iris"
+    assert "You are Iris" in custom["system_prompt"]
+    assert custom["temperature"] == 0.9
     assert custom["max_tokens"] == 0
 
 
