@@ -3792,7 +3792,11 @@ async function initUnifiedIntegrations() {
     // no typed-name → key lookup is needed (datalist-era leftover).
     const _applyPreset = () => {
       const p = presets[preset.value];
-      const isNtfy = preset.value === 'ntfy' || (p && (p.name || '').toLowerCase() === 'ntfy');
+      // Detect ntfy by preset OR by name/url containing "ntfy" — so editing an
+      // EXISTING ntfy connection (where the preset dropdown isn't restored, to
+      // avoid clobbering the name) still shows + saves the Topic field.
+      const isNtfy = preset.value === 'ntfy' || (p && (p.name || '').toLowerCase() === 'ntfy')
+        || /ntfy/i.test(name.value || '') || /ntfy/i.test(url.value || '');
       const isUrlAuth = preset.value === 'discord_webhook'; // secret embedded in URL — no key/auth fields needed
       if (ntfyHint) {
         ntfyHint.style.display = isNtfy ? 'block' : 'none';
@@ -3825,7 +3829,7 @@ async function initUnifiedIntegrations() {
       const presetKey = preset.value || undefined;
       const body = { name: name.value, base_url: url.value, auth_type: auth.value, auth_header: header.value, preset: presetKey };
       if (key.value) body.api_key = key.value;
-      const _isNtfy = presetKey === 'ntfy' || (name.value || '').toLowerCase() === 'ntfy';
+      const _isNtfy = presetKey === 'ntfy' || /ntfy/i.test(name.value || '') || /ntfy/i.test(url.value || '');
       if (_isNtfy && ntfyTopic) body.ntfy_topic = ntfyTopic.value.trim();
       try {
         const u = _editId ? `/api/auth/integrations/${_editId}` : '/api/auth/integrations';
