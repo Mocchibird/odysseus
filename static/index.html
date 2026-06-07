@@ -211,8 +211,8 @@
       }, { once: true });
     })();
   </script>
-  <link rel="stylesheet" href="/static/style.css?v=343">
-  <link rel="modulepreload" href="/static/app.js?v=343">
+  <link rel="stylesheet" href="/static/style.css?v=344">
+  <link rel="modulepreload" href="/static/app.js?v=344">
   <link rel="modulepreload" href="/static/js/chat.js">
   <link rel="modulepreload" href="/static/js/ui.js">
   <link rel="modulepreload" href="/static/js/sessions.js">
@@ -2008,9 +2008,10 @@
                 <label class="settings-label">Send to</label>
                 <input id="set-reminder-email-to" class="settings-select" type="email" placeholder="you@example.com" />
               </div>
-              <div id="set-reminder-ntfy-topic-row" class="settings-row" style="display:none">
+              <div id="set-reminder-ntfy-topic-row" class="settings-row" style="display:none;flex-wrap:wrap">
                 <label class="settings-label">ntfy topic</label>
                 <input id="set-reminder-ntfy-topic" class="settings-select" type="text" placeholder="reminders" />
+                <div style="flex-basis:100%;font-size:11px;opacity:0.6;margin-top:4px;">Per&#8209;account — each user sets their own topic and <b>your</b> reminders are sent here (log in as that user to set theirs). In <b>Integrations</b>, add the ntfy connection whose token is scoped to this topic.</div>
               </div>
               <div id="set-reminder-webhook-intg-row" class="settings-row" style="display:none">
                 <label class="settings-label">Integration</label>
@@ -2373,7 +2374,7 @@
 <script type="module" src="/static/js/settings.js"></script>
 <script type="module" src="/static/js/admin.js"></script>
 <script type="module" src="/static/js/assistant.js"></script>
-<script type="module" src="/static/app.js?v=343"></script>  <!-- app.js must be LAST -->
+<script type="module" src="/static/app.js?v=344"></script>  <!-- app.js must be LAST -->
 <script type="module" src="/static/js/init.js"></script>
 <script type="module" src="/static/js/a11y.js"></script>
 <script nonce="{{CSP_NONCE}}">if('serviceWorker' in navigator){navigator.serviceWorker.register('/static/sw.js').catch(()=>{});}</script>

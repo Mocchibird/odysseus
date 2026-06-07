@@ -2609,30 +2609,45 @@ async function initReminderSettings() {
     syncChannelRows();
   } catch (e) { console.warn('Failed to load reminder settings', e); }
 
+  // Returns true if everything persisted. Per-user keys (topic, channel, quiet
+  // hours, …) go to /api/prefs (this account only); the rest to global settings.
+  // Surfaces HTTP failures instead of swallowing them, so a silent 401/404 can't
+  // masquerade as "saved" (which previously looked like "the topic won't save").
   async function save(patch) {
+    const failures = [];
     try {
       const globalPatch = {};
       for (const [key, value] of Object.entries(patch || {})) {
         if (REMINDER_PREF_KEYS.has(key)) {
-          await fetch(`/api/prefs/${encodeURIComponent(key)}`, {
+          const r = await fetch(`/api/prefs/${encodeURIComponent(key)}`, {
             method: 'PUT',
             credentials: 'same-origin',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ value }),
           });
+          if (!r.ok) failures.push(`${key} (HTTP ${r.status})`);
         } else {
           globalPatch[key] = value;
         }
       }
       if (Object.keys(globalPatch).length) {
-        await fetch('/api/auth/settings', {
+        const r = await fetch('/api/auth/settings', {
           method: 'POST',
           credentials: 'same-origin',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(globalPatch),
         });
+        if (!r.ok) failures.push(`settings (HTTP ${r.status})`);
       }
-    } catch (e) { console.warn('Failed to save reminder settings', e); }
+    } catch (e) {
+      failures.push(String(e && e.message || e));
+    }
+    if (failures.length) {
+      console.warn('Failed to save reminder settings', failures);
+      try { uiModule.showError?.('Couldn’t save reminder settings — ' + failures.join('; ')); } catch (_) {}
+      return false;
+    }
+    return true;
   }
 
   channelSel.addEventListener('change', () => {
@@ -2654,10 +2669,18 @@ async function initReminderSettings() {
   }
   if (ntfyTopicIn) {
     let topicDebounce;
+    const saveTopic = async () => {
+      const ok = await save({ reminder_ntfy_topic: ntfyTopicIn.value.trim() || 'reminders' });
+      // Confirm on success so it's clear the (per-account) topic persisted.
+      if (ok) { try { uiModule.showToast?.('Your reminder topic was saved'); } catch (_) {} }
+    };
     ntfyTopicIn.addEventListener('input', () => {
       clearTimeout(topicDebounce);
-      topicDebounce = setTimeout(() => save({ reminder_ntfy_topic: ntfyTopicIn.value.trim() || 'reminders' }), 600);
+      topicDebounce = setTimeout(saveTopic, 700);
     });
+    // Belt-and-suspenders: also save immediately on blur, in case the user
+    // tabs/clicks away before the debounce fires.
+    ntfyTopicIn.addEventListener('blur', () => { clearTimeout(topicDebounce); saveTopic(); });
   }
   // Quiet hours wiring
   {
