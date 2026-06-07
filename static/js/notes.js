@@ -1749,6 +1749,8 @@ function _syncNotesModeChrome() {
   if (isVault || isBooks) {
     _selectMode = false;
     _selectedIds.clear();
+    pane?.classList.remove('notes-pane-archive');
+    archiveToggle?.classList.remove('active');
     const bar = document.getElementById('notes-bulk-bar');
     const btn = document.getElementById('notes-select-btn');
     const all = document.getElementById('notes-select-all');

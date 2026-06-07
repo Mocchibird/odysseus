@@ -86,6 +86,7 @@ def test_books_has_dedicated_reader_ui_hooks():
     assert "notes-header-spacer" in notes
     assert "archiveToggle" in notes
     assert "viewToggle" in notes
+    assert "pane?.classList.remove('notes-pane-archive')" in notes
     assert "notes-book-controls-row" in notes
     assert "notes-book-mode-btn" in notes
     assert "notes-book-page" in notes
@@ -97,10 +98,10 @@ def test_books_has_dedicated_reader_ui_hooks():
     assert "_removeLegacyBooksModal" in notes
     assert "#books-modal" in css
     assert "display: none !important" in css
-    assert "odysseus-v341" in sw
-    assert "/static/style.css?v=341" in index
-    assert "/static/app.js?v=341" in index
-    assert "./js/notes.js?v=341" in app
+    assert "odysseus-v342" in sw
+    assert "/static/style.css?v=342" in index
+    assert "/static/app.js?v=342" in index
+    assert "./js/notes.js?v=342" in app
     assert ".notes-pane-books" in css
     assert ".notes-book-content" in css
     assert ".notes-book-controls-row" in css
