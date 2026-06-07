@@ -1885,8 +1885,8 @@ async def do_manage_health(content: str, owner: Optional[str] = None) -> Dict:
 
     Backed by src/health_store.py (the same store the Health panel UI uses), so
     anything logged here shows up in the UI for the same user and vice versa.
-    Actions: log_meal, log_weight, log_training, check_habit, list_habits,
-    habit_heatmap, calories, weight_trend, summary.
+    Actions: create_habit, check_habit, list_habits, habit_heatmap, log_meal,
+    log_weight, log_training, calories, weight_trend, set_profile, summary.
     """
     from src import health_store as hs
 
@@ -1901,9 +1901,11 @@ async def do_manage_health(content: str, owner: Optional[str] = None) -> Dict:
         "weight": "log_weight", "add_weight": "log_weight",
         "training": "log_training", "workout": "log_training", "log_workout": "log_training",
         "habit": "check_habit", "mark_habit": "check_habit", "complete_habit": "check_habit",
+        "add_habit": "create_habit", "new_habit": "create_habit", "make_habit": "create_habit",
         "habits": "list_habits",
         "daily_calories": "calories", "kcal": "calories",
-        "weight_progress": "weight_trend", "weight": "weight_trend",
+        "weight_progress": "weight_trend",
+        "profile": "set_profile", "set_goal": "set_profile", "goal": "set_profile",
     }
     action = _ALIASES.get(action, action)
     ow = owner or ""
@@ -1953,10 +1955,24 @@ async def do_manage_health(content: str, owner: Optional[str] = None) -> Dict:
             )
             return {"output": f"Logged training: {kind or 'session'}.", "session": sess, "exit_code": 0}
 
+        if action == "create_habit":
+            name = str(args.get("name") or args.get("habit") or "").strip()
+            if not name:
+                return {"error": "habit name is required", "exit_code": 1}
+            try:
+                habit = hs.create_habit(
+                    ow, name,
+                    icon=args.get("icon") or "", category=args.get("category") or "",
+                    cadence=args.get("cadence") or "daily",
+                )
+            except ValueError as e:
+                return {"error": str(e), "exit_code": 1}
+            return {"output": f"Created habit “{habit['name']}”.", "habit": habit, "exit_code": 0}
+
         if action == "check_habit":
             hid = _resolve_habit_id(args.get("habit") or args.get("habit_id") or args.get("name"))
             if hid is None:
-                return {"error": "Unknown habit. Pass habit name or id.", "exit_code": 1}
+                return {"error": "Unknown habit. Create it first (action=create_habit) or pass an existing name/id.", "exit_code": 1}
             res = hs.set_habit_day(ow, hid, day=args.get("day"), done=args.get("done"))
             if res is None:
                 return {"error": "Habit not found", "exit_code": 1}
@@ -1985,6 +2001,18 @@ async def do_manage_health(content: str, owner: Optional[str] = None) -> Dict:
                 return {"output": "No weight entries yet.", **trend, "exit_code": 0}
             return {"output": f"{trend['first_kg']} → {trend['last_kg']} kg ({'+' if trend['delta_kg'] > 0 else ''}{trend['delta_kg']} kg).", **trend, "exit_code": 0}
 
+        if action == "set_profile":
+            fields = {k: args.get(k) for k in (
+                "height_cm", "date_of_birth", "sex", "activity_level",
+                "target_kg", "target_weekly_loss_kg", "daily_kcal_target",
+            ) if args.get(k) is not None}
+            if not fields:
+                return {"error": "Pass at least one profile field (height_cm, date_of_birth, sex, activity_level, target_kg, target_weekly_loss_kg, daily_kcal_target).", "exit_code": 1}
+            hs.set_profile(ow, **fields)
+            t = hs.tdee(ow)
+            tgt = f" Daily target: {t['target_kcal']} kcal." if t.get("target_kcal") else ""
+            return {"output": f"Health profile updated.{tgt}", "profile": hs.get_profile(ow), "tdee": t, "exit_code": 0}
+
         if action == "summary":
             return {
                 "output": "Health summary.",
@@ -1995,7 +2023,7 @@ async def do_manage_health(content: str, owner: Optional[str] = None) -> Dict:
                 "exit_code": 0,
             }
 
-        return {"error": f"Unknown action '{action}'. Use log_meal, log_weight, log_training, check_habit, list_habits, habit_heatmap, calories, weight_trend, or summary.", "exit_code": 1}
+        return {"error": f"Unknown action '{action}'. Use create_habit, check_habit, list_habits, habit_heatmap, log_meal, log_weight, log_training, calories, weight_trend, set_profile, or summary.", "exit_code": 1}
     except ValueError as e:
         return {"error": str(e), "exit_code": 1}
     except Exception as e:

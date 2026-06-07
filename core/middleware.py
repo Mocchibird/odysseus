@@ -124,6 +124,9 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
                 "font-src 'self' https://cdn.jsdelivr.net; "
                 "img-src 'self' data: blob:; "
                 "media-src 'self' blob:; "
+                # PDF.js (book reader) spawns its render worker from a same-origin
+                # .mjs and may also use a blob: worker — allow both.
+                "worker-src 'self' blob:; "
                 "connect-src 'self'; "
                 "frame-src 'self'; "
                 "frame-ancestors 'none'"

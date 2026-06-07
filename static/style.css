@@ -32252,6 +32252,19 @@ body.notes-mobile-mode.notes-drag-mode .note-card-pin.active {
   transition: opacity 0.15s ease;
 }
 .pdfjs-page:hover .pdfjs-page-num { opacity: 1; }
+/* Visible per-page render error (instead of a silent blank page). */
+.pdfjs-page-err {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 14px;
+  text-align: center;
+  font: 12px/1.4 ui-monospace, Menlo, Consolas, monospace;
+  color: #b00020;
+  background: #fff;
+}
 /* Center + show the page number on placeholders that haven't rasterized yet. */
 .pdfjs-page:not(:has(.pdfjs-canvas)) .pdfjs-page-num {
   opacity: 0.45;

@@ -100,39 +100,50 @@ export async function createPdfReader(container, opts = {}) {
     return p;
   }
 
+  function _pageError(wrap, num, msg) {
+    if (!wrap || destroyed) return;
+    let el = wrap.querySelector('.pdfjs-page-err');
+    if (!el) { el = document.createElement('div'); el.className = 'pdfjs-page-err'; wrap.appendChild(el); }
+    el.textContent = `Page ${num}: ${msg}`;
+  }
+
   async function _renderPage(num) {
     if (destroyed || rendered.has(num) || renderTasks.has(num)) return;
     const wrap = pageEls[num - 1];
     if (!wrap) return;
     let page;
-    try { page = await _getPage(num); } catch (_) { return; }
+    try { page = await _getPage(num); }
+    catch (e) { _pageError(wrap, num, 'failed to load — ' + (e && e.message || e)); return; }
     if (destroyed) return;
-    const base = page.getViewport({ scale: 1 });
-    // Correct the placeholder aspect ratio to this page's real ratio.
-    wrap.style.aspectRatio = `1 / ${base.height / base.width}`;
-    const cssW = _contentWidth();
-    const dpr = Math.min(window.devicePixelRatio || 1, 2.5);
-    let scale = (cssW / base.width) * dpr;
-    if (base.width * scale > MAX_CANVAS_PX) scale = MAX_CANVAS_PX / base.width;
-    const viewport = page.getViewport({ scale });
-    const canvas = document.createElement('canvas');
-    canvas.className = 'pdfjs-canvas';
-    canvas.width = Math.floor(viewport.width);
-    canvas.height = Math.floor(viewport.height);
-    canvas.style.width = '100%';
-    canvas.style.height = 'auto';
-    const ctx = canvas.getContext('2d', { alpha: false });
-    const task = page.render({ canvasContext: ctx, viewport });
-    renderTasks.set(num, task);
     try {
+      const base = page.getViewport({ scale: 1 });
+      // Correct the placeholder aspect ratio to this page's real ratio.
+      wrap.style.aspectRatio = `1 / ${base.height / base.width}`;
+      // Guard against a 0-width container (pre-layout): fall back to a sane width.
+      const cssW = Math.max(200, _contentWidth() || (wrap.clientWidth || 0) || 600);
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      let scale = (cssW / base.width) * dpr;
+      if (base.width * scale > MAX_CANVAS_PX) scale = MAX_CANVAS_PX / base.width;
+      const viewport = page.getViewport({ scale });
+      const canvas = document.createElement('canvas');
+      canvas.className = 'pdfjs-canvas';
+      canvas.width = Math.max(1, Math.floor(viewport.width));
+      canvas.height = Math.max(1, Math.floor(viewport.height));
+      canvas.style.width = '100%';
+      canvas.style.height = 'auto';
+      const ctx = canvas.getContext('2d', { alpha: false });
+      if (!ctx) { _pageError(wrap, num, 'no 2D canvas context'); return; }
+      const task = page.render({ canvasContext: ctx, viewport });
+      renderTasks.set(num, task);
       await task.promise;
       if (destroyed) return;
-      const old = wrap.querySelector('.pdfjs-canvas');
-      if (old) old.remove();
+      wrap.querySelectorAll('.pdfjs-canvas, .pdfjs-page-err').forEach((n) => n.remove());
       wrap.appendChild(canvas);
       rendered.add(num);
-    } catch (_) {
-      // RenderingCancelledException when scrolled away mid-render — fine.
+    } catch (e) {
+      // RenderingCancelledException when scrolled away mid-render is expected.
+      if (e && (e.name === 'RenderingCancelledException')) return;
+      _pageError(wrap, num, (e && e.message) || String(e));
     } finally {
       renderTasks.delete(num);
     }
