@@ -7,7 +7,11 @@
 //   - Other static assets (images/fonts/libs): cache-first with bg refresh.
 //   - API / non-GET: never cached.
 // Bump CACHE_NAME whenever the precache list or SW logic changes.
-const CACHE_NAME = 'odysseus-v342';
+const CACHE_NAME = 'odysseus-v343';
+// Separate, long-lived cache for book content (PDF bytes / EPUB chapters) so
+// books you've opened stay readable offline AND survive app-shell version bumps
+// (the activate cleanup below deliberately keeps this one).
+const BOOKS_CACHE = 'odysseus-books-v1';
 
 // Core shell precached on install so repeat opens are instant without any
 // network wait. Keep this list in sync with the <script type="module"> tags
@@ -54,6 +58,9 @@ const PRECACHE = [
   '/static/js/emailLibrary/signatureFold.js',
   '/static/js/emailLibrary/state.js',
   '/static/js/notes.js',
+  '/static/js/health.js',
+  '/static/js/pings.js',
+  '/static/js/pdfReader.js',
   '/static/js/tasks.js',
   '/static/js/calendar.js',
   '/static/js/calendar/utils.js',
@@ -85,15 +92,37 @@ self.addEventListener('install', (e) => {
 self.addEventListener('activate', (e) => {
   e.waitUntil(
     caches.keys().then(keys =>
-      Promise.all(keys.filter(k => k !== CACHE_NAME).map(k => caches.delete(k)))
+      // Keep the current shell cache AND the long-lived books cache; drop the rest.
+      Promise.all(keys.filter(k => k !== CACHE_NAME && k !== BOOKS_CACHE).map(k => caches.delete(k)))
     ).then(() => self.clients.claim())
   );
 });
 
+// Book content is immutable (a book's bytes/chapters don't change), so cache it
+// for offline reading. Opening a book online populates this; later it's served
+// from cache even with no connection. Kept in BOOKS_CACHE (survives shell bumps).
+const BOOK_CONTENT = /^\/api\/(books\/(file|chapter|open)|iris-vault\/epub)$/;
+
 self.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url);
 
-  // Never touch API calls or non-GET.
+  // Offline reading: stale-while-revalidate book content (returns instantly from
+  // cache when present, refreshes in the background; works fully offline).
+  if (e.request.method === 'GET' && BOOK_CONTENT.test(url.pathname)) {
+    e.respondWith(
+      caches.open(BOOKS_CACHE).then(async cache => {
+        const cached = await cache.match(e.request);
+        const network = fetch(e.request).then(res => {
+          if (res && res.ok) cache.put(e.request, res.clone());
+          return res;
+        }).catch(() => cached);
+        return cached || network;
+      })
+    );
+    return;
+  }
+
+  // Never touch other API calls or non-GET.
   if (url.pathname.startsWith('/api/') || e.request.method !== 'GET') return;
 
   // HTML navigation: stale-while-revalidate the app shell — but ONLY for the

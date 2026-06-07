@@ -4207,3 +4207,11 @@ if (document.readyState === 'loading') {
 } else {
   startOdysseusApp();
 }
+
+// Register the service worker — enables installable PWA + offline reading of
+// books you've opened (see static/sw.js). Was scaffolded but never registered.
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/static/sw.js').catch((e) => console.debug('SW register failed', e));
+  });
+}
