@@ -2896,6 +2896,11 @@ function _renderBookReader(body, baseHtml) {
           <button type="button" class="notes-book-mode-btn${_bookReadMode === 'page' ? ' active' : ''}" data-mode="page">Pages</button>
         </div>`;
   if (isPdf && _bookPdfViewMode !== 'text') {
+    // Show the PDF as-is in the browser's built-in viewer. Simple + reliable;
+    // the #page anchor jumps to the current page. "Open ↗" is a fallback for
+    // browsers that won't render a PDF inline in an iframe (e.g. iOS Safari).
+    const fileUrl = `${API_BASE}/api/books/file?path=${encodeURIComponent(book?.path || '')}`;
+    const pdfUrl = `${fileUrl}#view=FitH&page=${Math.max(1, idx + 1)}`;
     body.innerHTML = baseHtml + `<div class="notes-book-reader notes-book-reader-pdf">
       <div class="notes-vault-reader-head notes-book-head">
         <div class="notes-book-title-row">
@@ -2915,42 +2920,15 @@ function _renderBookReader(body, baseHtml) {
           <button type="button" class="notes-select-trigger notes-book-prev" ${idx <= 0 ? 'disabled' : ''}>Prev</button>
           <select class="notes-select-trigger notes-book-select" aria-label="Jump to page">${options}</select>
           <button type="button" class="notes-select-trigger notes-book-next" ${idx >= chapters.length - 1 ? 'disabled' : ''}>Next</button>
+          <a class="notes-select-trigger notes-book-pdf-open" href="${_attrEsc(fileUrl)}" target="_blank" rel="noopener" title="Open the PDF in a new tab">Open ↗</a>
         </div>
       </div>
-      <article class="notes-book-content notes-book-content-pdf">
-        <div class="notes-epub-progress-line"><span style="width:${Math.max(0, Math.min(progressPct, 100))}%"></span></div>
-        <div class="notes-book-pdf-canvas" tabindex="0"></div>
-      </article>
+      <div class="notes-book-pdf-viewer">
+        <iframe class="notes-book-pdf-frame" src="${_attrEsc(pdfUrl)}" title="${_attrEsc(book?.title || 'PDF')}"></iframe>
+      </div>
     </div>`;
-    const canvasHost = body.querySelector('.notes-book-pdf-canvas');
-    const selectEl = body.querySelector('.notes-book-select');
-    const prevBtn = body.querySelector('.notes-book-prev');
-    const nextBtn = body.querySelector('.notes-book-next');
-    const progressSpan = body.querySelector('.notes-epub-progress-line span');
-    const total = chapters.length || 0;
-    // The PDF canvas is its own scroller, so the generic percent helper can't
-    // read it — track the last reported percent for the final save on exit.
-    let _lastPdfPct = Math.max(0, Math.min(progressPct, 100));
-    const _syncPdfControls = (page) => {
-      _bookChapterIndex = Math.max(0, Math.min(page - 1, total > 0 ? total - 1 : page - 1));
-      if (selectEl) selectEl.value = String(_bookChapterIndex);
-      if (prevBtn) prevBtn.disabled = page <= 1;
-      if (nextBtn) nextBtn.disabled = total > 0 && page >= total;
-      if (_bookOpenBook?.progress) {
-        _bookOpenBook.progress.chapter_index = _bookChapterIndex;
-      }
-    };
-    const _pdfGoTo = (n) => {
-      const target = Math.max(0, Math.min(Number(n) || 0, total > 0 ? total - 1 : Number(n) || 0));
-      _bookChapterIndex = target;
-      if (_bookPdfReader) _bookPdfReader.goToPage(target + 1, { behavior: 'smooth' });
-    };
-    prevBtn?.addEventListener('click', () => _pdfGoTo(_bookChapterIndex - 1));
-    nextBtn?.addEventListener('click', () => _pdfGoTo(_bookChapterIndex + 1));
-    selectEl?.addEventListener('change', (e) => _pdfGoTo(e.target.value));
     body.querySelector('.notes-vault-back')?.addEventListener('click', () => {
-      _saveBookProgressNow(_lastPdfPct);
-      _destroyBookPdfReader();
+      _saveBookProgressNow(0);
       if (_bookKeyHandler) {
         document.removeEventListener('keydown', _bookKeyHandler);
         _bookKeyHandler = null;
@@ -2970,29 +2948,9 @@ function _renderBookReader(body, baseHtml) {
     body.querySelectorAll('.notes-book-pdf-toggle .notes-book-mode-btn').forEach(btn => {
       btn.addEventListener('click', () => _setBookPdfViewMode(btn.dataset.pdfMode || 'pdf'));
     });
-    // Spin up the actual-PDF canvas renderer (vendored PDF.js).
-    if (canvasHost) {
-      canvasHost.innerHTML = '<p class="notes-book-loading">Rendering PDF…</p>';
-      (async () => {
-        try {
-          const { createPdfReader } = await import('./pdfReader.js');
-          if (!_bookOpenBook || _bookOpenBook.path !== book.path || _bookPdfViewMode === 'text') return;
-          canvasHost.innerHTML = '';
-          _bookPdfReader = await createPdfReader(canvasHost, {
-            url: `${API_BASE}/api/books/file?path=${encodeURIComponent(book?.path || '')}`,
-            initialPage: idx + 1,
-            onPageChange: (page) => _syncPdfControls(page),
-            onProgress: (pct) => {
-              _lastPdfPct = pct;
-              if (progressSpan) progressSpan.style.width = `${pct}%`;
-              _scheduleBookProgressSave(pct);
-            },
-          });
-        } catch (err) {
-          canvasHost.innerHTML = `<p class="notes-book-loading">Couldn't render this PDF (${_esc(err?.message || 'error')}). Switch to <strong>Text</strong> view above to read the extracted text.</p>`;
-        }
-      })();
-    }
+    body.querySelector('.notes-book-prev')?.addEventListener('click', () => _setBookChapter(idx - 1));
+    body.querySelector('.notes-book-next')?.addEventListener('click', () => _setBookChapter(idx + 1));
+    body.querySelector('.notes-book-select')?.addEventListener('change', (e) => _setBookChapter(e.target.value));
     return;
   }
   body.innerHTML = baseHtml + `<div class="notes-book-reader notes-book-reader-${_attrEsc(_bookReadMode)}">
