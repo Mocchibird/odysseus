@@ -5,6 +5,7 @@ import re
 import uuid
 from datetime import datetime, date, timedelta
 from typing import Optional, List
+from urllib.parse import unquote, urljoin, urlparse
 
 from fastapi import APIRouter, HTTPException, Request, UploadFile, File
 from pydantic import BaseModel
@@ -125,6 +126,288 @@ def _resolve_base_uid(uid: str) -> str:
     if not base:
         raise ValueError("malformed compound UID: missing base before ::")
     return base
+
+
+# 10 MB hard cap on ICS import. Loading the whole calendar into memory is
+# unavoidable with python-icalendar, so file uploads and feed downloads share
+# the same cap.
+_ICS_MAX_BYTES = 10 * 1024 * 1024
+_ICS_MAX_REDIRECTS = 5
+
+
+def _sanitize_calendar_display_name(raw_name: str) -> str:
+    """Sanitize user/feed-derived calendar display names."""
+    raw = (raw_name or "").strip() or "Imported"
+    return "".join(c for c in raw if c.isprintable())[:120] or "Imported"
+
+
+def _calendar_name_from_url(url: str) -> str:
+    parsed = urlparse(url)
+    path_name = unquote((parsed.path or "").rstrip("/").rsplit("/", 1)[-1])
+    name = re.sub(r"\.(ics|ical)$", "", path_name, flags=re.IGNORECASE)
+    name = name.replace("_", " ").replace("-", " ").strip()
+    return name or (parsed.hostname or "Subscribed calendar")
+
+
+def _normalize_ics_feed_url(url: str) -> str:
+    url = (url or "").strip()
+    if url.startswith("webcal://"):
+        url = "https://" + url[len("webcal://"):]
+    return url
+
+
+def _ics_block_private_ips() -> bool:
+    return _os.environ.get("ODYSSEUS_ICS_BLOCK_PRIVATE_IPS", "0").strip().lower() in {
+        "1", "true", "yes", "on"
+    }
+
+
+def _validate_ics_feed_url(url: str) -> str:
+    """Validate a user-supplied ICS feed URL before the server fetches it."""
+    url = _normalize_ics_feed_url(url)
+    from src.url_safety import check_outbound_url
+
+    ok, reason = check_outbound_url(url, block_private=_ics_block_private_ips())
+    if not ok:
+        raise HTTPException(400, f"Invalid ICS URL: {reason}")
+    return url
+
+
+async def _fetch_ics_feed(url: str) -> tuple[bytes, str]:
+    """Fetch a remote iCalendar feed with size and redirect safety checks."""
+    import httpx
+
+    current = _validate_ics_feed_url(url)
+    async with httpx.AsyncClient(timeout=30.0, follow_redirects=False, trust_env=False) as cx:
+        for _ in range(_ICS_MAX_REDIRECTS + 1):
+            current = _validate_ics_feed_url(current)
+            try:
+                async with cx.stream(
+                    "GET",
+                    current,
+                    headers={"Accept": "text/calendar,text/plain,*/*"},
+                ) as resp:
+                    if 300 <= resp.status_code < 400:
+                        location = resp.headers.get("location")
+                        if not location:
+                            raise HTTPException(400, f"ICS feed redirected without a Location header")
+                        current = urljoin(str(resp.url), location)
+                        continue
+                    if resp.status_code >= 400:
+                        raise HTTPException(400, f"Could not fetch ICS feed: HTTP {resp.status_code}")
+
+                    chunks: list[bytes] = []
+                    total = 0
+                    async for chunk in resp.aiter_bytes():
+                        total += len(chunk)
+                        if total > _ICS_MAX_BYTES:
+                            raise HTTPException(413, "ICS feed exceeds 10 MB limit")
+                        chunks.append(chunk)
+                    return b"".join(chunks), str(resp.url)
+            except HTTPException:
+                raise
+            except httpx.TimeoutException:
+                raise HTTPException(400, "Could not fetch ICS feed: timed out")
+            except httpx.HTTPError as e:
+                raise HTTPException(400, f"Could not fetch ICS feed: {e}") from e
+        raise HTTPException(400, "ICS feed redirected too many times")
+
+
+def _import_ics_content(
+    db,
+    *,
+    owner: str,
+    content: bytes,
+    source_name: str,
+    calendar_name: str = "",
+    source_url: str = "",
+    persistent: bool = False,
+    replace_existing: bool = False,
+) -> dict:
+    """Import parsed iCalendar bytes into the caller's local calendar DB."""
+    from icalendar import Calendar as iCal
+
+    try:
+        cal_data = iCal.from_ical(content)
+    except Exception as e:
+        raise HTTPException(400, f"Invalid ICS file: {e}")
+
+    raw_name = calendar_name.strip() or re.sub(
+        r"\.(ics|ical)$", "", (source_name or "").replace("_", " ").strip(), flags=re.IGNORECASE
+    ) or "Imported"
+    cal_display = _sanitize_calendar_display_name(raw_name)
+
+    target_cal = None
+    if persistent and source_url:
+        target_cal = db.query(CalendarCal).filter(
+            CalendarCal.source_url == source_url,
+            CalendarCal.owner == owner,
+        ).first()
+    if not target_cal:
+        target_cal = db.query(CalendarCal).filter(
+            CalendarCal.name == cal_display,
+            CalendarCal.owner == owner,
+        ).first()
+    if not target_cal:
+        target_cal = CalendarCal(
+            id=str(uuid.uuid4()),
+            owner=owner,
+            name=cal_display,
+            color="#7c4dff",
+            source="ics" if persistent else "import",
+            source_url=source_url or None,
+            sync_enabled=True,
+        )
+        db.add(target_cal)
+        db.commit()
+        db.refresh(target_cal)
+    elif persistent:
+        target_cal.source = "ics"
+        target_cal.source_url = source_url or target_cal.source_url
+        target_cal.sync_enabled = True
+        db.commit()
+        db.refresh(target_cal)
+
+    deleted_existing = 0
+    if replace_existing:
+        deleted_existing = db.query(CalendarEvent).filter(
+            CalendarEvent.calendar_id == target_cal.id,
+            CalendarEvent.origin == "ics",
+        ).delete()
+        db.commit()
+
+    imported = skipped = 0
+    for comp in cal_data.walk():
+        if comp.name != "VEVENT":
+            continue
+        uid_val = str(uuid.uuid4())
+        dtstart = comp.get("dtstart")
+        if not dtstart:
+            skipped += 1
+            continue
+
+        source_uid = str(comp.get("uid", "")) or None
+        if source_uid:
+            src_dtstart = dtstart.dt
+            naive_src = _ics_naive_dtstart(src_dtstart)
+            existing = (
+                db.query(CalendarEvent)
+                .filter(
+                    CalendarEvent.calendar_id == target_cal.id,
+                    CalendarEvent.dtstart == naive_src,
+                    CalendarEvent.summary == str(comp.get("summary", "")),
+                )
+                .first()
+            )
+            if existing:
+                skipped += 1
+                continue
+
+        dt_val = dtstart.dt
+        all_day = isinstance(dt_val, date) and not isinstance(dt_val, datetime)
+        from datetime import timezone as _tz
+        row_is_utc = False
+        if all_day:
+            start_dt = datetime(dt_val.year, dt_val.month, dt_val.day)
+            dtend = comp.get("dtend")
+            end_dt = datetime(dtend.dt.year, dtend.dt.month, dtend.dt.day) if dtend else start_dt + timedelta(days=1)
+        else:
+            if hasattr(dt_val, 'tzinfo') and dt_val.tzinfo is not None:
+                start_dt = dt_val.astimezone(_tz.utc).replace(tzinfo=None)
+                row_is_utc = True
+            else:
+                start_dt = dt_val
+            dtend = comp.get("dtend")
+            if dtend:
+                d_end = dtend.dt
+                if hasattr(d_end, 'tzinfo') and d_end.tzinfo is not None:
+                    end_dt = d_end.astimezone(_tz.utc).replace(tzinfo=None)
+                else:
+                    end_dt = d_end
+            else:
+                end_dt = start_dt + timedelta(hours=1)
+
+        ev = CalendarEvent(
+            uid=uid_val,
+            calendar_id=target_cal.id,
+            summary=str(comp.get("summary", "")),
+            description=str(comp.get("description", "")),
+            location=str(comp.get("location", "")),
+            dtstart=start_dt,
+            dtend=end_dt,
+            all_day=all_day,
+            is_utc=row_is_utc,
+            rrule=(comp.get("rrule").to_ical().decode() if comp.get("rrule") else ""),
+            origin="ics" if persistent else None,
+        )
+        db.add(ev)
+        imported += 1
+
+    db.commit()
+    return {
+        "ok": True,
+        "imported": imported,
+        "skipped": skipped,
+        "deleted": deleted_existing,
+        "calendar": cal_display,
+        "calendar_id": target_cal.id,
+    }
+
+
+async def _sync_ics_subscriptions(owner: str) -> dict:
+    """Refresh all enabled persistent ICS subscriptions for an owner."""
+    db = SessionLocal()
+    try:
+        rows = db.query(CalendarCal).filter(
+            CalendarCal.owner == owner,
+            CalendarCal.source == "ics",
+            CalendarCal.sync_enabled != False,  # noqa: E712
+            CalendarCal.source_url.isnot(None),
+        ).all()
+        feeds = [
+            {
+                "id": row.id,
+                "name": row.name,
+                "source_url": row.source_url,
+            }
+            for row in rows
+        ]
+    finally:
+        db.close()
+
+    totals = {"calendars": 0, "events": 0, "deleted": 0, "errors": []}
+    for feed in feeds:
+        db = SessionLocal()
+        try:
+            content, final_url = await _fetch_ics_feed(feed["source_url"])
+            result = _import_ics_content(
+                db,
+                owner=owner,
+                content=content,
+                source_name=feed["name"] or _calendar_name_from_url(final_url),
+                calendar_name=feed["name"],
+                source_url=feed["source_url"],
+                persistent=True,
+                replace_existing=True,
+            )
+            refreshed = db.query(CalendarCal).filter(CalendarCal.id == feed["id"]).first()
+            if refreshed:
+                refreshed.last_synced = datetime.utcnow()
+                refreshed.sync_status = "ok"
+                db.commit()
+            totals["calendars"] += 1
+            totals["events"] += int(result.get("imported") or 0)
+            totals["deleted"] += int(result.get("deleted") or 0)
+        except Exception as e:
+            msg = str(getattr(e, "detail", None) or e)[:200]
+            row = db.query(CalendarCal).filter(CalendarCal.id == feed["id"]).first()
+            if row:
+                row.sync_status = msg
+                db.commit()
+            totals["errors"].append(f"{feed['name']}: {msg}")
+        finally:
+            db.close()
+    return totals
 
 # ── Pydantic models ──
 
@@ -605,6 +888,31 @@ def setup_calendar_routes() -> APIRouter:
 
     # ── CalDAV config routes (backward-compat single-account API) ────────────
 
+    @router.get("/today")
+    async def today(request: Request):
+        _require_user(request)
+        try:
+            from src.user_time import clear_user_time_context, timezone_label
+
+            clear_user_time_context()
+            tz_offset = request.headers.get("x-tz-offset")
+            tz_name = request.headers.get("x-tz-name")
+            if tz_offset is not None:
+                set_user_tz_offset(tz_offset)
+            if tz_name:
+                set_user_tz_name(tz_name)
+            now = now_user_local()
+            return {
+                "date": now.date().isoformat(),
+                "weekday": now.strftime("%A"),
+                "time": now.strftime("%H:%M:%S"),
+                "timezone": timezone_label(now),
+                "iso": now.isoformat(),
+            }
+        except Exception as e:
+            logger.error("Failed to resolve calendar today context: %s", e)
+            raise HTTPException(500, "Failed to resolve current date")
+
     @router.get("/config")
     async def get_config(request: Request):
         """Legacy single-account endpoint — returns the first configured account."""
@@ -844,12 +1152,26 @@ def setup_calendar_routes() -> APIRouter:
 
     @router.post("/sync")
     async def sync_caldav_endpoint(request: Request):
-        """Pull events from the configured CalDAV server into local DB.
+        """Pull events from configured CalDAV and persistent ICS feeds.
         Returns counts + any per-calendar errors. Called by the frontend
         on calendar open and by the periodic scheduler loop."""
         owner = _require_user(request)
         from src.caldav_sync import sync_caldav
-        return await sync_caldav(owner)
+        caldav = await sync_caldav(owner)
+        ics = await _sync_ics_subscriptions(owner)
+        errors = []
+        errors.extend(caldav.get("errors") or [])
+        if ics.get("calendars") and errors == ["CalDAV is not configured"]:
+            errors = []
+        errors.extend(ics.get("errors") or [])
+        return {
+            "calendars": int(caldav.get("calendars") or 0) + int(ics.get("calendars") or 0),
+            "events": int(caldav.get("events") or 0) + int(ics.get("events") or 0),
+            "deleted": int(caldav.get("deleted") or 0) + int(ics.get("deleted") or 0),
+            "errors": errors,
+            "caldav": caldav,
+            "ics": ics,
+        }
 
     @router.delete("/calendars/{cal_id}")
     async def delete_calendar(cal_id: str, request: Request):
@@ -881,7 +1203,16 @@ def setup_calendar_routes() -> APIRouter:
             _ensure_default_calendar(db, owner)
             cals = db.query(CalendarCal).filter(CalendarCal.owner == owner).all()
             return {"calendars": [
-                {"name": c.name, "href": c.id, "color": c.color, "source": c.source}
+                {
+                    "name": c.name,
+                    "href": c.id,
+                    "color": c.color,
+                    "source": c.source,
+                    "source_url": c.source_url or "",
+                    "sync_enabled": bool(c.sync_enabled),
+                    "last_synced": c.last_synced.isoformat() if c.last_synced else "",
+                    "sync_status": c.sync_status or "",
+                }
                 for c in cals
             ]}
         except HTTPException:
@@ -1170,136 +1501,41 @@ def setup_calendar_routes() -> APIRouter:
         finally:
             db.close()
 
-    # 10 MB hard cap on ICS upload. Loading the whole file into memory is
-    # unavoidable with python-icalendar, so an unbounded upload would OOM.
-    _ICS_MAX_BYTES = 10 * 1024 * 1024
-
     @router.post("/import")
-    async def import_ics(request: Request, file: UploadFile = File(...), calendar_name: str = ""):
-        """Import events from an .ics file (scoped to caller's account)."""
-        from icalendar import Calendar as iCal
-
+    async def import_ics(request: Request, file: Optional[UploadFile] = File(None), calendar_name: str = ""):
+        """Import events from an .ics file or http(s)/webcal ICS feed URL."""
         owner = _require_user(request)
         db = SessionLocal()
         try:
-            content = await read_upload_limited(file, _ICS_MAX_BYTES, "ICS file")
-            try:
-                cal_data = iCal.from_ical(content)
-            except Exception as e:
-                raise HTTPException(400, f"Invalid ICS file: {e}")
-
-            # Sanitize display name — length cap + strip control chars
-            raw_name = calendar_name.strip() or (file.filename or "").replace(".ics", "").replace("_", " ").strip() or "Imported"
-            cal_display = "".join(c for c in raw_name if c.isprintable())[:120] or "Imported"
-
-            target_cal = db.query(CalendarCal).filter(
-                CalendarCal.name == cal_display,
-                CalendarCal.owner == owner,
-            ).first()
-            if not target_cal:
-                target_cal = CalendarCal(
-                    id=str(uuid.uuid4()),
+            if file is not None:
+                content = await read_upload_limited(file, _ICS_MAX_BYTES, "ICS file")
+                return _import_ics_content(
+                    db,
                     owner=owner,
-                    name=cal_display,
-                    color="#7c4dff",
-                    source="import",
+                    content=content,
+                    source_name=file.filename or "Imported",
+                    calendar_name=calendar_name,
                 )
-                db.add(target_cal)
-                db.commit()
-                db.refresh(target_cal)
 
-            imported = skipped = 0
-            for comp in cal_data.walk():
-                if comp.name != "VEVENT":
-                    continue
-                # Generate a fresh uid for each import. The old code reused
-                # the VEVENT uid from the file, which leaked across users:
-                # a uid present on ANY user's calendar caused this user's
-                # row to be silently skipped (and enabled enumeration).
-                # Using a fresh uuid scopes uniqueness per-row.
-                uid_val = str(uuid.uuid4())
-                dtstart = comp.get("dtstart")
-                if not dtstart:
-                    skipped += 1
-                    continue
+            try:
+                body = await request.json()
+            except Exception:
+                body = {}
+            url = (body.get("url") or body.get("ics_url") or "").strip() if isinstance(body, dict) else ""
+            if not url:
+                raise HTTPException(400, "Provide an .ics file or an ICS feed URL")
 
-                # Dedup INSIDE this user's target calendar only — same
-                # source-uid + same dtstart in the same target = duplicate.
-                source_uid = str(comp.get("uid", "")) or None
-                if source_uid:
-                    src_dtstart = dtstart.dt
-                    # Normalize to the SAME naive form import_ics stores, so a
-                    # re-import of a tz-aware event matches the existing row.
-                    # The old code stripped tzinfo WITHOUT converting to UTC
-                    # (wall clock), while storage converts to UTC first, so
-                    # every re-import of a TZID event created a duplicate.
-                    naive_src = _ics_naive_dtstart(src_dtstart)
-                    existing = (
-                        db.query(CalendarEvent)
-                        .filter(
-                            CalendarEvent.calendar_id == target_cal.id,
-                            CalendarEvent.dtstart == naive_src,
-                            CalendarEvent.summary == str(comp.get("summary", "")),
-                        )
-                        .first()
-                    )
-                    if existing:
-                        skipped += 1
-                        continue
-
-                dt_val = dtstart.dt
-                all_day = isinstance(dt_val, date) and not isinstance(dt_val, datetime)
-                # For timed events, preserve the source timezone by converting
-                # to UTC before stripping tzinfo (DB stores naive). We mark
-                # the row with is_utc=True so the serializer adds the Z
-                # suffix on output — without this, the frontend would parse
-                # the naive ISO as the user's CURRENT local, which is exactly
-                # the bug where imported events fire reminders at wrong times.
-                from datetime import timezone as _tz
-                row_is_utc = False
-                if all_day:
-                    start_dt = datetime(dt_val.year, dt_val.month, dt_val.day)
-                    dtend = comp.get("dtend")
-                    end_dt = datetime(dtend.dt.year, dtend.dt.month, dtend.dt.day) if dtend else start_dt + timedelta(days=1)
-                else:
-                    if hasattr(dt_val, 'tzinfo') and dt_val.tzinfo is not None:
-                        start_dt = dt_val.astimezone(_tz.utc).replace(tzinfo=None)
-                        row_is_utc = True
-                    else:
-                        start_dt = dt_val
-                    dtend = comp.get("dtend")
-                    if dtend:
-                        d_end = dtend.dt
-                        if hasattr(d_end, 'tzinfo') and d_end.tzinfo is not None:
-                            end_dt = d_end.astimezone(_tz.utc).replace(tzinfo=None)
-                        else:
-                            end_dt = d_end
-                    else:
-                        end_dt = start_dt + timedelta(hours=1)
-
-                ev = CalendarEvent(
-                    uid=uid_val,
-                    calendar_id=target_cal.id,
-                    summary=str(comp.get("summary", "")),
-                    description=str(comp.get("description", "")),
-                    location=str(comp.get("location", "")),
-                    dtstart=start_dt,
-                    dtend=end_dt,
-                    all_day=all_day,
-                    is_utc=row_is_utc,
-                    rrule=(comp.get("rrule").to_ical().decode() if comp.get("rrule") else ""),
-                )
-                db.add(ev)
-                imported += 1
-
-            db.commit()
-            return {
-                "ok": True,
-                "imported": imported,
-                "skipped": skipped,
-                "calendar": cal_display,
-                "calendar_id": target_cal.id,
-            }
+            content, final_url = await _fetch_ics_feed(url)
+            return _import_ics_content(
+                db,
+                owner=owner,
+                content=content,
+                source_name=_calendar_name_from_url(final_url),
+                calendar_name=(body.get("calendar_name") or calendar_name or "") if isinstance(body, dict) else calendar_name,
+                source_url=_normalize_ics_feed_url(url),
+                persistent=True,
+                replace_existing=True,
+            )
         except HTTPException:
             raise
         except Exception as e:

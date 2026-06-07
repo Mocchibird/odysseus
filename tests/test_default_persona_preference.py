@@ -1,0 +1,32 @@
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_default_persona_is_user_scoped_setting():
+    source = (ROOT / "src/settings.py").read_text(encoding="utf-8")
+
+    assert '"default_persona": "Iris"' in source
+    assert '"default_persona",' in source
+    assert "_ALLOW_EMPTY_USER_KEYS" in source
+
+
+def test_settings_exposes_default_persona_selector():
+    html = (ROOT / "static/index.html").read_text(encoding="utf-8")
+    settings_js = (ROOT / "static/js/settings.js").read_text(encoding="utf-8")
+
+    assert 'id="set-defaultPersonaSelect"' in html
+    assert "/api/prefs/default_persona" in settings_js
+    assert "odysseus-default-persona" in settings_js
+    assert "PROMPT_TEMPLATES" in settings_js
+
+
+def test_new_chat_applies_default_persona():
+    presets_js = (ROOT / "static/js/presets.js").read_text(encoding="utf-8")
+    sessions_js = (ROOT / "static/js/sessions.js").read_text(encoding="utf-8")
+
+    assert "export async function applyDefaultPersonaForNewChat()" in presets_js
+    assert "export async function applyPersonaByName" in presets_js
+    assert "applyDefaultPersonaForNewChat" in sessions_js
+    assert "await _applyDefaultPersonaForPendingChat();" in sessions_js

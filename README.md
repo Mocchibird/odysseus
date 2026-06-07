@@ -246,10 +246,61 @@ container. Cookbook **Serve** is a separate workflow for serving downloaded
 models through Odysseus/llama.cpp, so Windows users with an existing Ollama
 install usually only need to add the endpoint in Settings.
 
+**Proton Mail Bridge with Docker.** Odysseus uses normal IMAP/SMTP for email,
+so Proton works through Proton Mail Bridge. If Bridge runs on the Docker host,
+choose `Proton Bridge (host)` in **Settings → Email**; the preset fills Bridge's
+default IMAP/SMTP ports:
+
+```text
+IMAP host: host.docker.internal
+IMAP port: 1143
+SMTP host: host.docker.internal
+SMTP port: 1025
+Security: STARTTLS
+```
+
+Use the username and password shown in Proton Bridge's mailbox details, not
+your Proton account password. If Odysseus runs outside Docker on the same
+machine as Bridge, use `127.0.0.1` instead. If Bridge runs on another host or
+container, use that LAN/Tailscale/container hostname and make sure Bridge is
+listening somewhere Odysseus can reach it.
+
+For a Dockge/Compose sidecar, the stack includes a separate `proton-bridge`
+container by default:
+
+```env
+PROTON_BRIDGE_IMAGE=docker.io/shenxn/protonmail-bridge:latest
+ODYSSEUS_PROTON_BRIDGE_IMAGE=odysseus-proton-bridge:local
+```
+
+Odysseus builds a tiny local wrapper image from `PROTON_BRIDGE_IMAGE` so newer
+Bridge self-updates have the extra runtime libraries they need, including
+`libfido2.so.1`. In Dockge, rebuild the `proton-bridge` service after changing
+the stack. Then open a shell in the `proton-bridge` container and complete the
+Bridge login using that image's CLI flow. In Odysseus choose
+`Proton Bridge (Docker)`, which connects to `proton-bridge:143/25` on the Docker network. The
+host/debug binds remain `127.0.0.1:1143` and `127.0.0.1:1025`. Proton Bridge
+Docker images are community-maintained wrappers around Proton Bridge, so the
+base image is configurable through `PROTON_BRIDGE_IMAGE`. The Email settings
+form checks `/api/email/proton-bridge/status?mode=docker` or `mode=host` when
+you pick a Proton preset so you can see whether IMAP and SMTP are reachable
+before saving the account.
+
 **Useful checks.**
 
 ```bash
 docker compose ps
+docker compose ps proton-bridge
+docker compose logs --tail=120 proton-bridge
+docker compose exec odysseus python - <<'PY'
+import socket
+for host, port in [('proton-bridge', 143), ('proton-bridge', 25)]:
+    try:
+        socket.create_connection((host, port), timeout=3).close()
+        print(f'{host}:{port} ok')
+    except Exception as e:
+        print(f'{host}:{port} failed: {e}')
+PY
 docker compose logs --tail=120 odysseus
 docker compose logs odysseus | grep -E 'ChromaDB|MemoryVectorStore|DEGRADED'
 ```
@@ -408,6 +459,63 @@ npx -y @playwright/mcp@latest --version
 ```
 
 That installs `@playwright/mcp` plus Playwright (~300MB total). Restart Odysseus and the server will register at startup.
+
+To expose an Iris / Obsidian vault MCP server inside Odysseus, point Odysseus
+at an installed `obsidian-iris-mcp` checkout:
+
+```bash
+export ODYSSEUS_OBSIDIAN_MCP_SCRIPT=/absolute/path/to/obsidian-iris-mcp/obsidian_memory_mcp.py
+export ODYSSEUS_OBSIDIAN_VAULT_ROOT=/absolute/path/to/your/Obsidian/vault
+# Optional when Iris has its own virtualenv:
+export ODYSSEUS_OBSIDIAN_MCP_COMMAND=/absolute/path/to/obsidian-iris-mcp/.venv/bin/python
+```
+
+Restart Odysseus and the server appears as `Iris: Obsidian Vault` in the MCP
+tools list. This keeps Iris's vault implementation intact while making its
+tools available to Odysseus agents.
+
+In Docker/Dockge, the compose file uses Iris-style mount points by default:
+
+```env
+ODYSSEUS_REPO_DIR=/mnt/<pool>/<dataset>/obsidian-vaults/odysseus
+ODYSSEUS_OBSIDIAN_VAULT_DIR=/mnt/<pool>/<dataset>/obsidian-vaults/AI_Memory
+ODYSSEUS_IRIS_MCP_REPO_DIR=/mnt/<pool>/<dataset>/obsidian-vaults/obsidian-iris-mcp
+INSTALL_IRIS_MCP_DEPS=true
+```
+
+Those mount the vault at `/vault` and Iris MCP at `/opt/obsidian-iris-mcp`
+inside the container. Compose then defaults
+`ODYSSEUS_OBSIDIAN_MCP_SCRIPT` to
+`/opt/obsidian-iris-mcp/obsidian_memory_mcp.py` and
+`ODYSSEUS_OBSIDIAN_VAULT_ROOT` / `IRIS_VAULT_ROOT` to `/vault`.
+`INSTALL_IRIS_MCP_DEPS=true` installs the lean extra Python packages needed
+for Iris's MCP tools without pulling in the heavier Discord/Whisper stack.
+
+Odysseus also reads persistent session context from
+`$ODYSSEUS_OBSIDIAN_VAULT_ROOT/00_Index/assistant_rules.md` and injects it into
+every chat and agent session. Override the note path with
+`ODYSSEUS_OBSIDIAN_CONTEXT_PATH` or the cap with
+`ODYSSEUS_OBSIDIAN_CONTEXT_MAX_CHARS`.
+
+Iris also uses the same Obsidian vault as durable user-scoped file storage.
+Files written through `/api/iris-vault/*` or the `manage_iris_vault` agent tool
+are stored under `$ODYSSEUS_OBSIDIAN_VAULT_ROOT/<username>/` and indexed in
+SQLite (`iris_vault_files`) by owner, path, hash, title, excerpt, and searchable
+text content. Text files are also chunked into the dedicated ChromaDB collection
+`iris_vault` for semantic retrieval when ChromaDB and embeddings are available.
+SQLite remains the durable catalog; ChromaDB is a retrievable semantic side
+index and can be rebuilt. Uploads from chat, Documents, Books, and the vault UI
+mirror into the user's vault; EPUBs and reader PDFs go under `40_Attachments/epubs`,
+while other attachments are sorted by type and lightweight context. Files dropped
+into `90_Inbox` or `Inbox` are auto-sorted when the vault browser/search/reindex
+runs (`ODYSSEUS_IRIS_AUTO_SORT_INBOX=0` disables that). Run
+`POST /api/iris-vault/reindex` after adding files directly to the vault from
+outside Odysseus.
+
+Calendar ICS links are persistent subscriptions: importing a `webcal://` or
+`https://...ics` link stores it on the calendar row and refreshes it whenever
+the calendar sync runs. Set `ODYSSEUS_ICS_BLOCK_PRIVATE_IPS=1` if this instance
+is exposed to untrusted users and should reject private/loopback feed targets.
 
 ## Architecture
 ```

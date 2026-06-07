@@ -120,6 +120,7 @@ DEFAULT_SETTINGS = {
     "task_model": "",
     "default_endpoint_id": "",
     "default_model": "",
+    "default_persona": "Iris",
     # Ordered fallback chain for the default chat model. Each entry is
     # {"endpoint_id": "...", "model": "..."}. If the primary model fails
     # before producing output (endpoint offline / errors), the chat
@@ -144,6 +145,7 @@ DEFAULT_SETTINGS = {
     "reminder_channel": "browser",   # "browser" | "email" | "ntfy" | "webhook"
     "reminder_llm_synthesis": False,
     "reminder_ntfy_topic": "Reminders",
+    "reminder_email_account_id": "",
     "reminder_email_to": "",
     # Generic outbound webhook channel: pick any saved Integration as the
     # target and supply a JSON payload template. Use {{title}} and {{message}}
@@ -245,8 +247,18 @@ _PER_USER_KEYS = {
     # account inherited whatever the most-recent admin picked, which then
     # got injected into the chat composer on first open.
     "default_endpoint_id", "default_model", "default_model_fallbacks",
+    "default_persona",
     "utility_endpoint_id", "utility_model", "utility_model_fallbacks",
     "research_endpoint_id", "research_model",
+    # Reminder delivery is personal: one user may want browser-only alerts,
+    # another may subscribe to a private ntfy topic.
+    "reminder_channel", "reminder_llm_synthesis", "reminder_ntfy_topic",
+    "reminder_email_account_id", "reminder_email_to",
+}
+
+_ALLOW_EMPTY_USER_KEYS = {
+    "reminder_email_account_id", "reminder_email_to",
+    "default_persona",
 }
 
 
@@ -262,8 +274,10 @@ def get_user_setting(key: str, owner: str = "", default: Any = None) -> Any:
         try:
             from routes.prefs_routes import _load_for_user
             prefs = _load_for_user(owner) or {}
-            if key in prefs and prefs[key] not in (None, ""):
-                return prefs[key]
+            if key in prefs:
+                value = prefs[key]
+                if value not in (None, "") or key in _ALLOW_EMPTY_USER_KEYS:
+                    return value
         except Exception:
             pass
     return get_setting(key, default)

@@ -1,4 +1,5 @@
 import os
+import ssl
 import tempfile
 from pathlib import Path
 
@@ -38,6 +39,14 @@ class _FakeSMTP:
 
 class _FakeSMTPSSL(_FakeSMTP):
     pass
+
+
+class _SelfSignedBridgeSMTP(_FakeSMTP):
+    def starttls(self, *, context=None):
+        _FakeSMTP.calls.append(("starttls", self.host, self.port, bool(context)))
+        if context is None:
+            raise ssl.SSLCertVerificationError("self-signed local Bridge certificate")
+        self.starttls_called = True
 
 
 def _cfg(security, port=2525):
@@ -103,3 +112,43 @@ def test_send_smtp_message_uses_ssl_when_configured(monkeypatch):
 
     assert _FakeSMTP.calls[0] == ("connect", "_FakeSMTPSSL", "smtp.local", 465)
     assert not any(call[0] == "starttls" for call in _FakeSMTP.calls)
+
+
+def test_send_smtp_message_retries_local_self_signed_starttls(monkeypatch):
+    import routes.email_helpers as helpers
+
+    _FakeSMTP.calls = []
+    monkeypatch.setattr(helpers.smtplib, "SMTP", _SelfSignedBridgeSMTP)
+    monkeypatch.setattr(helpers.smtplib, "SMTP_SSL", _FakeSMTPSSL)
+
+    _send_smtp_message(
+        _cfg("starttls", port=1025) | {"smtp_host": "host.docker.internal"},
+        "from@example.com",
+        ["to@example.com"],
+        "hello",
+    )
+
+    assert _FakeSMTP.calls[0] == ("connect", "_SelfSignedBridgeSMTP", "host.docker.internal", 1025)
+    assert ("starttls", "host.docker.internal", 1025, False) in _FakeSMTP.calls
+    assert ("starttls", "host.docker.internal", 1025, True) in _FakeSMTP.calls
+    assert _FakeSMTP.calls[-1] == ("sendmail", "from@example.com", ("to@example.com",), "hello", True)
+
+
+def test_send_smtp_message_retries_docker_proton_bridge_self_signed_starttls(monkeypatch):
+    import routes.email_helpers as helpers
+
+    _FakeSMTP.calls = []
+    monkeypatch.setattr(helpers.smtplib, "SMTP", _SelfSignedBridgeSMTP)
+    monkeypatch.setattr(helpers.smtplib, "SMTP_SSL", _FakeSMTPSSL)
+
+    _send_smtp_message(
+        _cfg("starttls", port=1025) | {"smtp_host": "proton-bridge"},
+        "from@example.com",
+        ["to@example.com"],
+        "hello",
+    )
+
+    assert _FakeSMTP.calls[0] == ("connect", "_SelfSignedBridgeSMTP", "proton-bridge", 1025)
+    assert ("starttls", "proton-bridge", 1025, False) in _FakeSMTP.calls
+    assert ("starttls", "proton-bridge", 1025, True) in _FakeSMTP.calls
+    assert _FakeSMTP.calls[-1] == ("sendmail", "from@example.com", ("to@example.com",), "hello", True)

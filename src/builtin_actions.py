@@ -1896,7 +1896,15 @@ async def action_check_email_urgency(owner: str, **kwargs) -> Tuple[str, bool]:
                     title=title, note_body=body, note_id="urgent-email",
                     owner=owner or "",
                 )
-                channel = (settings.get("reminder_channel") or "browser").strip().lower()
+                from src.settings import get_user_setting as _get_user_setting
+                channel = str(
+                    _get_user_setting(
+                        "reminder_channel",
+                        owner or "",
+                        settings.get("reminder_channel") or "browser",
+                    )
+                    or "browser"
+                ).strip().lower()
                 delivered = bool(dispatch_result.get("browser_sent"))
                 if channel == "email":
                     delivered = bool(dispatch_result.get("email_sent"))

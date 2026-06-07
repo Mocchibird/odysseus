@@ -1143,10 +1143,10 @@ async def execute_tool_block(
     from src.tool_implementations import (
         do_create_document, do_update_document, do_edit_document,
         do_suggest_document, do_search_chats, do_manage_tasks,
-        do_manage_skills, do_api_call, do_manage_endpoints,
+        do_manage_skills, do_api_call, do_send_ping, do_manage_endpoints,
         do_manage_mcp, do_manage_webhooks, do_manage_tokens,
         do_manage_documents, do_manage_settings, do_manage_notes,
-        do_manage_calendar,
+        do_manage_calendar, do_manage_iris_vault, do_manage_books,
         do_download_model, do_serve_model, do_list_served_models, do_stop_served_model,
         do_tail_serve_output,
         do_list_downloads, do_cancel_download, do_search_hf_models, do_list_cached_models,
@@ -1370,6 +1370,9 @@ async def execute_tool_block(
         first_line = content.split("\n")[0].strip()[:60]
         desc = f"api_call: {first_line}"
         result = await do_api_call(content)
+    elif tool == "send_ping":
+        desc = "send_ping"
+        result = await do_send_ping(content, owner=owner)
     elif tool == "manage_endpoints":
         desc = "manage_endpoints"
         result = await do_manage_endpoints(content, owner=owner)
@@ -1394,6 +1397,12 @@ async def execute_tool_block(
     elif tool == "manage_calendar":
         desc = "manage_calendar"
         result = await do_manage_calendar(content, owner=owner)
+    elif tool == "manage_iris_vault":
+        desc = "manage_iris_vault"
+        result = await do_manage_iris_vault(content, owner=owner)
+    elif tool == "manage_books":
+        desc = "manage_books"
+        result = await do_manage_books(content, owner=owner)
     elif tool == "download_model":
         desc = "download_model"
         result = await do_download_model(content, owner=owner)

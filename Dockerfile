@@ -1,11 +1,19 @@
 FROM python:3.12-slim
 
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONUNBUFFERED=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_NO_CACHE_DIR=1 \
+    TZ=Europe/Zurich
+
 # System deps. tmux is required by Cookbook for background downloads/serves.
 # openssh-client is required for Cookbook remote server tests, setup, probes,
 # downloads, and serves from Docker installs.
 # git/cmake are required when Cookbook builds llama.cpp on first llama.cpp
 # launch inside Docker.
 # nodejs/npm provide npx for the optional built-in Browser MCP server.
+# sqlite3/tzdata match Iris MCP's runtime assumptions for vault indexing and
+# timezone-aware notes; ffmpeg/libopus/libsndfile cover optional Iris audio work.
 # gosu lets the entrypoint drop privileges cleanly so signals still reach
 # uvicorn directly (no extra shell layer like `su`/`sudo` would add).
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -13,8 +21,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     cmake \
     curl \
     git \
+    ffmpeg \
+    libopus0 \
+    libsndfile1 \
     nodejs \
     npm \
+    sqlite3 \
+    tzdata \
     tmux \
     openssh-client \
     gosu \
@@ -25,15 +38,18 @@ WORKDIR /app
 # Install Python deps first (layer cache). Optional extras (PyMuPDF AGPL, etc.)
 # are opt-in so the default image stays MIT-core; see requirements-optional.txt.
 ARG INSTALL_OPTIONAL=false
-COPY requirements.txt requirements-optional.txt ./
+ARG INSTALL_IRIS_MCP_DEPS=false
+COPY requirements.txt requirements-optional.txt requirements-iris-mcp.txt ./
 RUN pip install --no-cache-dir -r requirements.txt \
-    && if [ "$INSTALL_OPTIONAL" = "true" ]; then pip install --no-cache-dir -r requirements-optional.txt; fi
+    && if [ "$INSTALL_OPTIONAL" = "true" ]; then pip install --no-cache-dir -r requirements-optional.txt; fi \
+    && if [ "$INSTALL_IRIS_MCP_DEPS" = "true" ]; then pip install --no-cache-dir -r requirements-iris-mcp.txt; fi
 
 # Copy app code
 COPY . .
 
-# Create data directory (mount a volume here for persistence)
-RUN mkdir -p data logs services/cache/search
+# Create data directory (mount a volume here for persistence) and the
+# conventional Iris/Obsidian vault mount point used by docker-compose.
+RUN mkdir -p data logs services/cache/search /vault
 
 # Entrypoint that drops to PUID/PGID (default 1000:1000) and repairs
 # ownership on the bind-mounted /app/data and /app/logs. Without this,
@@ -45,6 +61,8 @@ COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 
 EXPOSE 7000
+
+VOLUME ["/app/data", "/app/logs", "/vault"]
 
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "7000"]

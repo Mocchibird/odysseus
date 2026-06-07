@@ -28,6 +28,12 @@ export const KEYS = {
   PLAN: 'odysseus-plan'
 };
 
+export const DEFAULT_TOGGLE_STATE = {
+  mode: 'agent'
+};
+
+const AGENTIC_DEFAULT_VERSION = 'iris-agent-default-v1';
+
 /**
  * Safely get and parse a JSON value from localStorage.
  * Returns fallback on any error.
@@ -91,11 +97,24 @@ export function remove(key) {
 // ── Toggle state helpers ──
 
 export function loadToggleState() {
-  return getJSON(KEYS.TOGGLES, {});
+  const state = getJSON(KEYS.TOGGLES, {});
+  return {
+    ...DEFAULT_TOGGLE_STATE,
+    ...(state && typeof state === 'object' && !Array.isArray(state) ? state : {})
+  };
 }
 
 export function saveToggleState(state) {
   setJSON(KEYS.TOGGLES, state);
+}
+
+export function applyAgenticDefaultMode() {
+  const state = loadToggleState();
+  if (state.agentic_default_version === AGENTIC_DEFAULT_VERSION) return state;
+  state.mode = 'agent';
+  state.agentic_default_version = AGENTIC_DEFAULT_VERSION;
+  saveToggleState(state);
+  return state;
 }
 
 export function getToggle(name, fallback) {
@@ -118,6 +137,7 @@ const Storage = {
   remove,
   loadToggleState,
   saveToggleState,
+  applyAgenticDefaultMode,
   getToggle,
   setToggle
 };

@@ -138,7 +138,7 @@ export function removePending(idx) {
 /**
  * Upload all pending files to server
  */
-export async function uploadPending() {
+export async function uploadPending(options = {}) {
   if (pendingFiles.length === 0) return [];
 
   // The message bubble is shown immediately, but the upload can take a moment —
@@ -164,6 +164,9 @@ export async function uploadPending() {
 
   const fd = new FormData();
   pendingFiles.forEach(f => fd.append('files', f, f.name || 'paste.png'));
+  if (options.context) fd.append('context', String(options.context).slice(0, 4000));
+  if (options.source) fd.append('source', String(options.source).slice(0, 80));
+  if (options.session) fd.append('session', String(options.session).slice(0, 160));
 
   try {
     const res = await fetch(`${API_BASE}/api/upload`, {

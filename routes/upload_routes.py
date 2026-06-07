@@ -3,7 +3,7 @@ import os
 import time
 import json
 import asyncio
-from fastapi import APIRouter, Request, File, UploadFile, HTTPException
+from fastapi import APIRouter, Request, File, UploadFile, HTTPException, Form
 from typing import List
 import logging
 from core.middleware import require_admin
@@ -52,7 +52,12 @@ def setup_upload_routes(upload_handler):
         raise HTTPException(404, "File not found")
     
     @router.post("")
-    async def api_upload(request: Request, files: List[UploadFile] = File(...)):
+    async def api_upload(
+        request: Request,
+        files: List[UploadFile] = File(...),
+        context: str = Form(""),
+        source: str = Form("upload"),
+    ):
         """Upload files with enhanced security and organization."""
         if not files:
             raise HTTPException(400, "No files uploaded")
@@ -78,7 +83,13 @@ def setup_upload_routes(upload_handler):
         
         for u in files:
             try:
-                meta = upload_handler.save_upload(u, client_ip, owner=get_current_user(request))
+                meta = upload_handler.save_upload(
+                    u,
+                    client_ip,
+                    owner=get_current_user(request),
+                    context=context,
+                    source=source,
+                )
                 out.append({
                     "id": meta["id"],
                     "name": meta["name"],
@@ -88,6 +99,8 @@ def setup_upload_routes(upload_handler):
                     "uploaded_at": meta["uploaded_at"],
                     "width": meta.get("width"),
                     "height": meta.get("height"),
+                    "vault_path": meta.get("vault_path") or meta.get("vault_rel_path"),
+                    "vault_title": meta.get("vault_title"),
                     "is_duplicate": meta.get("is_duplicate", False)
                 })
             except HTTPException:

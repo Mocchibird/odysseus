@@ -131,6 +131,36 @@ function sanitizeAllowedHtml(html) {
   return out;
 }
 
+function decodeHtmlishText(value) {
+  return String(value || '')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<[^>]*>/g, '')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;|&apos;/gi, "'")
+    .replace(/&#(\d+);/g, (_m, n) => {
+      const cp = Number(n);
+      return Number.isFinite(cp) ? String.fromCodePoint(cp) : '';
+    })
+    .replace(/&#x([0-9a-f]+);/gi, (_m, n) => {
+      const cp = parseInt(n, 16);
+      return Number.isFinite(cp) ? String.fromCodePoint(cp) : '';
+    });
+}
+
+function cleanRevealAnswer(answer) {
+  return decodeHtmlishText(answer)
+    .trim()
+    .replace(/^\s*quiz[-_\s]?spoiler[-_\s]?markdown\s*[:：-]\s*/i, '')
+    .replace(/^(?:answer|antwort|lösung|loesung|correct\s+answer)\s*[:：-]\s*/i, '')
+    .replace(/^(\*\*|__)([\s\S]{1,500})\1$/g, '$2')
+    .replace(/^([*_`])([\s\S]{1,500})\1$/g, '$2')
+    .trim();
+}
+
 /**
  * Check if text has unclosed think tag
  */
@@ -442,6 +472,7 @@ export function processWithThinking(text) {
 export function mdToHtml(src, opts) {
   const allowedHtmlBlocks = [];
   const codeBlocks = [];
+  const inlineCodeBlocks = [];
   const mermaidBlocks = [];
   let s = (src ?? '');
 
@@ -480,6 +511,57 @@ export function mdToHtml(src, opts) {
     return placeholder;
   });
 
+  const pushReveal = (answer, options = {}) => {
+    const text = cleanRevealAnswer(answer);
+    if (!text) return '';
+    const kind = options.kind || 'hidden';
+    const labelText = String(options.label || '').trim() || (kind === 'spoiler' ? 'Spoiler' : 'Reveal');
+    const revealLabel = kind === 'spoiler' ? 'Reveal spoiler' : 'Reveal hidden answer';
+    const hideLabel = kind === 'spoiler' ? 'Hide spoiler' : 'Hide hidden answer';
+    const hint = String(options.hint || '').trim();
+    const visibleLabel = hint ? `Hint: ${hint}` : labelText;
+    const classes = ['quiz-reveal', kind === 'spoiler' ? 'quiz-spoiler' : ''].filter(Boolean).join(' ');
+    const placeholder = `___ALLOWED_HTML_${allowedHtmlBlocks.length}___`;
+    allowedHtmlBlocks.push(
+      `<button type="button" class="${classes}" aria-label="${escapeHtml(revealLabel)}" aria-expanded="false" data-hidden-label="${escapeHtml(visibleLabel)}" data-reveal-label="${escapeHtml(revealLabel)}" data-hide-label="${escapeHtml(hideLabel)}"><span class="quiz-reveal-text">${escapeHtml(text)}</span></button>`
+    );
+    return placeholder;
+  };
+
+  const preserveQuizRevealButton = (match, inner) => {
+    const openTag = (String(match || '').match(/^<button\b[^>]*>/i) || [''])[0];
+    const kind = /\bquiz-spoiler\b/i.test(openTag) ? 'spoiler' : 'hidden';
+    const placeholder = pushReveal(inner, { kind, label: kind === 'spoiler' ? 'Spoiler' : 'Answer' });
+    return placeholder || '';
+  };
+
+  // Compatibility for the failure mode where the agent writes the skill name
+  // as a visible pseudo-call instead of using the actual Iris reveal syntax:
+  //   quiz-spoiler-markdown: **C) Saul**
+  // Some models even wrap that whole line in backticks, so run this before
+  // inline-code protection. Restrict to a standalone line to keep prose
+  // examples like "Use `quiz-spoiler-markdown: ...`" literal.
+  s = s.replace(
+    /(^|\n)\s*`?\s*quiz[-_\s]?spoiler[-_\s]?markdown\s*:\s*([^`\n]{1,500})\s*`?\s*(?=\n|$)/gi,
+    (match, prefix, answer) => `${prefix}${pushReveal(answer, { kind: 'hidden', label: 'Answer' }) || match}`,
+  );
+
+  // Protect inline code before spoiler/quiz/link passes. Otherwise examples
+  // like `||spoiler||` get converted instead of rendered literally.
+  s = s.replace(/`([^`\n]+?)`/g, (_match, code) => {
+    const placeholder = `___INLINE_CODE_${inlineCodeBlocks.length}___`;
+    inlineCodeBlocks.push(`<code>${escapeHtml(code)}</code>`);
+    return placeholder;
+  });
+
+  // Compatibility for an even messier model output: raw HTML reveal buttons
+  // whose visible text is still the skill pseudo-call. Regenerate the button
+  // from its inner text so the app owns the markup and the answer is hidden.
+  s = s.replace(
+    /<button\b(?=[^>]*\bclass\s*=\s*(?:"[^"]*\bquiz-reveal\b[^"]*"|'[^']*\bquiz-reveal\b[^']*'|[^\s>]*\bquiz-reveal\b[^\s>]*))[^>]*>([\s\S]{0,1200}?)<\/button>/gi,
+    preserveQuizRevealButton,
+  );
+
   // Repair common ways the agent mangles the entity-anchor convention
   // (`[Name](#kind-<id>)`). Models reliably get the single-link case
   // right but slip into other formats when listing many in a table.
@@ -505,6 +587,35 @@ export function mdToHtml(src, opts) {
     new RegExp(`(^|[^\\[(])#(${ANCHOR_KIND}-[A-Za-z0-9_-]+)\\b`, 'g'),
     '$1[#$2](#$2)',
   );
+
+  // Lightweight flashcard syntax: [[front::back]] renders as a click-to-flip
+  // card. Code blocks have already been extracted, so examples inside fenced
+  // or inline code are left untouched.
+  s = s.replace(/\[\[([^\[\]\n]{1,240})::([^\[\]\n]{1,400})\]\]/g, (_match, front, back) => {
+    const placeholder = `___ALLOWED_HTML_${allowedHtmlBlocks.length}___`;
+    allowedHtmlBlocks.push(`<button type="button" class="quiz-flashcard" data-back="${escapeHtml(back.trim())}" aria-label="Reveal flashcard answer"><span>${escapeHtml(front.trim())}</span></button>`);
+    return placeholder;
+  });
+
+  // Lightweight spoiler and quiz/cloze syntax. These render as click-to-
+  // reveal pills:
+  //   ||spoiler||, >!spoiler!<, <spoiler>spoiler</spoiler>
+  //   {{hidden answer}}, {{c1::hidden answer}}, {{c1::hidden answer::hint}}
+  s = s.replace(/\|\|([^|\n]{1,500})\|\|/g, (match, answer) => {
+    return pushReveal(answer, { kind: 'spoiler', label: 'Spoiler' }) || match;
+  });
+  s = s.replace(/>!([^!\n]{1,500})!</g, (match, answer) => {
+    return pushReveal(answer, { kind: 'spoiler', label: 'Spoiler' }) || match;
+  });
+  s = s.replace(/<spoiler>([^<>\n]{1,500})<\/spoiler>/gi, (match, answer) => {
+    return pushReveal(answer, { kind: 'spoiler', label: 'Spoiler' }) || match;
+  });
+  s = s.replace(/\{\{c\d+::([^{}\n]+?)(?:::([^{}\n]{1,120}))?\}\}/gi, (match, answer, hint) => {
+    return pushReveal(answer, { kind: 'hidden', label: 'Reveal', hint }) || match;
+  });
+  s = s.replace(/\{\{([^{}\n]{1,300})\}\}/g, (match, answer) => {
+    return pushReveal(answer, { kind: 'hidden', label: 'Reveal' }) || match;
+  });
 
   // Convert markdown links [text](url) to clickable links
   // Internal #hash links navigate in-page; external links open in new tab
@@ -630,12 +741,6 @@ export function mdToHtml(src, opts) {
     return html;
   });
 
-  // Inline code (but not placeholders)
-  s = s.replace(/`([^`]+?)`/g, (match, code) => {
-    if (code.startsWith('___CODE_BLOCK_') || code.startsWith('___ALLOWED_HTML_')) return match;
-    return `<code>${code}</code>`;
-  });
-
   // Horizontal rules (must come before bold/italic to avoid * conflicts)
   s = s.replace(/^(?:---|\*\*\*|___)\s*$/gm, '<hr>');
 
@@ -701,6 +806,12 @@ export function mdToHtml(src, opts) {
   // Restore mermaid diagram blocks
   mermaidBlocks.forEach((block, index) => {
     s = s.replace(`___MERMAID_BLOCK_${index}___`, block);
+  });
+
+  // Restore inline code after paragraph/list/header processing, so the code
+  // element can live naturally inside whichever block contains it.
+  inlineCodeBlocks.forEach((block, index) => {
+    s = s.replace(`___INLINE_CODE_${index}___`, block);
   });
 
   // CRITICAL: Restore code blocks at the end
@@ -823,6 +934,24 @@ function _setThinkingExpanded(content, toggle, header, expanded) {
 
 // Delegated click handler for thinking toggle (CSP-safe, no inline onclick)
 document.addEventListener('click', function(e) {
+  const quiz = e.target.closest('.quiz-reveal');
+  if (quiz) {
+    const revealed = quiz.classList.toggle('revealed');
+    quiz.setAttribute('aria-expanded', revealed ? 'true' : 'false');
+    quiz.setAttribute('aria-label', revealed ? (quiz.dataset.hideLabel || 'Hide hidden answer') : (quiz.dataset.revealLabel || 'Reveal hidden answer'));
+    return;
+  }
+  const card = e.target.closest('.quiz-flashcard');
+  if (card) {
+    const revealed = card.classList.toggle('revealed');
+    const front = card.querySelector('span');
+    if (front) {
+      if (!card.dataset.front) card.dataset.front = front.textContent || '';
+      front.textContent = revealed ? (card.dataset.back || '') : (card.dataset.front || '');
+    }
+    card.setAttribute('aria-label', revealed ? 'Hide flashcard answer' : 'Reveal flashcard answer');
+    return;
+  }
   const header = e.target.closest('.thinking-header[data-thinking-id]');
   if (!header) return;
   const id = header.dataset.thinkingId;

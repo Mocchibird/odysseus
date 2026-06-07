@@ -185,3 +185,55 @@ def test_dotted_python_import_paths_are_not_autolinked(node_available):
     assert 'href="https://imblearn.com' not in html
     assert 'href="https://sklearn.me' not in html
     assert 'href="https://example.com/docs"' in html
+
+
+def test_spoiler_and_cloze_syntax_render_as_reveal_controls(node_available):
+    html = _run_markdown_case(
+        "Use ||spoiler text||, >!reddit spoiler!<, "
+        "{{hidden answer}}, and {{c1::cloze answer::first hint}}."
+    )
+
+    assert html.count('<button type="button" class="quiz-reveal') == 4
+    assert html.count('aria-expanded="false"') == 4
+    assert 'class="quiz-reveal quiz-spoiler"' in html
+    assert 'data-hidden-label="Spoiler"' in html
+    assert 'data-hidden-label="Hint: first hint"' in html
+    assert '<span class="quiz-reveal-text">spoiler text</span>' in html
+    assert '<span class="quiz-reveal-text">reddit spoiler</span>' in html
+    assert '<span class="quiz-reveal-text">hidden answer</span>' in html
+    assert '<span class="quiz-reveal-text">cloze answer</span>' in html
+
+
+def test_spoiler_syntax_inside_inline_code_stays_literal(node_available):
+    html = _run_markdown_case("Literal `||not hidden||` and shown ||hidden||.")
+
+    assert "<code>||not hidden||</code>" in html
+    assert html.count('class="quiz-reveal quiz-spoiler"') == 1
+    assert '<span class="quiz-reveal-text">hidden</span>' in html
+
+
+def test_accidental_skill_pseudo_call_renders_as_hidden_answer(node_available):
+    html = _run_markdown_case(
+        "quiz-spoiler-markdown: **C) Saul**\n\n"
+        "`quiz-spoiler-markdown: **B) David**`\n\n"
+        "Literal prose keeps `quiz-spoiler-markdown: **A) Example**` as code."
+    )
+
+    assert html.count('<button type="button" class="quiz-reveal"') == 2
+    assert 'data-hidden-label="Answer"' in html
+    assert '<span class="quiz-reveal-text">C) Saul</span>' in html
+    assert '<span class="quiz-reveal-text">B) David</span>' in html
+    assert '<code>quiz-spoiler-markdown: **A) Example**</code>' in html
+
+
+def test_raw_quiz_reveal_button_with_skill_pseudo_call_is_repaired(node_available):
+    html = _run_markdown_case(
+        '<button type="button" class="quiz-reveal" aria-label="Reveal hidden answer">'
+        'quiz-spoiler-markdown: **B) Die Erschaffung des Lichts**'
+        '</button>'
+    )
+
+    assert html.count('<button type="button" class="quiz-reveal"') == 1
+    assert 'quiz-spoiler-markdown' not in html
+    assert 'data-hidden-label="Answer"' in html
+    assert '<span class="quiz-reveal-text">B) Die Erschaffung des Lichts</span>' in html

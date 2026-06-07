@@ -17,10 +17,10 @@ import sqlite3 as _sql3
 import email as email_mod
 import email.header
 import email.utils
-import smtplib
 import json
 import re
 import html
+import mimetypes
 from html.parser import HTMLParser as _HTMLParser
 import logging
 import uuid
@@ -40,7 +40,7 @@ from routes.email_helpers import (
     _strip_think, _extract_reply, _apply_email_style_mechanics, require_owner, require_user, _assert_owns_account,
     _q, _attach_compose_uploads, _cleanup_compose_uploads,
     _load_settings, _save_settings, _get_email_config,
-    _send_smtp_message, _smtp_security_mode,
+    _send_smtp_message, _smtp_security_mode, _open_smtp_connection,
     _IMAP_TIMEOUT_SECONDS, _open_imap_connection,
     _imap_connect, _imap, _decode_header, _detect_sent_folder, _detect_drafts_folder,
     _extract_attachment_text, _list_attachments_from_msg,
@@ -57,6 +57,76 @@ logger = logging.getLogger(__name__)
 
 ODYSSEUS_MAIL_ORIGIN = "odysseus-ui"
 EMAIL_COMPOSE_UPLOAD_MAX_BYTES = 25 * 1024 * 1024
+
+PROTON_BRIDGE_PRESETS = {
+    "docker": {
+        "label": "Proton Bridge (Docker)",
+        "imap_host": "proton-bridge",
+        "imap_port": 143,
+        "imap_starttls": True,
+        "smtp_host": "proton-bridge",
+        "smtp_port": 25,
+        "smtp_security": "starttls",
+    },
+    "host": {
+        "label": "Proton Bridge (host)",
+        "imap_host": "host.docker.internal",
+        "imap_port": 1143,
+        "imap_starttls": True,
+        "smtp_host": "host.docker.internal",
+        "smtp_port": 1025,
+        "smtp_security": "starttls",
+    },
+}
+
+
+def _proton_bridge_preset(mode: str | None) -> dict:
+    key = (mode or "docker").strip().lower()
+    return dict(PROTON_BRIDGE_PRESETS.get(key) or PROTON_BRIDGE_PRESETS["docker"])
+
+
+def _tcp_status(host: str, port: int, timeout: float = 3.0) -> dict:
+    import socket
+
+    try:
+        with socket.create_connection((host, int(port)), timeout=timeout):
+            return {"ok": True, "host": host, "port": int(port)}
+    except Exception as exc:
+        return {
+            "ok": False,
+            "host": host,
+            "port": int(port),
+            "error": _mail_endpoint_error(host, port, exc),
+        }
+
+
+def _mail_endpoint_error(host: str, port: int, exc: Exception) -> str:
+    """Make connection-test errors actionable without exposing credentials."""
+    endpoint = f"{host}:{int(port)}"
+    raw = str(exc)[:160] or exc.__class__.__name__
+    hint = ""
+    normalized_host = (host or "").strip().lower()
+    if normalized_host in {"localhost", "127.0.0.1", "::1"}:
+        hint = (
+            "localhost is the Odysseus container in Docker; use "
+            "proton-bridge:143/25 for the compose sidecar or "
+            "host.docker.internal:1143/1025 for Bridge on the host."
+        )
+    elif normalized_host in {"proton-bridge", "protonmail-bridge"}:
+        hint = (
+            "the Proton Bridge sidecar is not listening yet. Start/recreate "
+            "the proton-bridge service and complete its CLI login, then use "
+            "the Bridge-generated mailbox username/password."
+        )
+    elif normalized_host == "host.docker.internal":
+        hint = (
+            "this is the host Bridge preset. If Bridge is the compose sidecar, "
+            "switch to Proton Bridge (Docker); if Bridge runs on the host, make "
+            "sure host ports 1143/1025 are bound and Bridge is logged in."
+        )
+    if hint:
+        return f"{endpoint} refused ({raw}). {hint}"
+    return f"{endpoint} failed ({raw})"
 
 
 def _email_tag_owner_aliases(account_id: str | None, owner: str = "") -> list[str]:
@@ -1290,6 +1360,7 @@ def setup_email_routes():
             return {
                 "uid": uid,
                 "folder": folder,
+                "account_id": account_id or "",
                 "message_id": message_id.strip(),
                 "subject": subject,
                 "from_name": sender_name or sender_addr,
@@ -1433,7 +1504,7 @@ def setup_email_routes():
             return FileResponse(
                 path=str(filepath),
                 filename=filepath.name,
-                media_type="application/octet-stream",
+                media_type=mimetypes.guess_type(str(filepath))[0] or "application/octet-stream",
             )
         except Exception as e:
             logger.error(f"Failed to download attachment {uid}/{index}: {e}")
@@ -1893,11 +1964,30 @@ def setup_email_routes():
             content = await read_upload_limited(file, EMAIL_COMPOSE_UPLOAD_MAX_BYTES, "Attachment")
             with open(filepath, "wb") as f:
                 f.write(content)
+            vault_meta = {}
+            try:
+                from src import iris_vault
+
+                row = iris_vault.save_uploaded_file(
+                    owner or "local",
+                    safe_name,
+                    content,
+                    mime=file.content_type or "",
+                    context=f"Email compose attachment {safe_name}",
+                    source="email",
+                )
+                vault_meta = {
+                    "vault_path": row.rel_path,
+                    "vault_title": getattr(row, "title", "") or "",
+                }
+            except Exception:
+                logger.debug("Email compose attachment vault mirror skipped", exc_info=True)
             return {
                 "success": True,
                 "token": token,
                 "filename": safe_name,
                 "size": len(content),
+                **vault_meta,
             }
         except HTTPException:
             raise
@@ -2921,6 +3011,68 @@ def setup_email_routes():
     # Exactly one row has is_default=True; that account is used when callers
     # don't specify an account_id.
 
+    @router.get("/proton-bridge/status")
+    async def proton_bridge_status(mode: str = Query("docker"), owner: str = Depends(require_user)):
+        preset = _proton_bridge_preset(mode)
+        imap = _tcp_status(preset["imap_host"], preset["imap_port"])
+        smtp = _tcp_status(preset["smtp_host"], preset["smtp_port"])
+        return {
+            "ok": bool(imap.get("ok") and smtp.get("ok")),
+            "mode": mode,
+            "preset": {k: v for k, v in preset.items() if k != "label"},
+            "imap": imap,
+            "smtp": smtp,
+        }
+
+    @router.post("/accounts/proton-bridge")
+    async def create_proton_bridge_account(data: dict, owner: str = Depends(require_owner)):
+        """Create an EmailAccount prefilled for Proton Mail Bridge.
+
+        The password must be the Bridge-generated mailbox password, not the
+        Proton account password.
+        """
+        from core.database import SessionLocal, EmailAccount
+        from src.secret_storage import encrypt as _enc
+        import uuid as _uuid
+
+        preset = _proton_bridge_preset(data.get("mode"))
+        email_addr = (data.get("email") or data.get("from_address") or "").strip()
+        username = (data.get("username") or data.get("imap_user") or email_addr).strip()
+        password = data.get("password") or data.get("imap_password") or ""
+        if not username or not password:
+            return {"ok": False, "error": "Bridge username and password are required"}
+        name = (data.get("name") or preset["label"]).strip() or preset["label"]
+        db = SessionLocal()
+        try:
+            scope_q = db.query(EmailAccount)
+            if owner:
+                scope_q = scope_q.filter(EmailAccount.owner == owner)
+            row = EmailAccount(
+                id=_uuid.uuid4().hex,
+                owner=owner,
+                name=name,
+                is_default=bool(data.get("is_default", scope_q.count() == 0)),
+                enabled=True,
+                imap_host=preset["imap_host"],
+                imap_port=preset["imap_port"],
+                imap_user=username,
+                imap_password=_enc(password),
+                imap_starttls=bool(preset["imap_starttls"]),
+                smtp_host=preset["smtp_host"],
+                smtp_port=preset["smtp_port"],
+                smtp_security=preset["smtp_security"],
+                smtp_user=(data.get("smtp_user") or username).strip(),
+                smtp_password=_enc(data.get("smtp_password") or password),
+                from_address=email_addr or username,
+            )
+            if row.is_default:
+                scope_q.update({EmailAccount.is_default: False})
+            db.add(row)
+            db.commit()
+            return {"ok": True, "id": row.id}
+        finally:
+            db.close()
+
     @router.get("/accounts")
     async def list_email_accounts(owner: str = Depends(require_user)):
         """List all email accounts with credentials masked."""
@@ -3162,7 +3314,12 @@ def setup_email_routes():
                     try: conn.logout()
                     except Exception: pass
             except Exception as e:
-                imap_result = {"ok": False, "error": str(e)[:200]}
+                imap_result = {
+                    "ok": False,
+                    "host": imap_host,
+                    "port": imap_port,
+                    "error": _mail_endpoint_error(imap_host, imap_port, e),
+                }
 
         smtp_host = (body.get("smtp_host") or "").strip()
         if smtp_host:
@@ -3171,12 +3328,7 @@ def setup_email_routes():
             smtp_user = (body.get("smtp_user") or imap_user).strip()
             smtp_pass = body.get("smtp_password") or imap_pass
             try:
-                if smtp_security == "ssl":
-                    smtp = smtplib.SMTP_SSL(smtp_host, smtp_port, timeout=10)
-                else:
-                    smtp = smtplib.SMTP(smtp_host, smtp_port, timeout=10)
-                    if smtp_security == "starttls":
-                        smtp.starttls()
+                smtp = _open_smtp_connection(smtp_host, smtp_port, security=smtp_security, timeout=10)
                 try:
                     smtp.login(smtp_user, smtp_pass)
                     smtp_result = {"ok": True}
@@ -3184,7 +3336,12 @@ def setup_email_routes():
                     try: smtp.quit()
                     except Exception: pass
             except Exception as e:
-                smtp_result = {"ok": False, "error": str(e)[:200]}
+                smtp_result = {
+                    "ok": False,
+                    "host": smtp_host,
+                    "port": smtp_port,
+                    "error": _mail_endpoint_error(smtp_host, smtp_port, e),
+                }
 
         return {
             "ok": imap_result["ok"] and (smtp_result is None or smtp_result["ok"]),

@@ -7,6 +7,7 @@ import { makeWindowDraggable } from './windowDrag.js';
 import { clearDockSide } from './modalSnap.js';
 import { sortModelIds } from './modelSort.js';
 import { isAltGrEvent } from './platform.js';
+import { PROMPT_TEMPLATES } from './presets.js';
 
 let initialized = false;
 let modalEl = null;
@@ -372,6 +373,7 @@ function _bindFallbackWidget(opts) {
 async function initDefaultChat() {
   var epSel = el('set-defaultEpSelect');
   var modelSel = el('set-defaultModelSelect');
+  var personaSel = el('set-defaultPersonaSelect');
   var msg = el('set-defaultChatMsg');
   var fbContainer = el('set-defaultFallbacks');
   var addFbBtn = el('set-defaultAddFallback');
@@ -398,6 +400,62 @@ async function initDefaultChat() {
     _fillEndpointSelect(epSel, _endpoints, selectedEndpoint !== undefined ? selectedEndpoint : epSel.value, false);
     refreshModels(selectedModel !== undefined ? selectedModel : modelSel.value);
     renderFallbacks();
+  }
+
+  function appendPersonaOption(value, label, seen) {
+    if (!personaSel || seen.has(value)) return;
+    var opt = document.createElement('option');
+    opt.value = value;
+    opt.textContent = label;
+    personaSel.appendChild(opt);
+    seen.add(value);
+  }
+
+  async function populatePersonaSelect(selectedPersona) {
+    if (!personaSel) return;
+    var selected = selectedPersona == null ? 'Iris' : String(selectedPersona);
+    var seen = new Set();
+    personaSel.innerHTML = '';
+    appendPersonaOption('', 'No persona', seen);
+
+    var builtinGroup = document.createElement('optgroup');
+    builtinGroup.label = 'Built in';
+    PROMPT_TEMPLATES
+      .filter(function(t) { return t && (t.isCharacter || t.isPreset) && t.name; })
+      .forEach(function(t) {
+        if (seen.has(t.name)) return;
+        var opt = document.createElement('option');
+        opt.value = t.name;
+        opt.textContent = t.name;
+        builtinGroup.appendChild(opt);
+        seen.add(t.name);
+      });
+    if (builtinGroup.children.length) personaSel.appendChild(builtinGroup);
+
+    try {
+      var res = await fetch('/api/presets/templates', { credentials: 'same-origin' });
+      if (res.ok) {
+        var templates = await res.json();
+        if (Array.isArray(templates) && templates.length) {
+          var savedGroup = document.createElement('optgroup');
+          savedGroup.label = 'Saved';
+          templates.forEach(function(t) {
+            if (!t || !t.name || seen.has(t.name)) return;
+            var opt = document.createElement('option');
+            opt.value = t.name;
+            opt.textContent = t.name;
+            savedGroup.appendChild(opt);
+            seen.add(t.name);
+          });
+          if (savedGroup.children.length) personaSel.appendChild(savedGroup);
+        }
+      }
+    } catch (e) { console.warn('Failed to load persona templates', e); }
+
+    if (selected && !seen.has(selected)) {
+      appendPersonaOption(selected, selected, seen);
+    }
+    personaSel.value = selected;
   }
 
   // Render the fallback chain. Each row is endpoint + model + remove.
@@ -468,7 +526,21 @@ async function initDefaultChat() {
         })
       : [];
     renderFallbacks();
-  } catch (e) { console.warn('Failed to load default chat settings', e); }
+    var prefPersona;
+    try {
+      var prefRes = await fetch('/api/prefs/default_persona', { credentials: 'same-origin' });
+      if (prefRes.ok) {
+        var prefData = await prefRes.json();
+        if (prefData && Object.prototype.hasOwnProperty.call(prefData, 'value')) {
+          prefPersona = prefData.value;
+        }
+      }
+    } catch (e) { console.warn('Failed to load default persona preference', e); }
+    await populatePersonaSelect(prefPersona !== undefined ? prefPersona : (settings.default_persona !== undefined ? settings.default_persona : 'Iris'));
+  } catch (e) {
+    console.warn('Failed to load default chat settings', e);
+    await populatePersonaSelect('Iris');
+  }
 
   async function saveDefault() {
     try {
@@ -478,9 +550,21 @@ async function initDefaultChat() {
         body: JSON.stringify({
           default_endpoint_id: epSel.value,
           default_model: modelSel.value,
+          default_persona: personaSel ? personaSel.value : 'Iris',
           default_model_fallbacks: clean
         })
       });
+      if (personaSel) {
+        try {
+          localStorage.setItem('odysseus-default-persona', personaSel.value);
+        } catch (_) {}
+        await fetch('/api/prefs/default_persona', {
+          method: 'PUT',
+          credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ value: personaSel.value })
+        });
+      }
       msg.textContent = 'Saved'; msg.style.color = 'var(--fg)';
       setTimeout(function() { msg.textContent = ''; }, 2000);
     } catch (e) { msg.textContent = 'Failed to save'; msg.style.color = 'var(--red)'; }
@@ -488,6 +572,7 @@ async function initDefaultChat() {
 
   epSel.addEventListener('change', function() { refreshModels(''); saveDefault(); });
   modelSel.addEventListener('change', saveDefault);
+  if (personaSel) personaSel.addEventListener('change', saveDefault);
   if (addFbBtn) addFbBtn.addEventListener('click', function() {
     var first = enabledEndpoints()[0];
     _fallbacks.push({ endpoint_id: first ? first.id : '', model: '' });
@@ -2261,6 +2346,59 @@ async function initReminderSettings() {
   }
   if (!channelSel || !llmToggle) return;
 
+  const REMINDER_PREF_KEYS = new Set([
+    'reminder_channel',
+    'reminder_llm_synthesis',
+    'reminder_ntfy_topic',
+    'reminder_email_account_id',
+    'reminder_email_to',
+  ]);
+  const REMINDER_PREF_ALLOW_EMPTY = new Set(['reminder_email_account_id', 'reminder_email_to']);
+
+  async function loadReminderSettings() {
+    let s = {};
+    try {
+      const res = await fetch('/api/auth/settings', { credentials: 'same-origin' });
+      if (res.ok) s = await res.json();
+    } catch (_) {}
+    try {
+      const prefRes = await fetch('/api/prefs', { credentials: 'same-origin' });
+      if (prefRes.ok) {
+        const prefs = await prefRes.json();
+        for (const key of REMINDER_PREF_KEYS) {
+          if (!Object.prototype.hasOwnProperty.call(prefs || {}, key)) continue;
+          const val = prefs[key];
+          if (val !== null && (val !== '' || REMINDER_PREF_ALLOW_EMPTY.has(key))) s[key] = val;
+        }
+      }
+    } catch (_) {}
+    return s;
+  }
+
+  async function detectNtfyConfigured() {
+    try {
+      const res = await fetch('/api/auth/integrations', { credentials: 'same-origin' });
+      if (res.ok) {
+        const data = await res.json();
+        if ((data.integrations || []).some(
+          i => (i.preset === 'ntfy' || (i.name || '').toLowerCase() === 'ntfy') && i.enabled !== false && i.base_url
+        )) return true;
+      }
+    } catch (_) {}
+    try {
+      const res = await fetch('/api/auth/integrations/status', { credentials: 'same-origin' });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.ntfy || data.integrations?.ntfy) return true;
+      }
+    } catch (_) {}
+    try {
+      const s = await loadReminderSettings();
+      if (s.reminder_channel === 'ntfy') return true;
+    } catch (_) {}
+    return false;
+  }
+
   // Detect configured email accounts. The legacy single-account
   // `/api/email/config` endpoint was a no-op stub for most installs;
   // the real per-account list lives at `/api/email/accounts` and is
@@ -2281,26 +2419,7 @@ async function initReminderSettings() {
     emailOpt.textContent = 'Email (add an account in Integrations)';
   }
 
-  // Detect whether ntfy integration exists — try admin endpoint, fall back to
-  // checking if an ntfy integration was saved in settings (non-admin users).
-  let ntfyConfigured = false;
-  try {
-    const res = await fetch('/api/auth/integrations', { credentials: 'same-origin' });
-    if (res.ok) {
-      const data = await res.json();
-      ntfyConfigured = (data.integrations || []).some(
-        i => (i.preset === 'ntfy' || (i.name || '').toLowerCase() === 'ntfy') && i.enabled !== false && i.base_url
-      );
-    }
-  } catch (_) {}
-  // If admin check failed, check if ntfy was previously selected (trust the saved setting)
-  if (!ntfyConfigured) {
-    try {
-      const res = await fetch('/api/auth/settings', { credentials: 'same-origin' });
-      const s = await res.json();
-      if (s.reminder_channel === 'ntfy') ntfyConfigured = true;
-    } catch (_) {}
-  }
+  let ntfyConfigured = await detectNtfyConfigured();
 
   if (!ntfyConfigured && ntfyOpt) {
     ntfyOpt.disabled = true;
@@ -2380,25 +2499,15 @@ async function initReminderSettings() {
     } catch (_) {}
     smtpConfigured = emailAccounts.length > 0;
 
-    ntfyConfigured = false;
+    ntfyConfigured = await detectNtfyConfigured();
     try {
       const res = await fetch('/api/auth/integrations', { credentials: 'same-origin' });
       if (res.ok) {
         const data = await res.json();
-        ntfyConfigured = (data.integrations || []).some(
-          i => (i.preset === 'ntfy' || (i.name || '').toLowerCase() === 'ntfy') && i.enabled !== false && i.base_url
-        );
         allIntegrations = (data.integrations || []).filter(i => i.base_url && i.enabled !== false);
         webhookConfigured = allIntegrations.length > 0;
       }
     } catch (_) {}
-    if (!ntfyConfigured) {
-      try {
-        const res = await fetch('/api/auth/settings', { credentials: 'same-origin' });
-        const s = await res.json();
-        if (s.reminder_channel === 'ntfy') ntfyConfigured = true;
-      } catch (_) {}
-    }
 
     applyReminderChannelAvailability();
     populateReminderEmailAccounts(currentEmailAccount);
@@ -2452,8 +2561,7 @@ async function initReminderSettings() {
   };
 
   try {
-    const res = await fetch('/api/auth/settings', { credentials: 'same-origin' });
-    const s = await res.json();
+    const s = await loadReminderSettings();
     let savedChannel = s.reminder_channel || 'browser';
     if (savedChannel === 'email' && !smtpConfigured) savedChannel = 'browser';
     if (savedChannel === 'ntfy' && !ntfyConfigured) savedChannel = 'browser';
@@ -2489,12 +2597,27 @@ async function initReminderSettings() {
 
   async function save(patch) {
     try {
-      await fetch('/api/auth/settings', {
-        method: 'POST',
-        credentials: 'same-origin',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(patch),
-      });
+      const globalPatch = {};
+      for (const [key, value] of Object.entries(patch || {})) {
+        if (REMINDER_PREF_KEYS.has(key)) {
+          await fetch(`/api/prefs/${encodeURIComponent(key)}`, {
+            method: 'PUT',
+            credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ value }),
+          });
+        } else {
+          globalPatch[key] = value;
+        }
+      }
+      if (Object.keys(globalPatch).length) {
+        await fetch('/api/auth/settings', {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(globalPatch),
+        });
+      }
     } catch (e) { console.warn('Failed to save reminder settings', e); }
   }
 
@@ -2572,6 +2695,13 @@ async function initReminderSettings() {
       } catch (_) {}
       const _stopTestSpin = () => { try { _testSpin && _testSpin.stop(); _testSpin && _testSpin.element.remove(); } catch (_) {} };
       try {
+        await save({
+          reminder_channel: channelSel.value,
+          reminder_llm_synthesis: llmToggle.checked,
+          reminder_email_account_id: emailAcctSel ? (emailAcctSel.value || null) : null,
+          reminder_email_to: emailToIn ? emailToIn.value.trim() : '',
+          reminder_ntfy_topic: ntfyTopicIn ? (ntfyTopicIn.value.trim() || 'reminders') : 'reminders',
+        });
         const res = await fetch('/api/notes/fire-reminder', {
           method: 'POST',
           credentials: 'same-origin',
@@ -2726,6 +2856,8 @@ async function initEmailAccountsSettings() {
       outlook:  { label: 'Outlook / Office 365',   imap: { host: 'outlook.office365.com',    port: 993, starttls: false }, smtp: { host: 'smtp.office365.com',        port: 587 } },
       fastmail: { label: 'Fastmail',               imap: { host: 'imap.fastmail.com',        port: 993, starttls: false }, smtp: { host: 'smtp.fastmail.com',         port: 465 } },
       yahoo:    { label: 'Yahoo',                  imap: { host: 'imap.mail.yahoo.com',      port: 993, starttls: false }, smtp: { host: 'smtp.mail.yahoo.com',       port: 465 } },
+      proton_bridge: { label: 'Proton Bridge (host)', imap: { host: 'host.docker.internal',   port: 1143, starttls: true }, smtp: { host: 'host.docker.internal',       port: 1025, security: 'starttls' } },
+      proton_bridge_docker: { label: 'Proton Bridge (Docker)', imap: { host: 'proton-bridge', port: 143, starttls: true }, smtp: { host: 'proton-bridge',              port: 25, security: 'starttls' } },
       dovecot:  { label: 'Dovecot IMAP (no SMTP)',  imap: { host: '',                        port: 31143, starttls: false }, smtp: { host: '',                          port: 465 } },
     };
     const _providerOptions = Object.entries(PROVIDERS)
@@ -2747,7 +2879,7 @@ async function initEmailAccountsSettings() {
         <div style="font-size:11px;font-weight:600;opacity:0.6;margin:8px 0 2px">SMTP (Sending) <span style="font-weight:normal;opacity:0.7">— optional, leave blank for read-only</span></div>
         <div class="settings-row"><label class="settings-label">Host${_hint('Your outgoing-mail server, e.g. smtp.gmail.com, smtp.migadu.com. Leave blank to make this account read-only.')}</label><input id="eaf-smtp-host" class="settings-input" value="${esc(a.smtp_host || '')}"></div>
         <div class="settings-row"><label class="settings-label">Port${_hint('465 for SSL/SMTPS, 587 for STARTTLS. 25 is usually blocked by ISPs.')}</label><input id="eaf-smtp-port" class="settings-input" type="number" value="${esc(a.smtp_port || 465)}" style="max-width:100px"></div>
-        <div class="settings-row"><label class="settings-label">Security${_hint('SSL for port 465, STARTTLS for port 587, or None for local SMTP bridges such as Proton Mail Bridge.')}</label><select id="eaf-smtp-security" class="settings-select"><option value="ssl">SSL</option><option value="starttls">STARTTLS</option><option value="none">None</option></select></div>
+        <div class="settings-row"><label class="settings-label">Security${_hint('SSL for port 465, STARTTLS for port 587 or Proton Mail Bridge, or None for local SMTP servers with TLS disabled.')}</label><select id="eaf-smtp-security" class="settings-select"><option value="ssl">SSL</option><option value="starttls">STARTTLS</option><option value="none">None</option></select></div>
         <div class="settings-row"><label class="settings-label">Same as IMAP${_hint('Use the IMAP username and password for SMTP too (this is right for almost every provider). Turn off to enter separate SMTP credentials.')}</label><label class="admin-switch"><input type="checkbox" id="eaf-smtp-same" ${(!isEdit || (a.smtp_user && a.imap_user && a.smtp_user === a.imap_user)) ? 'checked' : ''}><span class="admin-slider"></span></label></div>
         <div class="settings-row eaf-smtp-creds"><label class="settings-label">Username${_hint('Usually the same as your IMAP username (your email address).')}</label><input id="eaf-smtp-user" class="settings-input" value="${esc(a.smtp_user || '')}"></div>
         <div class="settings-row eaf-smtp-creds"><label class="settings-label">Password${_hint('Your SMTP password — often the same as your IMAP password.')}</label><input id="eaf-smtp-pass" class="settings-input" type="password" placeholder="${isEdit && a.has_smtp_password ? '(unchanged)' : ''}"></div>
@@ -4027,6 +4159,8 @@ async function initUnifiedIntegrations() {
       outlook:  { label: 'Outlook / Office 365',    emailEx: 'you@outlook.com',   imap: { host: 'outlook.office365.com',    port: 993, starttls: false }, smtp: { host: 'smtp.office365.com', port: 587 } },
       fastmail: { label: 'Fastmail',                emailEx: 'you@fastmail.com',  imap: { host: 'imap.fastmail.com',        port: 993, starttls: false }, smtp: { host: 'smtp.fastmail.com',  port: 465 } },
       yahoo:    { label: 'Yahoo',                   emailEx: 'you@yahoo.com',     imap: { host: 'imap.mail.yahoo.com',      port: 993, starttls: false }, smtp: { host: 'smtp.mail.yahoo.com', port: 465 } },
+      proton_bridge: { label: 'Proton Bridge (host)', emailEx: 'you@proton.me',   imap: { host: 'host.docker.internal',     port: 1143, starttls: true }, smtp: { host: 'host.docker.internal', port: 1025, security: 'starttls' } },
+      proton_bridge_docker: { label: 'Proton Bridge (Docker)', emailEx: 'you@proton.me', imap: { host: 'proton-bridge',     port: 143, starttls: true }, smtp: { host: 'proton-bridge',          port: 25, security: 'starttls' } },
       dovecot:  { label: 'Dovecot IMAP (no SMTP)',  emailEx: 'you@example.com',   imap: { host: '',                         port: 31143, starttls: false }, smtp: { host: '',                   port: 465 } },
     };
     const _providerOptions = Object.entries(PROVIDERS)
@@ -4044,6 +4178,8 @@ async function initUnifiedIntegrations() {
       outlook:  _letterLogo('O', '#0078d4'),
       fastmail: _letterLogo('F', '#4a5fbb'),
       yahoo:    _letterLogo('Y', '#6001d2'),
+      proton_bridge: _letterLogo('P', '#6d4aff'),
+      proton_bridge_docker: _letterLogo('P', '#6d4aff'),
       dovecot:  _letterLogo('D', '#6b7280'),
     };
     const _provOptionRows = [['', 'Custom…'], ...Object.entries(PROVIDERS).map(([k, v]) => [k, v.label])]
@@ -4071,12 +4207,12 @@ async function initUnifiedIntegrations() {
           <div class="settings-row"><label class="settings-label">Host${_hint('Your IMAP server, e.g. imap.gmail.com, imap.migadu.com, a LAN host, or a Tailscale IP for Dovecot.')}</label><input id="uf-imap-host" class="settings-input" placeholder="imap.example.com"></div>
           <div class="settings-row"><label class="settings-label">Port${_hint('993 for IMAPS (most providers), 143 for plain or STARTTLS. Local servers often use a custom port like 31143.')}</label><input id="uf-imap-port" class="settings-input" type="number" placeholder="993" style="max-width:100px"></div>
           <div class="settings-row"><label class="settings-label">Username${_hint('Yes — your full email address goes here too (e.g. you@gmail.com). Same as the Email field above for almost every provider.')}</label><input id="uf-imap-user" class="settings-input" placeholder="you@example.com"></div>
-          <div class="settings-row"><label class="settings-label">Password${_hint('For Gmail, iCloud, and Yahoo: paste your App Password (NOT your normal account password — those are blocked for IMAP). For Migadu, Fastmail, Outlook, etc.: your regular mailbox password works.')}</label><input id="uf-imap-pass" class="settings-input" type="password" placeholder="${placeholderPass}"></div>
+          <div class="settings-row"><label class="settings-label">Password${_hint('For Gmail, iCloud, and Yahoo: paste your App Password. For Proton Mail Bridge: paste the Bridge-generated mailbox password, not your Proton account password. For Migadu, Fastmail, Outlook, etc.: your regular mailbox password works.')}</label><input id="uf-imap-pass" class="settings-input" type="password" placeholder="${placeholderPass}"></div>
           <div class="settings-row"><label class="settings-label">STARTTLS${_hint('Turn ON for port 143/587 to upgrade plain to TLS. Turn OFF for port 993 (IMAPS — already encrypted) or a local server with no TLS configured.')}</label><label class="admin-switch" style="margin-left:0"><input type="checkbox" id="uf-imap-starttls" checked><span class="admin-slider"></span></label></div>
           <div style="font-size:11px;font-weight:600;opacity:0.6;margin:8px 0 2px;display:flex;align-items:center;gap:5px;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--accent, var(--red));flex-shrink:0;" aria-hidden="true"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>SMTP (Sending) <span style="font-weight:normal;opacity:0.7">— optional, leave blank for read-only</span></div>
           <div class="settings-row"><label class="settings-label">Host${_hint('Your outgoing-mail server, e.g. smtp.gmail.com. Leave blank to make this account read-only.')}</label><input id="uf-smtp-host" class="settings-input" placeholder="smtp.example.com"></div>
           <div class="settings-row"><label class="settings-label">Port${_hint('465 for SSL/SMTPS, 587 for STARTTLS. 25 is usually blocked by ISPs.')}</label><input id="uf-smtp-port" class="settings-input" type="number" placeholder="465" style="max-width:100px"></div>
-          <div class="settings-row"><label class="settings-label">Security${_hint('SSL for port 465, STARTTLS for port 587, or None for local SMTP bridges such as Proton Mail Bridge.')}</label><select id="uf-smtp-security" class="settings-select"><option value="ssl">SSL</option><option value="starttls">STARTTLS</option><option value="none">None</option></select></div>
+          <div class="settings-row"><label class="settings-label">Security${_hint('SSL for port 465, STARTTLS for port 587 or Proton Mail Bridge, or None for local SMTP servers with TLS disabled.')}</label><select id="uf-smtp-security" class="settings-select"><option value="ssl">SSL</option><option value="starttls">STARTTLS</option><option value="none">None</option></select></div>
           <div class="settings-row"><label class="settings-label">Same as IMAP${_hint('Use the IMAP username and password for SMTP too (right for almost every provider). Turn off to enter separate SMTP credentials.')}</label><label class="admin-switch" style="margin-left:0"><input type="checkbox" id="uf-smtp-same" checked><span class="admin-slider"></span></label></div>
           <div class="settings-row uf-smtp-creds"><label class="settings-label">Username${_hint('Usually the same as your IMAP username (your email address).')}</label><input id="uf-smtp-user" class="settings-input"></div>
           <div class="settings-row uf-smtp-creds"><label class="settings-label">Password${_hint('Your SMTP password — often the same as your IMAP password.')}</label><input id="uf-smtp-pass" class="settings-input" type="password" placeholder="${placeholderPass}"></div>
@@ -4123,6 +4259,20 @@ async function initUnifiedIntegrations() {
         title: 'Yahoo needs an App Password',
         body: 'Generate an App Password from Yahoo Account Security (requires 2-Step Verification enabled) and paste it as the Password.',
         url: 'https://login.yahoo.com/account/security/app-passwords',
+      },
+      proton_bridge: {
+        title: 'Proton Mail needs Bridge',
+        body: 'Run Proton Mail Bridge, add your mailbox, then paste the Bridge-generated username and password here. In Docker/Dockge, host.docker.internal usually reaches Bridge on the host; if Bridge runs elsewhere, use that LAN or Tailscale host.',
+        url: 'https://proton.me/mail/bridge',
+        cta: 'Open Proton Bridge',
+        bridgeMode: 'host',
+      },
+      proton_bridge_docker: {
+        title: 'Proton Bridge sidecar',
+        body: 'Use this when the proton-bridge compose service is running. After Bridge login, paste the Bridge-generated username and password here; Odysseus connects to proton-bridge on the Docker network.',
+        url: 'https://proton.me/mail/bridge',
+        cta: 'Open Proton Bridge',
+        bridgeMode: 'docker',
       },
     };
     const noteEl = el('uf-email-provider-note');
@@ -4174,6 +4324,7 @@ async function initUnifiedIntegrations() {
     const _renderProviderNote = (key) => {
       const n = PROVIDER_NOTES[key];
       if (!n) { noteEl.style.display = 'none'; noteEl.innerHTML = ''; return; }
+      const cta = n.cta || 'Generate App Password';
       noteEl.style.display = '';
       noteEl.innerHTML = `
         <div style="font-weight:600;margin-bottom:3px;">${esc(n.title)}</div>
@@ -4181,13 +4332,38 @@ async function initUnifiedIntegrations() {
         <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
           <a href="${esc(n.url)}" target="_blank" rel="noopener noreferrer" class="admin-btn-sm" style="background:var(--red);border-color:var(--red);color:#fff;text-decoration:none;display:inline-flex;align-items:center;gap:5px;font-weight:600;">
             <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
-            Generate App Password
+            ${esc(cta)}
           </a>
           <button type="button" class="admin-btn-sm uf-prov-copy" data-url="${esc(n.url)}" style="opacity:0.7;display:inline-flex;align-items:center;gap:5px;">
             <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
             Copy link
           </button>
-        </div>`;
+        </div>
+        ${n.bridgeMode ? '<div class="uf-proton-status" style="margin-top:6px;opacity:0.75;">Checking Bridge reachability...</div>' : ''}`;
+    };
+    const _checkProtonBridgeStatus = async (key) => {
+      const mode = PROVIDER_NOTES[key]?.bridgeMode;
+      if (!mode || !noteEl) return;
+      const statusEl = noteEl.querySelector('.uf-proton-status');
+      if (!statusEl) return;
+      try {
+        const r = await fetch(`/api/email/proton-bridge/status?mode=${encodeURIComponent(mode)}`, { credentials: 'same-origin' });
+        const d = await r.json();
+        if (el('uf-email-provider')?.value !== key) return;
+        if (d.ok) {
+          statusEl.textContent = `Bridge reachable: IMAP ${d.imap?.host}:${d.imap?.port}, SMTP ${d.smtp?.host}:${d.smtp?.port}`;
+          statusEl.style.color = 'var(--green,#50fa7b)';
+        } else {
+          const imap = d.imap?.ok ? 'IMAP ok' : `IMAP ${d.imap?.error || 'not reachable'}`;
+          const smtp = d.smtp?.ok ? 'SMTP ok' : `SMTP ${d.smtp?.error || 'not reachable'}`;
+          statusEl.textContent = `Bridge not reachable yet: ${imap}; ${smtp}`;
+          statusEl.style.color = 'var(--red)';
+        }
+      } catch (e) {
+        if (el('uf-email-provider')?.value !== key) return;
+        statusEl.textContent = `Bridge status check failed: ${e.message}`;
+        statusEl.style.color = 'var(--red)';
+      }
     };
 
     // Custom dropdown wire-up — the native <select> stays in the DOM as the
@@ -4246,6 +4422,7 @@ async function initUnifiedIntegrations() {
     el('uf-email-provider').addEventListener('change', (e) => {
       const key = e.target.value;
       _renderProviderNote(key);
+      _checkProtonBridgeStatus(key);
       const p = PROVIDERS[key];
       if (!p) return;
       el('uf-imap-host').value = p.imap.host;

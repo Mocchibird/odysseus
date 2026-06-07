@@ -101,6 +101,7 @@ app.add_middleware(
         "X-Odysseus-Owner",
         "X-Requested-With",
         "X-TZ-Offset",
+        "X-TZ-Name",
     ],
 )
 
@@ -722,6 +723,12 @@ app.include_router(setup_claude_routes())
 
 from routes.vault_routes import setup_vault_routes
 app.include_router(setup_vault_routes())
+
+from routes.iris_vault_routes import setup_iris_vault_routes
+app.include_router(setup_iris_vault_routes())
+
+from routes.book_routes import setup_book_routes
+app.include_router(setup_book_routes())
 
 # Contacts (CardDAV)
 from routes.contacts_routes import setup_contacts_routes

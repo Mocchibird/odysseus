@@ -188,7 +188,7 @@ async function _fetchCalendars() {
     });
   } catch (e) { _calendars = []; _calendarsError = e.message || 'Connection failed'; }
 
-  // First open: fire a background CalDAV pull. We don't await — the
+  // First open: fire a background calendar pull. We don't await — the
   // initial render uses whatever's already cached locally, and the
   // sync's writes show up on the next paint after it resolves.
   if (!_caldavSyncedOnce) {
@@ -197,9 +197,9 @@ async function _fetchCalendars() {
   }
 }
 
-// Trigger a CalDAV pull. `interactive=true` waits for the result and
+// Trigger a CalDAV/ICS pull. `interactive=true` waits for the result and
 // refreshes the UI; false fires-and-forgets (used on first open). Both
-// no-op silently if CalDAV isn't configured.
+// no-op silently when no sync sources are configured.
 async function _syncCaldav(interactive) {
   try {
     const res = await fetch(`${API_BASE}/api/calendar/sync`, {
@@ -748,13 +748,13 @@ function _renderEmpty() {
         <line x1="3" y1="10" x2="21" y2="10"/>
       </svg>
       <div class="cal-empty-title">${hasError ? 'Calendar unavailable' : 'No calendars yet'}</div>
-      <div class="cal-empty-msg">${hasError ? _e(_calendarsError) : 'Create a local calendar, import an .ics file, or sync via CalDAV.'}</div>
+      <div class="cal-empty-msg">${hasError ? _e(_calendarsError) : 'Create a local calendar, import an .ics file or link, or sync via CalDAV.'}</div>
       ${hasError ? `
         <button class="cal-btn cal-btn-primary" id="cal-goto-settings">Open Settings</button>
       ` : `
         <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-top:4px;">
           <button class="cal-btn cal-btn-primary" id="cal-empty-new">New calendar</button>
-          <button class="cal-btn" id="cal-empty-import">Import .ics</button>
+          <button class="cal-btn" id="cal-empty-import">Import ICS</button>
         </div>
         <div style="margin-top:10px;font-size:11px;opacity:0.55;">Or <a href="#" id="cal-empty-caldav" style="color:var(--accent, var(--red));text-decoration:none;font-weight:600;">set up CalDAV sync</a>.</div>
       `}
@@ -769,15 +769,14 @@ function _renderEmpty() {
     }
   });
   // New / Import open the calendar settings panel; the panel already
-  // has the "New calendar" button and the .ics file picker. Import
-  // triggers the file picker immediately so it's a one-click flow.
+  // has the "New calendar" button and the ICS import controls.
   document.getElementById('cal-empty-new')?.addEventListener('click', () => {
     _showCalSettings();
     setTimeout(() => document.getElementById('cal-settings-add')?.click(), 50);
   });
   document.getElementById('cal-empty-import')?.addEventListener('click', () => {
     _showCalSettings();
-    setTimeout(() => document.getElementById('cal-import-file')?.click(), 50);
+    setTimeout(() => document.getElementById('cal-import-url')?.focus(), 50);
   });
   document.getElementById('cal-empty-caldav')?.addEventListener('click', (e) => {
     e.preventDefault();
@@ -2452,7 +2451,7 @@ async function _showCalSettings() {
         </div>
         <div style="border-top:1px solid var(--border);padding-top:12px;">
           <div style="font-size:11px;opacity:0.5;margin-bottom:6px;">Import calendar</div>
-          <div style="display:flex;gap:8px;align-items:center;">
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
             <label class="memory-toolbar-btn" style="cursor:pointer;">
               <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="position:relative;top:5px;margin-right:3px;"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
               <span style="position:relative;top:4px;">Import .ics</span>
@@ -2460,7 +2459,11 @@ async function _showCalSettings() {
             </label>
             <span id="cal-import-status" style="font-size:11px;opacity:0.6;"></span>
           </div>
-          <div style="font-size:10px;opacity:0.4;margin-top:4px;">Upload a .ics file to import events. Google Calendar, Apple Calendar, and Outlook all export .ics files.</div>
+          <div style="display:flex;gap:6px;align-items:center;margin-top:8px;">
+            <input type="url" id="cal-import-url" class="cal-input" placeholder="https://.../calendar.ics or webcal://..." style="flex:1;min-width:0;font-size:12px;height:28px;" />
+            <button class="memory-toolbar-btn" id="cal-import-url-btn" style="cursor:pointer;height:28px;">Import link</button>
+          </div>
+          <div style="font-size:10px;opacity:0.4;margin-top:4px;">Upload a .ics file or paste a public ICS/webcal link from Google Calendar, Apple Calendar, Outlook, or similar services.</div>
         </div>
         <div style="border-top:1px solid var(--border);padding-top:12px;">
           <div style="font-size:11px;opacity:0.5;margin-bottom:6px;">Export calendar</div>
@@ -2483,7 +2486,7 @@ async function _showCalSettings() {
             </button>
             <span id="cal-settings-sync-status" style="font-size:11px;opacity:0.6;"></span>
           </div>
-          <div style="font-size:10px;opacity:0.4;margin-top:4px;">Pulls events from your CalDAV server. To connect or change CalDAV credentials, open <a href="#" id="cal-settings-open-caldav" style="color:var(--accent, var(--red));text-decoration:none;font-weight:600;">Settings → Integrations</a>.</div>
+          <div style="font-size:10px;opacity:0.4;margin-top:4px;">Pulls events from subscribed ICS links and your CalDAV server. To connect or change CalDAV credentials, open <a href="#" id="cal-settings-open-caldav" style="color:var(--accent, var(--red));text-decoration:none;font-weight:600;">Settings → Integrations</a>.</div>
         </div>
       </div>
     </div>
@@ -2568,6 +2571,22 @@ async function _showCalSettings() {
   });
 
   // ICS import
+  const showImportResult = async (res, status) => {
+    let data = null, raw = '';
+    try { data = await res.clone().json(); } catch (_) { raw = await res.text().catch(() => ''); }
+    if (res.ok && data && data.ok) {
+      status.textContent = `${data.imported} events imported to "${data.calendar}"` + (data.skipped ? ` (${data.skipped} skipped)` : '');
+      _allEvents = {}; _fetchedRanges = []; localStorage.removeItem(LS_KEY);
+      await _fetchCalendars();
+      _render();
+      return true;
+    }
+    const reason = (data && (data.detail || data.error)) || raw.slice(0, 200) || `HTTP ${res.status}`;
+    status.textContent = `Import failed: ${reason}`;
+    console.error('Calendar import failed', res.status, data || raw);
+    return false;
+  };
+
   overlay.querySelector('#cal-import-file').addEventListener('change', async (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -2577,27 +2596,47 @@ async function _showCalSettings() {
       const fd = new FormData();
       fd.append('file', file);
       const res = await fetch(`${API_BASE}/api/calendar/import`, { method: 'POST', body: fd, credentials: 'same-origin' });
-      // Try JSON first; fall back to text so HTML auth-walls and bare
-      // 500s surface something the user can act on instead of the
-      // generic "Import failed".
-      let data = null, raw = '';
-      try { data = await res.clone().json(); } catch (_) { raw = await res.text().catch(() => ''); }
-      if (res.ok && data && data.ok) {
-        status.textContent = `${data.imported} events imported to "${data.calendar}"` + (data.skipped ? ` (${data.skipped} skipped)` : '');
-        _allEvents = {}; _fetchedRanges = []; localStorage.removeItem(LS_KEY);
-        await _fetchCalendars();
-        _render();
-      } else {
-        // FastAPI HTTPException → {detail}; some routes use {error}.
-        const reason = (data && (data.detail || data.error)) || raw.slice(0, 200) || `HTTP ${res.status}`;
-        status.textContent = `Import failed: ${reason}`;
-        console.error('Calendar import failed', res.status, data || raw);
-      }
+      await showImportResult(res, status);
     } catch (err) {
       status.textContent = `Import failed: ${err.message || err}`;
       console.error('Calendar import threw', err);
     }
     e.target.value = '';
+  });
+
+  const urlInput = overlay.querySelector('#cal-import-url');
+  const urlBtn = overlay.querySelector('#cal-import-url-btn');
+  const importUrl = async () => {
+    const url = (urlInput?.value || '').trim();
+    if (!url) {
+      urlInput?.focus();
+      return;
+    }
+    const status = overlay.querySelector('#cal-import-status');
+    status.textContent = 'Importing link...';
+    if (urlBtn) urlBtn.disabled = true;
+    try {
+      const res = await fetch(`${API_BASE}/api/calendar/import`, {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url }),
+      });
+      const ok = await showImportResult(res, status);
+      if (ok && urlInput) urlInput.value = '';
+    } catch (err) {
+      status.textContent = `Import failed: ${err.message || err}`;
+      console.error('Calendar URL import threw', err);
+    } finally {
+      if (urlBtn) urlBtn.disabled = false;
+    }
+  };
+  urlBtn?.addEventListener('click', importUrl);
+  urlInput?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      importUrl();
+    }
   });
 
   // Export chips — one per calendar; downloads that calendar's .ics.
@@ -2607,7 +2646,7 @@ async function _showCalSettings() {
     });
   });
 
-  // Sync now — fires the CalDAV pull synchronously so we can show the
+  // Sync now — fires calendar pulls synchronously so we can show the
   // result inline, then refreshes the panel + calendar grid.
   overlay.querySelector('#cal-settings-sync-now')?.addEventListener('click', async (e) => {
     const btn = e.currentTarget;

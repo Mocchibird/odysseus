@@ -1572,7 +1572,7 @@ def setup_skills_routes(skills_manager: SkillsManager) -> APIRouter:
             raise HTTPException(400, "query is required")
         user = _owner(request)
         skills = skills_manager.load(owner=user)
-        results = skills_manager.get_relevant_skills(query, skills, max_items=10)
+        results = skills_manager.get_relevant_skills(query, skills, max_items=10, owner=user)
         return {"skills": results, "query": query, "count": len(results)}
 
     return router

@@ -627,7 +627,7 @@ async def do_manage_skills(content: str, owner: Optional[str] = None) -> Dict:
     name = (args.get("name") or args.get("skill_id") or "").strip()
 
     if action in ("list", "index", ""):
-        all_skills = sm.load(owner=owner)
+        all_skills = sm.available_skills(owner=owner)
         if not all_skills:
             return {"results": "No skills yet. Create one with action='add'."}
         published = [s for s in all_skills if s.get("status") == "published"]
@@ -782,7 +782,7 @@ async def do_manage_skills(content: str, owner: Optional[str] = None) -> Dict:
         query = (args.get("query") or "").strip()
         if not query:
             return {"error": "query is required for search", "exit_code": 1}
-        results = sm.get_relevant_skills(query, sm.load(owner=owner), max_items=5)
+        results = sm.get_relevant_skills(query, sm.load(owner=owner), max_items=5, owner=owner)
         if not results:
             return {"results": "No matching skills found."}
         lines = []
@@ -1501,7 +1501,22 @@ async def do_manage_settings(content: str, owner: Optional[str] = None) -> Dict:
         # set/get/list/delete operate on the REAL app settings (the same store
         # the Settings panel writes), so changing a model / voice / search
         # engine / reminder channel from chat actually takes effect.
-        from src.settings import load_settings, save_settings, DEFAULT_SETTINGS
+        from src.settings import (
+            DEFAULT_SETTINGS,
+            _PER_USER_KEYS,
+            get_user_setting,
+            load_settings,
+            save_settings,
+        )
+
+        def _save_user_pref(key: str, value):
+            if not owner or key not in _PER_USER_KEYS:
+                return False
+            from routes.prefs_routes import _load_for_user, _save_for_user
+            prefs = _load_for_user(owner) or {}
+            prefs[key] = value
+            _save_for_user(owner, prefs)
+            return True
 
         # Secrets/credentials the agent must NOT write — kept read-only (masked)
         # so API keys never flow through chat. User sets these in the panel.
@@ -1624,7 +1639,7 @@ async def do_manage_settings(content: str, owner: Optional[str] = None) -> Dict:
                 return {"error": "key is required", "exit_code": 1}
             if key not in DEFAULT_SETTINGS:
                 return {"error": f"Unknown setting '{args.get('key')}'. Use action='list' to see them.", "exit_code": 1}
-            val = load_settings().get(key, DEFAULT_SETTINGS.get(key))
+            val = get_user_setting(key, owner or "", load_settings().get(key, DEFAULT_SETTINGS.get(key)))
             return {"response": f"{key} = {_mask(key, val)}", "value": _mask(key, val), "exit_code": 0}
 
         elif action == "set":
@@ -1650,6 +1665,9 @@ async def do_manage_settings(content: str, owner: Optional[str] = None) -> Dict:
                 return {"error": f"'{value}' isn't a valid value for {key} (expected {type(DEFAULT_SETTINGS[key]).__name__}).", "exit_code": 1}
             if key in _ENUMS and str(value).lower() not in _ENUMS[key]:
                 return {"error": f"{key} must be one of: {', '.join(_ENUMS[key])}.", "exit_code": 1}
+            if _save_user_pref(key, value):
+                return {"response": f"Set {key} = {value}.", "exit_code": 0}
+
             s = load_settings()
             s[key] = value
             if key in {"default_model", "research_model", "utility_model", "task_model", "vision_model", "image_model"}:
@@ -1670,6 +1688,12 @@ async def do_manage_settings(content: str, owner: Optional[str] = None) -> Dict:
                 return {"error": f"Unknown setting '{args.get('key')}'.", "exit_code": 1}
             if _is_secret(key):
                 return {"response": f"'{key}' is a credential — reset it in the panel.", "exit_code": 0}
+            if owner and key in _PER_USER_KEYS:
+                from routes.prefs_routes import _load_for_user, _save_for_user
+                prefs = _load_for_user(owner) or {}
+                prefs.pop(key, None)
+                _save_for_user(owner, prefs)
+                return {"response": f"Reset {key} to the global/default value.", "exit_code": 0}
             s = load_settings()
             s[key] = DEFAULT_SETTINGS[key]
             save_settings(s)
@@ -1698,6 +1722,8 @@ async def do_manage_settings(content: str, owner: Optional[str] = None) -> Dict:
                 "tasks": ["manage_tasks"],
                 "notes": ["manage_notes"],
                 "calendar": ["manage_calendar"],
+                "books": ["manage_books"],
+                "reader": ["manage_books"],
                 "email": ["mcp__email__list_emails", "mcp__email__read_email", "mcp__email__send_email"],
                 "research": ["web_search"],  # research is a per-request flag, not a tool — closest analog
             }
@@ -1791,6 +1817,50 @@ async def do_api_call(content: str) -> Dict:
         params=args.get("params"),
         body=args.get("body"),
         extra_headers=args.get("headers"),
+    )
+
+
+async def do_send_ping(content: str, owner: Optional[str] = None) -> Dict:
+    """Send an immediate ntfy notification using the saved ntfy integration."""
+    try:
+        args = _parse_tool_args(content)
+    except ValueError:
+        args = {"message": content}
+
+    from src.integrations import load_integrations
+    from src.ntfy_client import find_ntfy_integration, send_ntfy_notification
+    from src.settings import get_user_setting, load_settings
+
+    message = str(args.get("message") or args.get("body") or args.get("text") or "").strip()
+    title = str(args.get("title") or "Iris").strip() or "Iris"
+    if not message:
+        return {"error": "message is required", "exit_code": 1}
+    if len(message) > 3800:
+        message = message[:3800] + "\n... (truncated)"
+
+    settings = load_settings()
+    topic = str(
+        args.get("topic")
+        or get_user_setting("reminder_ntfy_topic", owner or "", settings.get("reminder_ntfy_topic"))
+        or "Reminders"
+    ).strip()
+    priority = str(args.get("priority") or "high").strip() or "high"
+    tags = str(args.get("tags") or "bell").strip()
+
+    integration = find_ntfy_integration(load_integrations())
+    if not integration:
+        return {
+            "error": "No enabled ntfy integration found. Configure Settings -> Integrations -> ntfy first.",
+            "exit_code": 1,
+        }
+
+    return await send_ntfy_notification(
+        integration,
+        topic,
+        message,
+        title=title,
+        priority=priority,
+        tags=tags,
     )
 
 
@@ -2490,6 +2560,181 @@ async def do_manage_calendar(content: str, owner: Optional[str] = None) -> Dict:
         db.close()
 
 
+# ---------------------------------------------------------------------------
+# Iris vault tool — Obsidian-backed persistent user files
+# ---------------------------------------------------------------------------
+
+async def do_manage_iris_vault(content: str, owner: Optional[str] = None) -> Dict:
+    """Manage Iris's owner-scoped Obsidian vault files."""
+    try:
+        args = _parse_tool_args(content)
+    except ValueError:
+        return {"error": "Invalid JSON arguments", "exit_code": 1}
+
+    action = (args.get("action") or "search").replace("-", "_").strip().lower()
+    if action == "list":
+        action = "search"
+    if action in {"get", "open", "view"}:
+        action = "read"
+    if action in {"save", "create", "update"}:
+        action = "write"
+
+    from src import iris_vault
+
+    try:
+        if action == "status":
+            root = iris_vault.vault_root()
+            user_root = iris_vault.owner_root(owner)
+            return {
+                "response": f"Iris vault ready for {iris_vault.owner_folder_name(owner)} at {user_root}",
+                "vault_root": str(root),
+                "owner_path": str(user_root),
+                "exit_code": 0,
+            }
+
+        if action == "search":
+            query = str(args.get("query") or "")
+            iris_vault.sort_inbox(owner, limit=200)
+            rows = iris_vault.search(owner, query, int(args.get("limit") or 20))
+            if not rows:
+                return {"response": "No matching vault files found.", "files": [], "exit_code": 0}
+            lines = [f"Found {len(rows)} vault file(s):"]
+            for row in rows:
+                title = row.get("title") or row.get("path")
+                excerpt = (row.get("excerpt") or "").replace("\n", " ").strip()
+                if len(excerpt) > 140:
+                    excerpt = excerpt[:140].rstrip() + "..."
+                suffix = f" — {excerpt}" if excerpt else ""
+                lines.append(f"- {title} ({row.get('path')}){suffix}")
+            return {"response": "\n".join(lines), "files": rows, "exit_code": 0}
+
+        if action == "read":
+            path = str(args.get("path") or args.get("rel_path") or "").strip()
+            if not path:
+                return {"error": "read requires path", "exit_code": 1}
+            row = iris_vault.read_file(owner, path)
+            return {
+                "response": f"{row['path']}\n\n{row.get('content', '')}",
+                "file": row,
+                "exit_code": 0,
+            }
+
+        if action == "write":
+            path = str(args.get("path") or args.get("rel_path") or "").strip()
+            if not path:
+                return {"error": "write requires path", "exit_code": 1}
+            text = str(args.get("content") or "")
+            row = iris_vault.write_text_file(owner, path, text)
+            return {
+                "response": f"Saved vault file {row.rel_path}",
+                "file": iris_vault.row_to_dict(row),
+                "exit_code": 0,
+            }
+
+        if action == "delete":
+            path = str(args.get("path") or args.get("rel_path") or "").strip()
+            if not path:
+                return {"error": "delete requires path", "exit_code": 1}
+            deleted = iris_vault.delete_file(owner, path)
+            return {
+                "response": f"Deleted {path}" if deleted else f"Removed index entry for {path}",
+                "deleted": deleted,
+                "exit_code": 0,
+            }
+
+        if action == "reindex":
+            iris_vault.sort_inbox(owner, limit=200)
+            count = iris_vault.reindex_owner(owner)
+            return {"response": f"Indexed {count} vault file(s).", "indexed": count, "exit_code": 0}
+
+        if action in {"sort_inbox", "sort"}:
+            moved = iris_vault.sort_inbox(owner, limit=int(args.get("limit") or 200))
+            return {
+                "response": f"Sorted {len(moved)} inbox file(s).",
+                "moved": moved,
+                "exit_code": 0,
+            }
+
+        return {
+            "error": "Unknown action. Use status, search, read, write, delete, sort_inbox, or reindex.",
+            "exit_code": 1,
+        }
+    except Exception as e:
+        return {"error": str(getattr(e, "detail", None) or e), "exit_code": 1}
+
+
+# ---------------------------------------------------------------------------
+# Books tool — vault-backed EPUB/PDF reading state
+# ---------------------------------------------------------------------------
+
+async def do_manage_books(content: str, owner: Optional[str] = None) -> Dict:
+    """Manage Iris's owner-scoped EPUB/PDF books and reading progress."""
+    try:
+        args = _parse_tool_args(content)
+    except ValueError:
+        return {"error": "Invalid JSON arguments", "exit_code": 1}
+
+    action = (args.get("action") or "list").replace("-", "_").strip().lower()
+    if action in {"search", "find"}:
+        action = "list"
+    if action in {"open", "view", "get"}:
+        action = "read"
+
+    from src import book_reader
+
+    try:
+        if action == "list":
+            query = str(args.get("query") or args.get("search") or "")
+            rows = book_reader.list_books(owner, query, int(args.get("limit") or 20))
+            if not rows:
+                return {"response": "No EPUB/PDF books found in the Iris vault.", "books": [], "exit_code": 0}
+            lines = [f"Found {len(rows)} book(s):"]
+            for row in rows:
+                progress = row.get("progress") or {}
+                location = ""
+                if progress.get("updated_at"):
+                    label = "page" if row.get("kind") == "pdf" else "chapter"
+                    location = f" — last read {label} {int(progress.get('chapter_index') or 0) + 1}"
+                lines.append(f"- {row.get('title') or row.get('path')} ({row.get('path')}){location}")
+            return {"response": "\n".join(lines), "books": rows, "exit_code": 0}
+
+        if action == "read":
+            path = str(args.get("path") or "").strip()
+            if not path:
+                return {"error": "read requires path", "exit_code": 1}
+            chapter_index = int(args.get("chapter_index") or args.get("page_index") or 0)
+            result = book_reader.read_book_location(owner, path, chapter_index)
+            book = result.get("book") or {}
+            chapter = result.get("chapter") or {}
+            title = book.get("title") or path
+            response = f"{title}\n{chapter.get('title', '')}\n\n{chapter.get('text_excerpt') or ''}"
+            return {"response": response.strip(), "book": book, "chapter": chapter, "exit_code": 0}
+
+        if action == "progress":
+            path = str(args.get("path") or "").strip()
+            if not path:
+                return {"error": "progress requires path", "exit_code": 1}
+            progress = book_reader.save_progress(
+                owner,
+                path,
+                chapter_index=int(args.get("chapter_index") or args.get("page_index") or 0),
+                scroll_percent=float(args.get("scroll_percent") or 0),
+                chapter_title=str(args.get("chapter_title") or ""),
+                title=str(args.get("title") or ""),
+                author=str(args.get("author") or ""),
+                kind=str(args.get("kind") or ""),
+            )
+            return {
+                "response": f"Saved reading progress for {progress.get('title') or path}.",
+                "progress": progress,
+                "exit_code": 0,
+            }
+
+        return {"error": "Unknown action. Use list, read, or progress.", "exit_code": 1}
+    except Exception as e:
+        return {"error": str(getattr(e, "detail", None) or e), "exit_code": 1}
+
+
 # ── Cookbook tools ──
 
 # Cookbook routes loopback. The agent's tool calls run in-process but
@@ -2514,9 +2759,16 @@ _COOKBOOK_BASE = os.environ.get(
 
 def _internal_headers(owner: Optional[str] = None) -> Dict[str, str]:
     from core.middleware import INTERNAL_TOOL_HEADER, INTERNAL_TOOL_TOKEN
+    from src.user_time import get_user_tz_name, get_user_tz_offset
     headers = {INTERNAL_TOOL_HEADER: INTERNAL_TOOL_TOKEN}
     if owner:
         headers["X-Odysseus-Owner"] = owner
+    offset = get_user_tz_offset()
+    if offset is not None:
+        headers["X-TZ-Offset"] = str(offset)
+    tz_name = get_user_tz_name()
+    if tz_name:
+        headers["X-TZ-Name"] = tz_name
     return headers
 
 

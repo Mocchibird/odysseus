@@ -41,7 +41,7 @@ def _fake_handler():
     h.upload_rate_log = {}
     h.max_concurrent_uploads = 3
 
-    def save_upload(u, client_ip, owner=None):
+    def save_upload(u, client_ip, owner=None, **kwargs):
         # Mimic the real handler: every saved file logs a timestamp.
         h.upload_rate_log.setdefault(client_ip, []).append(_NOW)
         name = getattr(u, "filename", "f")

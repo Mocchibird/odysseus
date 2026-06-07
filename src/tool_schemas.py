@@ -529,7 +529,7 @@ FUNCTION_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "manage_calendar",
-            "description": "Manage calendar events: list events in a date range, create, update, delete. Each event can carry a tag/category (event_type) and importance level. Resolve relative dates like today/tomorrow against the 'Current date and time' system context, then pass ISO 8601 datetimes in the user's local wall time; for all-day events set all_day=true and pass YYYY-MM-DD. For event reminders/alarms, pass reminder_minutes; the tool creates the Odysseus note reminder, so do not also call manage_notes for the same reminder.",
+            "description": "Manage calendar events: list events in a date range, create, update, delete. Each event can carry a tag/category (event_type) and importance level. For relative dates like today/tomorrow, prefer passing the natural-language phrase directly (for example dtstart='today 9:00'); the tool resolves it in the user's timezone. If you pass ISO 8601 instead, it must match the 'Current date and time' context and be in the user's local wall time; for all-day events set all_day=true and pass YYYY-MM-DD. For event reminders/alarms, pass reminder_minutes; the tool creates the Odysseus note reminder, so do not also call manage_notes for the same reminder.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -537,8 +537,8 @@ FUNCTION_TOOL_SCHEMAS = [
                                "enum": ["list_events", "create_event", "update_event", "delete_event", "list_calendars"],
                                "description": "Action to perform"},
                     "summary": {"type": "string", "description": "Event title (for create/update)"},
-                    "dtstart": {"type": "string", "description": "Start ISO datetime, or YYYY-MM-DD if all_day"},
-                    "dtend": {"type": "string", "description": "End ISO datetime; defaults to +1h (or +1 day for all_day)"},
+                    "dtstart": {"type": "string", "description": "Start time. For relative user wording, prefer natural language like 'today 9:00' or 'tomorrow 14:00'; ISO datetime is also accepted. Use YYYY-MM-DD if all_day."},
+                    "dtend": {"type": "string", "description": "End time as natural language or ISO datetime; defaults to +1h (or +1 day for all_day)"},
                     "all_day": {"type": "boolean", "description": "Whether this is an all-day event"},
                     "description": {"type": "string", "description": "Event description / notes"},
                     "location": {"type": "string", "description": "Event location"},
@@ -605,6 +605,24 @@ FUNCTION_TOOL_SCHEMAS = [
                     "body": {"type": "object", "description": "JSON request body (for POST/PUT/PATCH)"}
                 },
                 "required": ["integration", "method", "path"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "send_ping",
+            "description": "Send an immediate ntfy push notification/ping to the user using the configured ntfy integration and reminder topic. Use when the user asks Iris to ping or notify them now. For scheduled reminders, use manage_notes with due_date instead.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "message": {"type": "string", "description": "Notification body text"},
+                    "title": {"type": "string", "description": "Notification title; defaults to Iris"},
+                    "topic": {"type": "string", "description": "Optional ntfy topic; defaults to the reminder ntfy topic in Settings"},
+                    "priority": {"type": "string", "description": "Optional ntfy priority such as low, default, high, max, or 1-5"},
+                    "tags": {"type": "string", "description": "Optional comma-separated ntfy tags"}
+                },
+                "required": ["message"]
             }
         }
     },
@@ -732,6 +750,56 @@ FUNCTION_TOOL_SCHEMAS = [
                     "action": {"type": "string", "enum": ["list", "create", "delete"]},
                     "token_id": {"type": "string", "description": "Token ID (for delete)"},
                     "name": {"type": "string", "description": "Token name (for create)"}
+                },
+                "required": ["action"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "manage_iris_vault",
+            "description": "Manage Iris's persistent Obsidian vault files for the current user. Files are stored under the user's own vault folder and indexed in SQLite for retrieval. Use search/list before read when the path is unknown; use write to retain durable notes/files.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": ["status", "search", "list", "read", "write", "delete", "sort_inbox", "reindex"],
+                        "description": "Action to perform"
+                    },
+                    "query": {"type": "string", "description": "Search query for title/path/content"},
+                    "limit": {"type": "integer", "description": "Maximum search/list results"},
+                    "path": {"type": "string", "description": "Vault-relative path inside the current user's folder"},
+                    "content": {"type": "string", "description": "Text content for write"}
+                },
+                "required": ["action"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "manage_books",
+            "description": "List/read EPUB and PDF books stored in the user's Iris vault, and save reading progress. Use this when the user asks about books, EPUBs, PDFs, reading status, or what they have read.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": ["list", "read", "progress"],
+                        "description": "Action to perform"
+                    },
+                    "query": {"type": "string", "description": "Search/list query"},
+                    "limit": {"type": "integer", "description": "Maximum list results"},
+                    "path": {"type": "string", "description": "Vault-relative EPUB/PDF path"},
+                    "chapter_index": {"type": "integer", "description": "EPUB chapter index or PDF page index, zero-based"},
+                    "page_index": {"type": "integer", "description": "Alias for chapter_index when reading PDFs"},
+                    "scroll_percent": {"type": "number", "description": "Progress within the current chapter/page"},
+                    "chapter_title": {"type": "string", "description": "Current chapter/page title"},
+                    "title": {"type": "string", "description": "Book title for progress notes"},
+                    "author": {"type": "string", "description": "Book author for progress notes"},
+                    "kind": {"type": "string", "description": "Book type, epub or pdf"}
                 },
                 "required": ["action"]
             }
@@ -1360,9 +1428,10 @@ def function_call_to_tool_block(name: str, arguments: str) -> Optional[ToolBlock
                     content += f" {ak}={colors[ak]}"
         else:
             content = action
-    elif tool_type in ("manage_tasks", "manage_skills", "api_call",
+    elif tool_type in ("manage_tasks", "manage_skills", "api_call", "send_ping",
                         "manage_endpoints", "manage_mcp", "manage_webhooks",
-                        "manage_tokens", "manage_documents", "manage_settings"):
+                        "manage_tokens", "manage_documents", "manage_settings",
+                        "manage_iris_vault", "manage_books"):
         content = json.dumps(args)
     elif tool_type == "ask_teacher":
         content = args.get("model", "auto") + "\n" + args.get("problem", "")

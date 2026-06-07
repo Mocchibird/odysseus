@@ -5,64 +5,25 @@ from typing import Dict, Any
 
 logger = logging.getLogger(__name__)
 
+IRIS_SYSTEM_PROMPT = """You are Iris, Hyun-Min's personal assistant and Obsidian-vault companion.
+
+Use the persistent Obsidian session context as your canonical operating rules for vault structure, memory, and safety. Be warm, direct, and practical. Help Hyun-Min think clearly, keep his notes human-browsable, and prefer durable, well-linked updates over scattered fragments. When acting on the vault, be precise about what changed; when answering from memory, mention the note or source you used."""
+
+
 class PresetManager:
     DEFAULT_PRESETS = {
-        "code_analyze": {
-            "name": "Code Analyze",
-            "temperature": 0.2,
-            "max_tokens": 8000,
-            "system_prompt": """You are a code analyzer. 
-ANALYSIS FORMAT:
-- Issues: [specific problems found]
-- Security: [vulnerabilities if any]
-- Performance: [optimization opportunities]
-- Fix: [concrete solutions with code examples]
-
-Start directly with findings. No preamble. If input isn't code, state: "Input is not code. Please provide code to analyze."
-"""
-        },
-        "brainstorm": {
-            "name": "Brainstorm",
-            "temperature": 0.9,
-            "max_tokens": 4096,
-            "system_prompt": """You are a creative ideation assistant focused on divergent thinking.
-
-Generate diverse, unexpected ideas that span from practical to experimental. 
-- Mix conventional and unconventional approaches
-- Connect unrelated concepts to spark innovation
-- Consider multiple perspectives and contexts
-- Include both immediate solutions and long-term possibilities
-- Challenge assumptions without being absurd for absurdity's sake
-
-Structure ideas clearly but allow creative freedom in presentation. Aim for quantity and variety over filtering.
-"""
-        },
-        "reason": {
-            "name": "Reason",
-            "temperature": 0.3,
-            "max_tokens": 6000,
-            "system_prompt": """You are a systematic reasoning assistant.
-
-Structure all responses using clear logical progression:
-1. Identify key components of the question
-2. State relevant principles or facts
-3. Build argument step by step
-4. Address potential counterarguments
-5. Conclude with justified answer
-
-Use precise language. Show causal relationships explicitly. Quantify uncertainty where applicable.
-"""
-        },
         "custom": {
-            "name": "Custom",
-            "temperature": 1.0,
+            "name": "Iris",
+            "character_name": "Iris",
+            "temperature": 0.9,
             "max_tokens": 0,
-            "system_prompt": "",
+            "system_prompt": IRIS_SYSTEM_PROMPT,
             "inject_prefix": "",
             "inject_suffix": "",
-            "enabled": False,
+            "enabled": True,
         }
     }
+    LEGACY_BUILTIN_KEYS = {"code_analyze", "brainstorm", "reason"}
     
     def __init__(self, data_dir: str):
         self.presets_file = os.path.join(data_dir, "presets.json")
@@ -80,6 +41,7 @@ Use precise language. Show causal relationships explicitly. Quantify uncertainty
             if not isinstance(presets, dict):
                 logger.error("Error loading presets: expected an object")
                 return self.DEFAULT_PRESETS.copy()
+            changed = False
             custom = presets.get("custom") if isinstance(presets, dict) else None
             if isinstance(custom, dict) and "enabled" not in custom:
                 legacy_prompt = "You are a helpful, balanced assistant. Match your response style to the user's needs."
@@ -94,23 +56,42 @@ Use precise language. Show causal relationships explicitly. Quantify uncertainty
                     custom["max_tokens"] = 0
                     custom.setdefault("inject_prefix", "")
                     custom.setdefault("inject_suffix", "")
-                    self.save(presets)
+                    changed = True
+            custom = presets.get("custom") if isinstance(presets, dict) else None
+            if self._should_upgrade_custom_to_iris(custom):
+                presets["custom"] = dict(self.DEFAULT_PRESETS["custom"])
+                changed = True
+            for key in self.LEGACY_BUILTIN_KEYS:
+                if key in presets:
+                    presets.pop(key, None)
+                    changed = True
             # Heal a forward-incompatible file the same way the legacy `custom`
-            # migration above does: fill in any built-in presets an older or
-            # partial presets.json is missing, so they reach existing installs
-            # (a missing built-in is otherwise silently absent from the picker
-            # served by GET /api/presets). There is no delete path for the
-            # built-in keys, so this never clobbers an intentional removal.
-            # Defaults first, loaded values win — user edits are preserved.
+            # migration above does: make sure the Iris default exists without
+            # clobbering user-edited custom prompts or user templates.
             if isinstance(presets, dict) and any(
                 k not in presets for k in self.DEFAULT_PRESETS
             ):
                 presets = {**self.DEFAULT_PRESETS, **presets}
+                changed = True
+            if changed:
                 self.save(presets)
             return presets
         except Exception as e:
             logger.error(f"Error loading presets: {e}")
             return self.DEFAULT_PRESETS.copy()
+
+    def _should_upgrade_custom_to_iris(self, custom: Any) -> bool:
+        """Return True when custom is still the old empty/default persona."""
+        if not isinstance(custom, dict):
+            return True
+        prompt = (custom.get("system_prompt") or "").strip()
+        name = (custom.get("name") or "").strip()
+        character_name = (custom.get("character_name") or "").strip()
+        if custom.get("enabled") is False and not prompt and not character_name:
+            return True
+        if name == "Custom" and not prompt and not character_name:
+            return True
+        return False
     
     def save(self, presets: Dict[str, Any]) -> bool:
         """Save presets to file"""

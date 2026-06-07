@@ -417,6 +417,39 @@ class UploadHandler:
         resolved.setdefault("original_name", resolved["name"])
         resolved.setdefault("mime", mimetypes.guess_type(path)[0] or "application/octet-stream")
         return resolved
+
+    def _mirror_upload_to_vault(
+        self,
+        *,
+        owner: Optional[str],
+        original_filename: str,
+        file_path: str,
+        mime: str,
+        context: str = "",
+        source: str = "",
+    ) -> Optional[Dict[str, Any]]:
+        """Persist an uploaded file in the user's Iris vault when configured.
+
+        The upload cache remains available for chat thumbnails and legacy
+        `/api/upload/{id}` URLs, but the long-lived copy is the vault file.
+        """
+        try:
+            from src import iris_vault
+
+            with open(file_path, "rb") as f:
+                content = f.read()
+            row = iris_vault.save_uploaded_file(
+                owner or "local",
+                original_filename,
+                content,
+                mime=mime,
+                context=context,
+                source=source,
+            )
+            return iris_vault.row_to_dict(row)
+        except Exception as exc:
+            logger.warning("Vault mirror skipped for upload %s: %s", original_filename, exc)
+            return None
     
     def cleanup_rate_limits(self):
         """Remove stale entries from upload_rate_log."""
@@ -481,7 +514,15 @@ class UploadHandler:
             logger.error(f"Failed to get upload stats: {e}")
             return {"error": str(e)}
     
-    def save_upload(self, u: UploadFile, client_ip: str, owner: str = None) -> dict:
+    def save_upload(
+        self,
+        u: UploadFile,
+        client_ip: str,
+        owner: str = None,
+        *,
+        context: str = "",
+        source: str = "chat",
+    ) -> dict:
         """Save uploaded file with enhanced security and organization."""
         # Rate limiting
         now = time.time()
@@ -595,9 +636,35 @@ class UploadHandler:
                     logger.warning(f"Failed to update uploads database: {e}")
 
             if existing_file:
+                if not existing_file.get("vault_rel_path") and existing_file.get("path"):
+                    vault_row = self._mirror_upload_to_vault(
+                        owner=owner,
+                        original_filename=existing_file.get("original_name") or original_filename,
+                        file_path=existing_file["path"],
+                        mime=existing_file.get("mime") or content_type,
+                        context=context,
+                        source=source,
+                    )
+                    if vault_row:
+                        existing_file["vault_rel_path"] = vault_row.get("path")
+                        existing_file["vault_title"] = vault_row.get("title")
+                        with self._index_lock:
+                            try:
+                                current = self._load_upload_index()
+                                for k, v in current.items():
+                                    if v.get("id") == existing_file["id"]:
+                                        v["vault_rel_path"] = existing_file["vault_rel_path"]
+                                        v["vault_title"] = existing_file["vault_title"]
+                                        current[k] = v
+                                        self._atomic_write_json(uploads_db_path, current)
+                                        break
+                            except Exception as e:
+                                logger.warning(f"Failed to persist duplicate vault metadata: {e}")
                 return {
                     "id": existing_file["id"],
                     "path": existing_file["path"],
+                    "vault_path": existing_file.get("vault_rel_path"),
+                    "vault_title": existing_file.get("vault_title"),
                     "mime": existing_file["mime"],
                     "size": existing_file["size"],
                     "name": existing_file["original_name"],
@@ -649,6 +716,18 @@ class UploadHandler:
                     file_metadata["height"] = _im.height
             except Exception as e:
                 logger.warning(f"Failed to read image dimensions for {file_id}: {e}")
+
+        vault_row = self._mirror_upload_to_vault(
+            owner=owner,
+            original_filename=original_filename,
+            file_path=file_path,
+            mime=content_type,
+            context=context,
+            source=source,
+        )
+        if vault_row:
+            file_metadata["vault_rel_path"] = vault_row.get("path")
+            file_metadata["vault_title"] = vault_row.get("title")
         
         # Update uploads database
         with self._index_lock:

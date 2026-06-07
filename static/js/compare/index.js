@@ -260,7 +260,7 @@ async function _buildCompareUI() {
 
   // 5. Save current mode and lock to the right one for this compare type
   const _toggleState = Storage.loadToggleState();
-  state._savedMode = _toggleState.mode || 'chat';
+  state._savedMode = _toggleState.mode || 'agent';
   const _targetMode = (state._compareMode === 'agent') ? 'agent' : 'chat';
   _toggleState.mode = _targetMode;
   Storage.saveToggleState(_toggleState);
@@ -892,7 +892,7 @@ async function _executeCompare(message) {
     let sharedSearchSources = null;
     const webChk = document.getElementById('web-toggle');
     const toggleState = Storage.loadToggleState();
-    const isAgentMode = (toggleState.mode || 'chat') === 'agent';
+    const isAgentMode = (toggleState.mode || 'agent') === 'agent';
     const webOn = webChk && webChk.checked;
     // In agent mode, web_search is a tool (handled per-pane); in chat mode, pre-search and share
     if (webOn && !isAgentMode) {

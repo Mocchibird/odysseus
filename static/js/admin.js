@@ -1306,6 +1306,7 @@ const TOOL_META = {
   ui_control:        { name: 'UI Control',       desc: 'Change theme, layout, settings',  cat: 'System',     ctx: '~150' },
   manage_tasks:      { name: 'Tasks',            desc: 'Schedule automated tasks',        cat: 'System',     ctx: '~150' },
   api_call:          { name: 'API Call',         desc: 'Make HTTP requests',              cat: 'System',     ctx: '~200' },
+  send_ping:         { name: 'Send Ping',        desc: 'Send ntfy notifications',         cat: 'System',     ctx: '~80' },
   manage_endpoints:  { name: 'Endpoints',        desc: 'Add/remove model endpoints',      cat: 'System',     ctx: '~100' },
   manage_mcp:        { name: 'MCP Servers',      desc: 'Manage MCP connections',          cat: 'System',     ctx: '~100' },
   manage_webhooks:   { name: 'Webhooks',         desc: 'Configure webhook events',        cat: 'System',     ctx: '~100' },
@@ -2015,7 +2016,7 @@ function initWebhookForm() {
 const featureLabels = {
   web_search: 'Web Search', deep_research: 'Deep Research',
   memory: 'Memory', document_editor: 'Document Editor', rag: 'RAG Knowledge Base', sensitive_filter: 'Sensitive Info Filter',
-  gallery: 'Gallery'
+  gallery: 'Gallery', books: 'Books'
 };
 
 async function loadFeatures() {

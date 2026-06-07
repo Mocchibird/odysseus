@@ -15,6 +15,7 @@ and `email_pollers.py` (the background loops):
 import os
 import imaplib
 import smtplib
+import ssl
 import email as email_mod
 import email.header
 import email.utils
@@ -38,6 +39,27 @@ from src.secret_storage import decrypt as _decrypt
 logger = logging.getLogger(__name__)
 
 
+_LOCAL_MAIL_BRIDGE_HOSTS = {
+    "localhost",
+    "127.0.0.1",
+    "::1",
+    "host.docker.internal",
+    "proton-bridge",
+    "protonmail-bridge",
+}
+
+
+def _is_local_mail_bridge_host(host: str) -> bool:
+    return str(host or "").strip().lower().strip("[]") in _LOCAL_MAIL_BRIDGE_HOSTS
+
+
+def _unverified_local_tls_context() -> ssl.SSLContext:
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    return ctx
+
+
 def _smtp_security_mode(cfg: dict) -> str:
     raw = str(cfg.get("smtp_security") or "").strip().lower()
     if raw in {"ssl", "starttls", "none"}:
@@ -48,6 +70,32 @@ def _smtp_security_mode(cfg: dict) -> str:
     return "ssl"
 
 
+def _open_smtp_connection(host: str, port: int, *, security: str, timeout: int = 30):
+    """Open SMTP, tolerating Proton Bridge's local self-signed TLS certificate."""
+    port = int(port or 465)
+    security = _smtp_security_mode({"smtp_security": security, "smtp_port": port})
+    if security == "ssl":
+        return smtplib.SMTP_SSL(host, port, timeout=timeout)
+
+    smtp = smtplib.SMTP(host, port, timeout=timeout)
+    if security != "starttls":
+        return smtp
+
+    try:
+        smtp.starttls()
+        return smtp
+    except ssl.SSLCertVerificationError:
+        if not _is_local_mail_bridge_host(host):
+            raise
+        try:
+            smtp.close()
+        except Exception:
+            pass
+        smtp = smtplib.SMTP(host, port, timeout=timeout)
+        smtp.starttls(context=_unverified_local_tls_context())
+        return smtp
+
+
 def _send_smtp_message(cfg: dict, from_addr: str, recipients: list[str], message: str | bytes, timeout: int = 30) -> None:
     """Send through SMTP using the configured transport security mode."""
     host = cfg["smtp_host"]
@@ -56,16 +104,7 @@ def _send_smtp_message(cfg: dict, from_addr: str, recipients: list[str], message
     password = cfg.get("smtp_password") or ""
     security = _smtp_security_mode(cfg)
 
-    if security == "ssl":
-        with smtplib.SMTP_SSL(host, port, timeout=timeout) as smtp:
-            if user and password:
-                smtp.login(user, password)
-            smtp.sendmail(from_addr, recipients, message)
-        return
-
-    with smtplib.SMTP(host, port, timeout=timeout) as smtp:
-        if security == "starttls":
-            smtp.starttls()
+    with _open_smtp_connection(host, port, security=security, timeout=timeout) as smtp:
         if user and password:
             smtp.login(user, password)
         smtp.sendmail(from_addr, recipients, message)
@@ -705,7 +744,17 @@ def _open_imap_connection(host: str, port: int, *, starttls: bool, timeout: int 
     port = int(port or 993)
     if starttls:
         conn = imaplib.IMAP4(host, port, timeout=timeout)
-        conn.starttls()
+        try:
+            conn.starttls()
+        except ssl.SSLCertVerificationError:
+            if not _is_local_mail_bridge_host(host):
+                raise
+            try:
+                conn.shutdown()
+            except Exception:
+                pass
+            conn = imaplib.IMAP4(host, port, timeout=timeout)
+            conn.starttls(ssl_context=_unverified_local_tls_context())
     elif port == 993:
         conn = imaplib.IMAP4_SSL(host, port, timeout=timeout)
     else:
@@ -1016,6 +1065,8 @@ def _list_attachments_from_msg(msg):
             continue
         cd = str(part.get("Content-Disposition", ""))
         ct = part.get_content_type()
+        content_id = str(part.get("Content-ID", "") or "").strip().strip("<>").strip()
+        content_location = str(part.get("Content-Location", "") or "").strip()
         # Skip text/html body parts (only consider real attachments)
         if ct in ("text/plain", "text/html") and "attachment" not in cd:
             continue
@@ -1033,7 +1084,10 @@ def _list_attachments_from_msg(msg):
             "filename": filename,
             "content_type": ct,
             "size": size,
-            "is_inline": "inline" in cd.lower(),
+            "is_inline": "inline" in cd.lower() or bool(content_id),
+            "is_image": ct.lower().startswith("image/"),
+            "content_id": content_id,
+            "content_location": content_location,
         })
         idx += 1
     return attachments

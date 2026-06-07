@@ -16,6 +16,7 @@ from src.settings import (
     load_features as _load_features,
     save_features as _save_features,
     DEFAULT_SETTINGS,
+    get_user_setting,
 )
 from src.integrations import (
     load_integrations,
@@ -478,6 +479,26 @@ def setup_auth_routes(auth_manager: AuthManager) -> APIRouter:
         """List available integration presets."""
         return {"presets": {k: {kk: vv for kk, vv in v.items() if kk != "api_key"} for k, v in INTEGRATION_PRESETS.items()}}
 
+    @router.get("/integrations/status")
+    async def integration_status_route(request: Request):
+        """Return non-secret integration availability for logged-in users."""
+        user = _get_current_user(request)
+        if auth_manager.is_configured and not user:
+            raise HTTPException(401, "Authentication required")
+        items = load_integrations()
+        available = {
+            "ntfy": any(
+                item.get("enabled", True)
+                and item.get("base_url")
+                and (
+                    (item.get("preset") or "").lower() == "ntfy"
+                    or (item.get("name") or "").lower() == "ntfy"
+                )
+                for item in items
+            )
+        }
+        return {"integrations": available, **available}
+
     @router.post("/integrations")
     async def create_integration(request: Request):
         """Create a new integration (admin only)."""
@@ -531,7 +552,7 @@ def setup_auth_routes(auth_manager: AuthManager) -> APIRouter:
         # checkmark + a phone ping confirms together.
         if preset == "ntfy":
             import httpx
-            from urllib.parse import urlparse
+            from urllib.parse import quote, urlparse
             # Strip any path/query the user accidentally pasted in the
             # base URL (e.g. `http://host:8091/odysseus`) — otherwise
             # the topic gets appended after the path and we publish to
@@ -541,8 +562,15 @@ def setup_auth_routes(auth_manager: AuthManager) -> APIRouter:
             parsed = urlparse(raw_base)
             base = f"{parsed.scheme}://{parsed.netloc}" if parsed.scheme and parsed.netloc else raw_base.rstrip("/")
             settings = _load_settings()
-            topic = (settings.get("reminder_ntfy_topic") or "reminders").strip() or "reminders"
-            full_url = f"{base}/{topic}"
+            topic = str(
+                get_user_setting(
+                    "reminder_ntfy_topic",
+                    user or "",
+                    settings.get("reminder_ntfy_topic") or "reminders",
+                )
+                or "reminders"
+            ).strip() or "reminders"
+            full_url = f"{base}/{quote(topic, safe='')}"
             api_key = integ.get("api_key", "")
             auth_type = (integ.get("auth_type") or "none").lower()
             headers = {

@@ -29,6 +29,44 @@ from .skill_format import Skill, slugify
 
 logger = logging.getLogger(__name__)
 
+QUIZ_SPOILER_MARKDOWN_SKILL_NAME = "quiz-spoiler-markdown"
+
+_QUIZ_SPOILER_MARKDOWN_SKILL_MD = """---
+name: quiz-spoiler-markdown
+description: Use Iris markdown reveal syntax for quizzes, flashcards, cloze deletions, hidden answers, and spoilered text.
+version: 1.0.0
+category: iris
+tags: [quiz, quizzes, study, flashcard, flashcards, cloze, answer, answers, hidden, hide, reveal, spoiler, spoilers, markdown, notes]
+status: published
+confidence: 1.0
+source: builtin
+created: 2026-06-06T00:00:00Z
+---
+
+## When to Use
+Use this whenever the user asks for quizzes, review questions, flashcards, hidden answers, reveal-on-click text, spoilers, spoiler-marked text, cloze deletion, study notes, or answer keys that should not be visible until clicked.
+
+## Procedure
+1. Never write `quiz-spoiler-markdown:` in the visible answer. It is the skill name, not a renderer command.
+2. For a simple quiz answer, write only `{{hidden answer}}` on its own line. Example: `{{C) Saul}}`, not `quiz-spoiler-markdown: **C) Saul**`.
+3. For an inline spoiler or hidden phrase in normal prose, write `||spoiler text||`.
+4. For Reddit/Discord-style spoilers, `>!spoiler text!<` also works.
+5. For Anki-style cloze deletion, write `{{c1::hidden answer}}`; add a hint with `{{c1::hidden answer::hint text}}`.
+6. For a flashcard, write `[[front question::back answer]]`.
+7. Keep hidden/reveal syntax out of code spans unless demonstrating the syntax literally; examples should be wrapped in backticks.
+
+## Pitfalls
+- Do not reveal answers immediately after a question if the user asked for quiz mode or self-testing.
+- Do not wrap the final hidden answer in backticks or put it in a code block.
+- Keep each hidden answer short enough to click comfortably; use flashcards for longer question/answer pairs.
+- Do not use unsupported custom HTML for spoilers when Iris markdown syntax is enough.
+
+## Verification
+- A rendered answer should appear as a small click-to-reveal pill or flashcard.
+- Literal syntax examples inside backticks should remain visible as plain code.
+- The user should be able to study without seeing the answer until they click it.
+"""
+
 
 # ---------------------------------------------------------------------------
 # Token / similarity helpers (kept for the relevance fallback)
@@ -285,6 +323,45 @@ class SkillsManager:
         # Hide them now; the owner needs to be backfilled on disk if those
         # skills should be visible to a specific user.
         return [s for s in entries if s.get("owner") == owner]
+
+    # ----------------------------------------------------------------------
+    # Application built-in skills — virtual entries available to every user
+    # ----------------------------------------------------------------------
+
+    @staticmethod
+    def _builtin_skill_dict(owner: Optional[str] = None) -> Dict:
+        sk = Skill.from_markdown(_QUIZ_SPOILER_MARKDOWN_SKILL_MD)
+        d = sk.to_dict()
+        d["owner"] = owner
+        d["source"] = "builtin"
+        d["_builtin"] = True
+        d["_virtual"] = True
+        d["uses"] = 0
+        d["last_used"] = None
+        return d
+
+    @staticmethod
+    def _builtin_skill_md(name: str) -> Optional[str]:
+        if slugify(name) == QUIZ_SPOILER_MARKDOWN_SKILL_NAME:
+            return _QUIZ_SPOILER_MARKDOWN_SKILL_MD
+        return None
+
+    def builtin_skills(self, owner: Optional[str] = None) -> List[Dict]:
+        return [self._builtin_skill_dict(owner=owner)]
+
+    def available_skills(self, owner: Optional[str] = None) -> List[Dict]:
+        """Return user file-backed skills plus application built-ins.
+
+        Built-ins are virtual and read-only. They intentionally do not live on
+        disk so one canonical skill can be available to every owner without
+        colliding with the global `<category>/<name>/SKILL.md` path layout.
+        """
+        out = list(self.load(owner=owner))
+        existing_names = {str(s.get("name") or "") for s in out}
+        for sk in self.builtin_skills(owner=owner):
+            if sk.get("name") not in existing_names:
+                out.append(sk)
+        return out
 
     # ----------------------------------------------------------------------
     # CRUD — disk-backed
@@ -553,7 +630,7 @@ class SkillsManager:
                     return f.read()
             except Exception:
                 return None
-        return None
+        return self._builtin_skill_md(name)
 
     def read_skill_reference(self, name: str, ref_path: str, owner: Optional[str] = None) -> Optional[str]:
         """Read a sub-file under the skill's directory (references/, etc).
@@ -605,7 +682,7 @@ class SkillsManager:
         """
         active_toolsets = active_toolsets or []
         out = []
-        for s in self.load(owner=owner):
+        for s in self.available_skills(owner=owner):
             status = s.get("status")
             # Published + None (pre-status legacy) always included.
             # Drafts only if the teacher wrote them.
@@ -647,9 +724,15 @@ class SkillsManager:
         threshold: float = 0.3,
         max_items: int = 5,
         min_confidence: float = 0.0,
+        owner: Optional[str] = None,
     ) -> List[Dict]:
         if skills is None:
             skills = self.load_all()
+        skills = list(skills)
+        existing_names = {str(s.get("name") or "") for s in skills if isinstance(s, dict)}
+        for sk in self.builtin_skills(owner=owner):
+            if sk.get("name") not in existing_names:
+                skills.append(sk)
         if not skills or not query.strip():
             return []
         # Consider published AND draft skills for relevance retrieval.

@@ -155,10 +155,16 @@ async def dispatch_reminder(
     the in-memory notification queue picked up by the frontend poller, so
     nothing is "sent" synchronously for it — the channel just routes there.
     """
-    from src.settings import load_settings
+    from src.settings import get_user_setting, load_settings
     settings = {**load_settings(), **(settings_override or {})}
-    channel = settings.get("reminder_channel", "browser")
-    llm_on = bool(settings.get("reminder_llm_synthesis", False))
+
+    def _setting(key: str, default=None):
+        if settings_override and key in settings_override:
+            return settings_override[key]
+        return get_user_setting(key, owner or "", settings.get(key, default))
+
+    channel = _setting("reminder_channel", "browser")
+    llm_on = bool(_setting("reminder_llm_synthesis", False))
     title = (title or "").strip()
     note_body = (note_body or "").strip()
     cache_key = str(note_id) if note_id else ""
@@ -303,7 +309,7 @@ async def dispatch_reminder(
             # account to send reminders from (when they have several
             # configured in Integrations). Falls back to the default
             # account when no explicit choice is saved.
-            _acc_id = (settings.get("reminder_email_account_id") or "").strip() or None
+            _acc_id = (_setting("reminder_email_account_id", "") or "").strip() or None
             cfg = _get_email_config(account_id=_acc_id, owner=owner or "")
             if not (cfg.get("smtp_host") and cfg.get("smtp_user") and cfg.get("smtp_password")):
                 try:
@@ -326,7 +332,7 @@ async def dispatch_reminder(
                 except Exception as _fallback_error:
                     logger.debug(f"Reminder SMTP fallback lookup failed: {_fallback_error}")
             from_addr = (cfg.get("from_address") or cfg.get("smtp_user") or "").strip()
-            recipient = (settings.get("reminder_email_to") or "").strip() or from_addr
+            recipient = (_setting("reminder_email_to", "") or "").strip() or from_addr
             # Loud diagnostic so we can see WHY a reminder didn't send (the
             # previous "silently no-op when cfg has no smtp_host" was invisible).
             logger.info(
@@ -463,25 +469,22 @@ async def dispatch_reminder(
     if channel == "ntfy":
         try:
             from src.integrations import load_integrations
-            import httpx
-            intg = next(
-                (i for i in load_integrations()
-                 if i.get("preset") == "ntfy" and i.get("enabled", True) and i.get("base_url")),
-                None,
-            )
+            from src.ntfy_client import find_ntfy_integration, send_ntfy_notification
+            intg = find_ntfy_integration(load_integrations())
             if intg:
-                base = intg["base_url"].rstrip("/")
-                topic = settings.get("reminder_ntfy_topic") or "reminders"
+                topic = _setting("reminder_ntfy_topic", "reminders") or "reminders"
                 ntfy_body = synthesis or note_body or title
-                hdrs = {"Title": title or "Reminder", "Priority": "high", "Tags": "bell"}
-                api_key = intg.get("api_key", "")
-                if api_key:
-                    hdrs["Authorization"] = f"Bearer {api_key}"
-                async with httpx.AsyncClient(timeout=10.0) as client:
-                    resp = await client.post(f"{base}/{topic}", content=ntfy_body, headers=hdrs)
-                    ntfy_sent = resp.is_success
-                    if not ntfy_sent:
-                        ntfy_error = f"ntfy returned HTTP {resp.status_code}"
+                result = await send_ntfy_notification(
+                    intg,
+                    topic,
+                    ntfy_body,
+                    title=title or "Reminder",
+                    priority="high",
+                    tags="bell",
+                )
+                ntfy_sent = result.get("exit_code") == 0
+                if not ntfy_sent:
+                    ntfy_error = result.get("error") or "ntfy send failed"
             else:
                 ntfy_error = "No enabled ntfy integration"
         except Exception as e:

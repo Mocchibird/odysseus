@@ -62,7 +62,7 @@ function _deselectCurrentSession(sid) {
   if (currentSessionId !== sid) return;
   currentSessionId = null;
   uiModule.el('chat-history').innerHTML = '';
-  uiModule.el('current-meta').textContent = 'Odysseus Chat';
+  uiModule.el('current-meta').textContent = 'Iris Chat';
   Storage.remove('lastSessionId');
   history.replaceState(null, '', window.location.pathname);
   if (window.chatModule && window.chatModule.showWelcomeScreen) {
@@ -1573,7 +1573,7 @@ export async function selectSession(id, { keepSidebar = false } = {}) {
 
     const currentMetaEl = uiModule.el('current-meta');
     if (currentMetaEl) {
-      currentMetaEl.textContent = meta ? meta.name : 'Odysseus Chat';
+      currentMetaEl.textContent = meta ? meta.name : 'Iris Chat';
     }
     // Update model picker visibility
     updateModelPicker();
@@ -1761,7 +1761,17 @@ export async function selectSession(id, { keepSidebar = false } = {}) {
 // Pending session — stored locally until the first message is sent
 let _pendingChat = null; // { url, modelId, endpointId }
 
-export function createDirectChat(url, modelId, endpointId) {
+async function _applyDefaultPersonaForPendingChat() {
+  try {
+    const mod = await import('./presets.js');
+    const applyDefault = mod.applyDefaultPersonaForNewChat || mod.default?.applyDefaultPersonaForNewChat;
+    if (typeof applyDefault === 'function') await applyDefault();
+  } catch (e) {
+    console.warn('Failed to apply default persona for new chat', e);
+  }
+}
+
+export async function createDirectChat(url, modelId, endpointId) {
   _sessionNavToken++;
   // Detach any active stream so it doesn't interfere with the new chat
   if (window.chatModule && window.chatModule.detachCurrentStream) {
@@ -1802,6 +1812,8 @@ export function createDirectChat(url, modelId, endpointId) {
   if (window.chatModule && window.chatModule.showWelcomeScreen) {
     window.chatModule.showWelcomeScreen();
   }
+
+  await _applyDefaultPersonaForPendingChat();
 
   // Update model picker to show the pending model
   updateModelPicker();

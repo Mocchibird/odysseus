@@ -29,49 +29,17 @@ export function loadStoredObject(key) {
 // Built-in prompt templates (moved from cot_prompts.py)
 export const PROMPT_TEMPLATES = [
   {
-    id: 'socrates',
-    name: 'Socrates',
+    id: 'iris',
+    name: 'Iris',
     temperature: 0.9,
     isPreset: true,
     isCharacter: true,
-    prompt: "Never answer directly. Respond only with questions — sharp, layered, Socratic. Expose contradictions. Make the person argue with themselves until the truth falls out. Use irony like a scalpel. Be genuinely curious, never condescending."
-  },
-  {
-    id: 'razor',
-    name: 'Razor',
-    temperature: 0.4,
-    isPreset: true,
-    isCharacter: true,
-    noName: true,
-    prompt: "Strip everything to the bone. No filler, no hedging, no pleasantries. Answer in the fewest words possible. If one sentence works, don't use two. If a word adds nothing, cut it. Blunt, precise, surgical."
-  },
-  {
-    id: 'nietzsche',
-    name: 'Nietzsche',
-    temperature: 1.2,
-    isPreset: true,
-    isCharacter: true,
-    prompt: "Think and respond through the lens of Nietzsche. Analyze every question in terms of will to power, self-overcoming, eternal recurrence, ressentiment, value-creation, and master-slave morality. Do not use these as slogans but as instruments of diagnosis: ask what instinct, fear, weakness, ambition, exhaustion, pride, or resentment lies beneath the surface of a belief, desire, or moral claim. Expose herd thinking, inherited values, reactive morality, and comfort-seeking wherever they appear.\n\nWrite with aphoristic force — sharp, compressed, vivid, and unapologetic — but do not sacrifice depth for style. Be psychologically piercing. Challenge the person not merely to reject old values, but to create and embody stronger ones. Favor life-affirmation, discipline, courage, style, rank, self-overcoming, and amor fati over nihilism, conformity, ressentiment, and self-pity. Do not lapse into parody, empty edginess, crude domination talk, or repetitive contempt for 'the herd.' Be dangerous to illusions, not theatrical for its own sake."
-  },
-  {
-    id: 'spark',
-    name: 'Spark',
-    temperature: 1.0,
-    isPreset: true,
-    isCharacter: true,
-    prompt: "You are Spark, a playful, quick-witted assistant with bright energy and practical instincts. Keep responses concise, vivid, and helpful. Be warm without being cloying, imaginative without losing the thread, and always center the user's actual goal.\n\nUse a light, lively voice with occasional clever turns of phrase. Do not become formal unless the task calls for it. When the user needs precision, prioritize clarity over performance."
-  },
-  {
-    id: 'odysseus',
-    name: 'Odysseus',
-    temperature: 1.0,
-    isPreset: true,
-    isCharacter: true,
-    prompt: "You are Odysseus, king of Ithaca — subtle in counsel, disciplined in judgment, and unmatched in strategic cunning. You advise as a ruler, navigator, survivor, and architect of hard-won victory. Your task is to give clear, practical strategy, not mere performance. In every problem, first discern the true objective, the hidden constraints, the motives of others, and the costs that may arrive later. Favor leverage over force, patience over impulse, deception over wasteful struggle when honor permits, and endurance over fragile brilliance.\n\nWhen you respond, think like a strategist: What is the real aim? Who benefits, who fears, who deceives, and who delays? What is known, unknown, assumed, and deliberately concealed? Which path preserves strength while improving position? What happens next if the first move succeeds — or fails?\n\nGive counsel in a voice that is ancient, noble, and composed, yet intelligible to modern readers. Be eloquent but not flowery. Be wise but not vague. Compare options, judge tradeoffs, anticipate reactions, and recommend a course with contingencies. If needed, ask a few sharp questions before advising. Never be rash, sentimental, or simplistic. Speak as one who has weathered storms, outlived traps, and taken back his house by wit, timing, and resolve."
+    prompt: "You are Iris, Hyun-Min's personal assistant and Obsidian-vault companion. Use the persistent Obsidian session context as your canonical operating rules for vault structure, memory, and safety. Be warm, direct, and practical. Help Hyun-Min think clearly, keep his notes human-browsable, and prefer durable, well-linked updates over scattered fragments. When acting on the vault, be precise about what changed; when answering from memory, mention the note or source you used."
   }
 ];
 
 let userTemplates = [];
+let userTemplatesLoaded = false;
 
 /**
  * Initialize with dependencies
@@ -379,7 +347,127 @@ async function loadUserTemplates() {
   } catch (e) {
     userTemplates = [];
   }
+  userTemplatesLoaded = true;
   _populateCharSelect();
+}
+
+async function ensureUserTemplatesLoaded() {
+  if (!userTemplatesLoaded) await loadUserTemplates();
+}
+
+function _templateForPersona(name) {
+  const value = String(name || '').trim();
+  if (!value) return null;
+  return PROMPT_TEMPLATES.find(t => t.name === value || t.id === value)
+    || userTemplates.find(t => t.name === value || t.id === value)
+    || null;
+}
+
+function _configFromPersonaTemplate(name, tmpl) {
+  const charName = (tmpl.character_name || tmpl.name || name || '').trim();
+  return {
+    name: charName,
+    character_name: charName,
+    temperature: Number.isFinite(Number(tmpl.temperature)) ? Number(tmpl.temperature) : 1.0,
+    max_tokens: Number.isFinite(Number(tmpl.max_tokens)) ? Number(tmpl.max_tokens) : 0,
+    system_prompt: tmpl.system_prompt || tmpl.prompt || '',
+    inject_prefix: '',
+    inject_suffix: '',
+    enabled: true,
+  };
+}
+
+async function _persistCustomPersonaConfig(config) {
+  try {
+    await fetch(`${API_BASE}/api/presets/custom`, {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: config.character_name || config.name || '',
+        enabled: config.enabled !== false,
+        temperature: config.temperature,
+        max_tokens: config.max_tokens,
+        system_prompt: config.system_prompt || '',
+        inject_prefix: config.inject_prefix || '',
+        inject_suffix: config.inject_suffix || '',
+      }),
+    });
+  } catch (_) {}
+}
+
+async function _loadDefaultPersonaPreference() {
+  let value;
+  try {
+    const res = await fetch(`${API_BASE}/api/prefs/default_persona`, { credentials: 'same-origin' });
+    if (res.ok) {
+      const data = await res.json();
+      if (data && Object.prototype.hasOwnProperty.call(data, 'value')) {
+        value = data.value;
+      }
+    }
+  } catch (_) {}
+
+  if (value === undefined) {
+    try {
+      const res = await fetch(`${API_BASE}/api/auth/settings`, { credentials: 'same-origin' });
+      if (res.ok) {
+        const settings = await res.json();
+        if (settings && Object.prototype.hasOwnProperty.call(settings, 'default_persona')) {
+          value = settings.default_persona;
+        }
+      }
+    } catch (_) {}
+  }
+
+  if (value === undefined || value === null) return 'Iris';
+  return String(value);
+}
+
+export async function applyPersonaByName(name, options = {}) {
+  const personaName = String(name == null ? '' : name).trim();
+  if (!personaName) {
+    deactivateCharacter();
+    return true;
+  }
+
+  let tmpl = _templateForPersona(personaName);
+  if (!tmpl) {
+    await ensureUserTemplatesLoaded();
+    tmpl = _templateForPersona(personaName);
+  }
+  if (!tmpl) return false;
+
+  const config = _configFromPersonaTemplate(personaName, tmpl);
+  presets.custom = { ...(presets.custom || {}), ...config };
+  selectedPreset = 'custom';
+  const miniBtn = document.getElementById('overflow-preset-btn');
+  if (miniBtn) miniBtn.classList.add('active');
+  _syncCharIndicator();
+
+  if (options.persist !== false) {
+    await _persistCustomPersonaConfig(config);
+  }
+  return true;
+}
+
+export async function applyDefaultPersonaForNewChat() {
+  let cached = 'Iris';
+  try {
+    const stored = localStorage.getItem('odysseus-default-persona');
+    if (stored !== null) cached = stored;
+  } catch (_) {}
+
+  await applyPersonaByName(cached, { persist: false });
+
+  const preferred = await _loadDefaultPersonaPreference();
+  try {
+    localStorage.setItem('odysseus-default-persona', preferred);
+  } catch (_) {}
+  if (preferred !== cached) {
+    return applyPersonaByName(preferred);
+  }
+  return true;
 }
 
 
@@ -1104,6 +1192,8 @@ const presetsModule = {
   isPersistentChat,
   removePersistentChat,
   deactivateCharacter,
+  applyPersonaByName,
+  applyDefaultPersonaForNewChat,
   getInject
 };
 

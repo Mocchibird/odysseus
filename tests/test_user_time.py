@@ -26,6 +26,8 @@ def test_current_datetime_prompt_uses_browser_timezone():
     assert "Australia/Brisbane, UTC+10:00" in prompt
     assert "Tomorrow is Tuesday, June 2, 2026 (2026-06-02)" in prompt
     assert "Do not ask for an exact date" in prompt
+    assert "`today 9:00`" in prompt
+    assert "the tool resolves it against this user-local date/time" in prompt
 
 
 def test_timezone_name_is_sanitized_and_ephemeral():
@@ -100,6 +102,27 @@ def test_calendar_relative_time_parser_handles_dotted_pm(monkeypatch):
     parsed = calendar_routes.parse_due_for_user("tomorrow at 1:30 p.m")
 
     assert parsed == "2026-06-02T13:30:00+10:00"
+
+
+def test_calendar_relative_today_parser_uses_user_timezone(monkeypatch):
+    import routes.calendar_routes as calendar_routes
+
+    class FixedDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            value = datetime(2026, 6, 7, 6, 57, tzinfo=timezone.utc)
+            if tz is not None:
+                return value.astimezone(tz)
+            return value.replace(tzinfo=None)
+
+    clear_user_time_context()
+    set_user_tz_offset(120)
+    set_user_tz_name("Europe/Zurich")
+    monkeypatch.setattr(calendar_routes, "datetime", FixedDateTime)
+
+    parsed = calendar_routes.parse_due_for_user("today 9:00")
+
+    assert parsed == "2026-06-07T09:00:00+02:00"
 
 
 class _Memory:

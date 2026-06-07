@@ -1,15 +1,14 @@
 {
-  "name": "Odysseus",
-  "short_name": "Odysseus",
+  "name": "Iris",
+  "short_name": "Iris",
   "description": "Self-hosted AI chat with memory, documents, and tools",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
   "orientation": "any",
-  "background_color": "#282c34",
-  "theme_color": "#282c34",
+  "background_color": "#151914",
+  "theme_color": "#151914",
   "icons": [
-    { "src": "/static/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
-    { "src": "/static/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+    { "src": "/static/IRIS.png", "sizes": "1254x1254", "type": "image/png", "purpose": "any maskable" }
   ]
 }

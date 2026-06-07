@@ -17,7 +17,7 @@ def _load_values():
         return {{
           broken: '{{',
           list: '[]',
-          object: '{{"session":"Socrates"}}',
+          object: '{{"session":"Iris"}}',
         }}[key] ?? null;
       }},
     }};
@@ -49,5 +49,5 @@ def test_preset_storage_helpers_fall_back_for_bad_values():
         "wrongArray": [],
         "brokenObject": {},
         "wrongObject": {},
-        "object": {"session": "Socrates"},
+        "object": {"session": "Iris"},
     }

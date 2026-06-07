@@ -24,6 +24,29 @@ let _activeFilter = null; // null | 'default' | 'reminders' | 'no-reminders'
 let _reminderChipNext = 'reminders';
 let _searchQuery = '';
 let _viewMode = (typeof localStorage !== 'undefined' && localStorage.getItem('odysseus-notes-view')) || 'list'; // 'list' or 'grid'
+let _notesMode = 'notes'; // 'notes' | 'vault' | 'books'
+let _vaultFiles = [];
+let _vaultLoading = false;
+let _vaultError = '';
+let _vaultOpenFile = null;
+let _books = [];
+let _booksLoading = false;
+let _booksError = '';
+let _bookOpenBook = null;
+let _bookChapterIndex = 0;
+let _bookUploadState = null;
+let _bookSaveTimer = null;
+let _bookChapterLoading = false;
+let _bookAutoAdvancing = false;
+let _bookKeyHandler = null;
+let _bookReadMode = (typeof localStorage !== 'undefined' && localStorage.getItem('odysseus-books-read-mode')) || 'scroll'; // 'scroll' | 'page'
+let _bookPdfViewMode = (typeof localStorage !== 'undefined' && localStorage.getItem('odysseus-books-pdf-view-mode')) || 'pdf'; // 'pdf' | 'text'
+const BOOK_CONTINUOUS_MAX_RENDERED_CHAPTERS = 4;
+let _epubOpenBook = null;
+let _epubSaveTimer = null;
+let _vaultSearchTimer = null;
+let _booksSearchTimer = null;
+let _vaultExpandedFolders = new Set(['']);
 let _showingArchived = false;
 let _selectMode = false;
 let _reminderTimer = null;
@@ -47,6 +70,12 @@ const REMINDER_ACTIVE_HIGHLIGHT_KEY = 'odysseus-notes-reminder-active-highlight'
 const REMINDER_DISMISSED_AT_KEY = 'odysseus-notes-reminder-dismissed-at';
 const NOTES_FIRST_OPEN_HINT_KEY = 'odysseus-notes-first-open-hint-v1';
 
+function _removeLegacyBooksModal() {
+  try {
+    document.querySelectorAll('#books-modal, .books-modal').forEach(node => node.remove());
+  } catch (_) {}
+}
+
 function _forceCloseNotesPanel() {
   _open = false;
   _editingId = null;
@@ -60,6 +89,10 @@ function _forceCloseNotesPanel() {
   if (_notesSelectEscHandler) {
     document.removeEventListener('keydown', _notesSelectEscHandler, true);
     _notesSelectEscHandler = null;
+  }
+  if (_bookKeyHandler) {
+    document.removeEventListener('keydown', _bookKeyHandler);
+    _bookKeyHandler = null;
   }
   if (_reminderTimer) {
     clearInterval(_reminderTimer);
@@ -440,6 +473,580 @@ async function _patchNote(id, patch) {
   });
   if (!res.ok) throw new Error('Failed to update note');
   return await res.json();
+}
+
+async function _fetchVaultFiles(opts = {}) {
+  _vaultLoading = true;
+  _vaultError = '';
+  if (opts.clearOpen !== false) {
+    _vaultOpenFile = null;
+    _epubOpenBook = null;
+  }
+  try {
+    const q = encodeURIComponent(_searchQuery || '');
+    const res = await fetch(`${API_BASE}/api/iris-vault/files?q=${q}&limit=100`, { credentials: 'same-origin' });
+    if (!res.ok) throw new Error(res.status === 503 ? 'Obsidian vault is not configured' : `HTTP ${res.status}`);
+    const data = await res.json();
+    _vaultFiles = data.files || [];
+  } catch (e) {
+    _vaultFiles = [];
+    _vaultError = e?.message || 'Failed to load vault files';
+  } finally {
+    _vaultLoading = false;
+  }
+}
+
+async function _readVaultFile(path) {
+  const res = await fetch(`${API_BASE}/api/iris-vault/file?path=${encodeURIComponent(path || '')}`, { credentials: 'same-origin' });
+  if (!res.ok) throw new Error(res.status === 404 ? 'Vault file not found' : `HTTP ${res.status}`);
+  const data = await res.json();
+  _vaultOpenFile = data.file || null;
+  _epubOpenBook = null;
+  return _vaultOpenFile;
+}
+
+async function _openEpubBook(path) {
+  const res = await fetch(`${API_BASE}/api/iris-vault/epub?path=${encodeURIComponent(path || '')}`, { credentials: 'same-origin' });
+  if (!res.ok) throw new Error(res.status === 404 ? 'EPUB not found' : `HTTP ${res.status}`);
+  const data = await res.json();
+  _epubOpenBook = data.book || null;
+  _vaultOpenFile = null;
+  return _epubOpenBook;
+}
+
+function _currentEpubChapter() {
+  if (!_epubOpenBook?.chapters?.length) return null;
+  const idx = Math.min(Math.max(Number(_epubOpenBook.progress?.chapter_index || 0), 0), _epubOpenBook.chapters.length - 1);
+  return _epubOpenBook.chapters[idx] || null;
+}
+
+async function _saveEpubProgressNow(scrollPercent = null) {
+  if (!_epubOpenBook) return;
+  const chapter = _currentEpubChapter();
+  if (!chapter) return;
+  const body = document.querySelector('#notes-pane .notes-pane-body');
+  const pct = scrollPercent == null
+    ? (body ? (body.scrollTop / Math.max(1, body.scrollHeight - body.clientHeight)) * 100 : 0)
+    : scrollPercent;
+  const payload = {
+    path: _epubOpenBook.path,
+    title: _epubOpenBook.title || '',
+    author: _epubOpenBook.author || '',
+    chapter_index: chapter.index || 0,
+    chapter_title: chapter.title || '',
+    scroll_percent: Math.max(0, Math.min(Number(pct || 0), 100)),
+  };
+  try {
+    const res = await fetch(`${API_BASE}/api/iris-vault/epub/progress`, {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      _epubOpenBook.progress = data.progress || payload;
+    }
+  } catch {}
+}
+
+function _scheduleEpubProgressSave() {
+  if (_epubSaveTimer) clearTimeout(_epubSaveTimer);
+  _epubSaveTimer = setTimeout(() => _saveEpubProgressNow(), 700);
+}
+
+function _setEpubChapter(index, restoreProgress = false) {
+  if (!_epubOpenBook?.chapters?.length) return;
+  const chapterIndex = Math.min(Math.max(Number(index || 0), 0), _epubOpenBook.chapters.length - 1);
+  _epubOpenBook.progress = {
+    ...(_epubOpenBook.progress || {}),
+    chapter_index: chapterIndex,
+    scroll_percent: restoreProgress ? Number(_epubOpenBook.progress?.scroll_percent || 0) : 0,
+  };
+  _renderNotes();
+  requestAnimationFrame(() => {
+    const body = document.querySelector('#notes-pane .notes-pane-body');
+    const pct = Number(_epubOpenBook?.progress?.scroll_percent || 0);
+    if (body && restoreProgress && pct > 0) {
+      body.scrollTop = (Math.max(1, body.scrollHeight - body.clientHeight) * pct) / 100;
+    } else if (body) {
+      body.scrollTop = 0;
+    }
+    _saveEpubProgressNow(restoreProgress ? pct : 0);
+  });
+}
+
+async function _reindexVaultFiles() {
+  const res = await fetch(`${API_BASE}/api/iris-vault/reindex`, { method: 'POST', credentials: 'same-origin' });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const data = await res.json();
+  await _fetchVaultFiles({ clearOpen: false });
+  return data.indexed || 0;
+}
+
+async function _uploadVaultFiles(files) {
+  const list = Array.from(files || []).filter(Boolean);
+  if (!list.length) return;
+  for (const file of list) {
+    const fd = new FormData();
+    fd.append('file', file);
+    fd.append('source', 'vault');
+    fd.append('context', `Vault upload ${file.name || ''}`);
+    const res = await fetch(`${API_BASE}/api/iris-vault/upload`, {
+      method: 'POST',
+      body: fd,
+      credentials: 'same-origin',
+    });
+    if (!res.ok) throw new Error(`Failed to upload ${file.name || 'file'}`);
+  }
+  await _fetchVaultFiles();
+}
+
+async function _fetchBooks() {
+  _booksLoading = true;
+  _booksError = '';
+  try {
+    const q = encodeURIComponent(_searchQuery || '');
+    const res = await fetch(`${API_BASE}/api/books?q=${q}&limit=100`, { credentials: 'same-origin' });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    _books = data.books || [];
+  } catch (e) {
+    _books = [];
+    _booksError = e?.message || 'Failed to load books';
+  } finally {
+    _booksLoading = false;
+  }
+}
+
+async function _openBook(path) {
+  const res = await fetch(`${API_BASE}/api/books/open?path=${encodeURIComponent(path || '')}`, { credentials: 'same-origin' });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const data = await res.json();
+  _bookOpenBook = data.book || null;
+  if (_bookOpenBook) _bookOpenBook._chapterCache = {};
+  _bookChapterIndex = Math.max(0, Number(_bookOpenBook?.progress?.chapter_index || 0));
+  _vaultOpenFile = null;
+  _epubOpenBook = null;
+  if (_bookOpenBook?.kind !== 'pdf' || _bookPdfViewMode === 'text') {
+    await _loadBookChapter(_bookChapterIndex);
+  }
+  return _bookOpenBook;
+}
+
+async function _loadBookChapter(index = _bookChapterIndex) {
+  if (!_bookOpenBook?.path) return null;
+  const chapters = _bookOpenBook.chapters || [];
+  if (!chapters.length) return null;
+  const idx = Math.max(0, Math.min(Number(index || 0), chapters.length - 1));
+  _bookOpenBook._chapterCache = _bookOpenBook._chapterCache || {};
+  if (_bookOpenBook._chapterCache[idx]) return _bookOpenBook._chapterCache[idx];
+  _bookChapterLoading = true;
+  try {
+    const res = await fetch(`${API_BASE}/api/books/chapter?path=${encodeURIComponent(_bookOpenBook.path)}&chapter_index=${idx}`, { credentials: 'same-origin' });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    const chapter = data.chapter || null;
+    if (chapter) {
+      _bookOpenBook._chapterCache[idx] = chapter;
+      _bookOpenBook.chapters[idx] = { ...(_bookOpenBook.chapters[idx] || {}), ...chapter, html: chapter.html };
+      return chapter;
+    }
+  } finally {
+    _bookChapterLoading = false;
+  }
+  return null;
+}
+
+async function _renameBook(path, currentTitle = '') {
+  const nextTitle = await uiModule.styledPrompt?.('Set the title Iris should use for this book.', {
+    title: 'Rename Book',
+    defaultValue: currentTitle || _vaultBasename(path),
+    placeholder: 'Book title',
+    confirmText: 'Save',
+    maxLength: 200,
+  });
+  if (nextTitle === null || nextTitle === undefined) return;
+  const clean = String(nextTitle || '').trim();
+  if (!clean) {
+    uiModule.showError?.('Title is required');
+    return;
+  }
+  const res = await fetch(`${API_BASE}/api/books/title`, {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path, title: clean }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || data.ok === false) throw new Error(data.detail || data.error || `HTTP ${res.status}`);
+  _books = _books.map(book => book.path === path ? { ...book, title: clean, custom_title: clean } : book);
+  if (_bookOpenBook?.path === path) {
+    _bookOpenBook.title = clean;
+    _bookOpenBook.custom_title = clean;
+    if (_bookOpenBook.progress) _bookOpenBook.progress.title = clean;
+  }
+  await _fetchBooks();
+  _renderNotes();
+  uiModule.showToast?.('Book title saved');
+}
+
+function _currentBookChapter() {
+  const chapters = _bookOpenBook?.chapters || [];
+  if (!chapters.length) return null;
+  const idx = Math.max(0, Math.min(_bookChapterIndex, chapters.length - 1));
+  return _bookOpenBook?._chapterCache?.[idx] || chapters[idx] || null;
+}
+
+function _bookUsesContinuousScroll() {
+  return _bookOpenBook?.kind === 'epub' && _bookReadMode === 'scroll';
+}
+
+function _renderBookChapterSection(chapter, index, label) {
+  const title = chapter?.title || `${label} ${Number(index || 0) + 1}`;
+  const html = chapter?.html || '<p>No readable content found.</p>';
+  return `<section class="notes-book-chapter-section" data-chapter-index="${Number(index || 0)}">
+    <h2>${_esc(title)}</h2>
+    <div class="notes-book-html">${html}</div>
+  </section>`;
+}
+
+function _bookSectionTop(body, section) {
+  if (!body || !section) return 0;
+  const bodyRect = body.getBoundingClientRect();
+  const sectionRect = section.getBoundingClientRect();
+  return body.scrollTop + sectionRect.top - bodyRect.top;
+}
+
+function _bookSectionReadableHeight(body, section) {
+  if (!body || !section) return 1;
+  const viewportAllowance = Math.max(80, Math.min(body.clientHeight * 0.65, body.clientHeight - 80));
+  return Math.max(1, section.offsetHeight - viewportAllowance);
+}
+
+function _bookStreamGapPx(stream) {
+  if (!stream) return 0;
+  const styles = getComputedStyle(stream);
+  const gap = parseFloat(styles.rowGap || styles.gap || '0');
+  return Number.isFinite(gap) ? gap : 0;
+}
+
+function _bookChapterScrollPercent() {
+  const body = document.querySelector('#notes-pane .notes-pane-body');
+  if (_bookUsesContinuousScroll()) {
+    const section = body?.querySelector(`.notes-book-chapter-section[data-chapter-index="${_bookChapterIndex}"]`);
+    if (body && section) {
+      const sectionTop = _bookSectionTop(body, section);
+      const pct = ((body.scrollTop - sectionTop) / _bookSectionReadableHeight(body, section)) * 100;
+      return Math.max(0, Math.min(100, pct));
+    }
+  }
+  const page = document.querySelector('#notes-pane .notes-book-page');
+  const scroller = _bookReadMode === 'page' && page ? page : body;
+  if (scroller && scroller.scrollHeight > scroller.clientHeight) {
+    return (scroller.scrollTop / Math.max(1, scroller.scrollHeight - scroller.clientHeight)) * 100;
+  }
+  return 0;
+}
+
+function _updateBookVisibleChapterFromScroll() {
+  if (!_bookUsesContinuousScroll()) return;
+  const body = document.querySelector('#notes-pane .notes-pane-body');
+  const sections = Array.from(body?.querySelectorAll('.notes-book-chapter-section[data-chapter-index]') || []);
+  if (!body || !sections.length) return;
+  const bodyRect = body.getBoundingClientRect();
+  const anchorY = bodyRect.top + Math.min(Math.max(body.clientHeight * 0.24, 120), 260);
+  let bestIndex = _bookChapterIndex;
+  let bestDistance = Infinity;
+  for (const section of sections) {
+    const rect = section.getBoundingClientRect();
+    if (rect.bottom <= bodyRect.top + 64) continue;
+    const distance = rect.top <= anchorY && rect.bottom >= anchorY
+      ? 0
+      : Math.min(Math.abs(rect.top - anchorY), Math.abs(rect.bottom - anchorY));
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      bestIndex = Number(section.dataset.chapterIndex || 0);
+    }
+  }
+  if (!Number.isFinite(bestIndex) || bestIndex === _bookChapterIndex) return;
+  _bookChapterIndex = bestIndex;
+  const select = body.querySelector('.notes-book-select');
+  if (select) select.value = String(bestIndex);
+  const chapter = _currentBookChapter();
+  if (_bookOpenBook?.progress) {
+    _bookOpenBook.progress.chapter_index = bestIndex;
+    _bookOpenBook.progress.chapter_title = chapter?.title || '';
+  }
+  const line = body.querySelector('.notes-epub-progress-line span');
+  if (line) line.style.width = `${_bookChapterScrollPercent()}%`;
+}
+
+function _trimBookContinuousStream() {
+  if (!_bookUsesContinuousScroll()) return;
+  const body = document.querySelector('#notes-pane .notes-pane-body');
+  const stream = body?.querySelector('.notes-book-stream');
+  if (!body || !stream) return;
+  const sections = Array.from(stream.querySelectorAll('.notes-book-chapter-section[data-chapter-index]'));
+  if (sections.length <= BOOK_CONTINUOUS_MAX_RENDERED_CHAPTERS) return;
+
+  const keepBefore = 1;
+  const keepAfter = Math.max(1, BOOK_CONTINUOUS_MAX_RENDERED_CHAPTERS - keepBefore - 1);
+  const minKeep = Math.max(0, _bookChapterIndex - keepBefore);
+  const maxKeep = _bookChapterIndex + keepAfter;
+  const gap = _bookStreamGapPx(stream);
+  let removedAbove = 0;
+
+  for (const section of sections) {
+    const idx = Number(section.dataset.chapterIndex || 0);
+    if (idx >= minKeep && idx <= maxKeep) continue;
+    const sectionTop = _bookSectionTop(body, section);
+    const sectionHeight = section.getBoundingClientRect().height + gap;
+    if (sectionTop < body.scrollTop) removedAbove += sectionHeight;
+    section.remove();
+  }
+  if (removedAbove > 0) body.scrollTop = Math.max(0, body.scrollTop - removedAbove);
+
+  const remaining = Array.from(stream.querySelectorAll('.notes-book-chapter-section[data-chapter-index]'));
+  if (remaining.length) {
+    stream.dataset.streamStart = String(Number(remaining[0].dataset.chapterIndex || 0));
+    stream.dataset.streamEnd = String(Number(remaining[remaining.length - 1].dataset.chapterIndex || 0));
+  }
+
+  const cache = _bookOpenBook?._chapterCache || {};
+  const cacheMin = Math.max(0, _bookChapterIndex - 2);
+  const cacheMax = _bookChapterIndex + 3;
+  for (const key of Object.keys(cache)) {
+    const idx = Number(key);
+    if (!Number.isFinite(idx) || (idx >= cacheMin && idx <= cacheMax)) continue;
+    delete cache[key];
+    if (_bookOpenBook?.chapters?.[idx]) delete _bookOpenBook.chapters[idx].html;
+  }
+}
+
+async function _appendNextBookChapterIfNeeded() {
+  if (!_bookUsesContinuousScroll() || _bookChapterLoading || _bookAutoAdvancing) return;
+  const body = document.querySelector('#notes-pane .notes-pane-body');
+  const stream = body?.querySelector('.notes-book-stream');
+  const chapters = _bookOpenBook?.chapters || [];
+  if (!body || !stream || !chapters.length) return;
+  const remaining = body.scrollHeight - (body.scrollTop + body.clientHeight);
+  if (remaining > Math.max(700, body.clientHeight * 1.35)) return;
+  const currentEnd = Number(stream.dataset.streamEnd || _bookChapterIndex);
+  const nextIndex = currentEnd + 1;
+  if (nextIndex >= chapters.length) return;
+  _bookAutoAdvancing = true;
+  const loading = document.createElement('div');
+  loading.className = 'notes-book-stream-loading';
+  loading.textContent = 'Loading next chapter...';
+  stream.appendChild(loading);
+  try {
+    const next = await _loadBookChapter(nextIndex);
+    loading.remove();
+    stream.insertAdjacentHTML('beforeend', _renderBookChapterSection(next || chapters[nextIndex], nextIndex, 'Chapter'));
+    stream.dataset.streamEnd = String(nextIndex);
+    _trimBookContinuousStream();
+    requestAnimationFrame(() => _appendNextBookChapterIfNeeded());
+  } catch (err) {
+    loading.textContent = err?.message || 'Failed to load next chapter';
+  } finally {
+    _bookAutoAdvancing = false;
+  }
+}
+
+async function _saveBookProgressNow(scrollPercent = null) {
+  if (!_bookOpenBook) return;
+  const chapter = _currentBookChapter();
+  let pct = Number(scrollPercent);
+  if (!Number.isFinite(pct)) {
+    pct = _bookChapterScrollPercent();
+  }
+  try {
+    const res = await fetch(`${API_BASE}/api/books/progress`, {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        path: _bookOpenBook.path,
+        kind: _bookOpenBook.kind || '',
+        title: _bookOpenBook.title || '',
+        author: _bookOpenBook.author || '',
+        chapter_index: _bookChapterIndex,
+        chapter_title: chapter?.title || '',
+        scroll_percent: pct,
+      }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.ok) _bookOpenBook.progress = data.progress || _bookOpenBook.progress || {};
+  } catch {}
+}
+
+function _scheduleBookProgressSave() {
+  if (_bookSaveTimer) clearTimeout(_bookSaveTimer);
+  _bookSaveTimer = setTimeout(() => _saveBookProgressNow(), 700);
+}
+
+function _setBookReadMode(mode) {
+  const next = mode === 'page' ? 'page' : 'scroll';
+  if (_bookReadMode === next) return;
+  _saveBookProgressNow();
+  _bookReadMode = next;
+  try { localStorage.setItem('odysseus-books-read-mode', next); } catch {}
+  _renderNotes();
+}
+
+async function _setBookPdfViewMode(mode) {
+  const next = mode === 'text' ? 'text' : 'pdf';
+  if (_bookPdfViewMode === next) return;
+  if (_bookOpenBook?.kind === 'pdf' && _bookPdfViewMode === 'text') {
+    _saveBookProgressNow();
+  }
+  _bookPdfViewMode = next;
+  try { localStorage.setItem('odysseus-books-pdf-view-mode', next); } catch {}
+  if (next === 'text') {
+    await _loadBookChapter(_bookChapterIndex);
+  }
+  _renderNotes();
+}
+
+async function _turnBookPage(direction = 1) {
+  if (!_bookOpenBook?.chapters?.length) return;
+  const dir = Number(direction || 0) < 0 ? -1 : 1;
+  if (_bookReadMode === 'scroll') {
+    await _setBookChapter(_bookChapterIndex + dir);
+    return;
+  }
+  const page = document.querySelector('#notes-pane .notes-book-page');
+  if (!page) {
+    await _setBookChapter(_bookChapterIndex + dir);
+    return;
+  }
+  const maxScroll = Math.max(0, page.scrollHeight - page.clientHeight);
+  const step = Math.max(160, Math.floor(page.clientHeight * 0.86));
+  if (dir > 0) {
+    if (page.scrollTop >= maxScroll - 8) {
+      if (_bookChapterIndex >= _bookOpenBook.chapters.length - 1) return;
+      await _setBookChapter(_bookChapterIndex + 1);
+    } else {
+      page.scrollTo({ top: Math.min(maxScroll, page.scrollTop + step), behavior: 'smooth' });
+      _scheduleBookProgressSave();
+    }
+  } else if (page.scrollTop <= 8) {
+    if (_bookChapterIndex <= 0) return;
+    await _setBookChapter(_bookChapterIndex - 1);
+  } else {
+    page.scrollTo({ top: Math.max(0, page.scrollTop - step), behavior: 'smooth' });
+    _scheduleBookProgressSave();
+  }
+}
+
+async function _setBookChapter(index, restoreProgress = false) {
+  if (!_bookOpenBook?.chapters?.length) return;
+  _bookChapterIndex = Math.min(Math.max(Number(index || 0), 0), _bookOpenBook.chapters.length - 1);
+  if (_bookOpenBook.kind === 'pdf' && _bookPdfViewMode !== 'text') {
+    _renderNotes();
+    requestAnimationFrame(() => _saveBookProgressNow(0));
+    return;
+  }
+  _renderNotes();
+  await _loadBookChapter(_bookChapterIndex);
+  _renderNotes();
+  requestAnimationFrame(() => {
+    const body = document.querySelector('#notes-pane .notes-pane-body');
+    const page = document.querySelector('#notes-pane .notes-book-page');
+    const pct = restoreProgress ? Number(_bookOpenBook?.progress?.scroll_percent || 0) : 0;
+    const targetScroll = (node) => {
+      if (!node) return 0;
+      return (Math.max(1, node.scrollHeight - node.clientHeight) * pct) / 100;
+    };
+    if (_bookUsesContinuousScroll() && body) {
+      const section = body.querySelector(`.notes-book-chapter-section[data-chapter-index="${_bookChapterIndex}"]`);
+      if (section) {
+        const sectionTop = _bookSectionTop(body, section);
+        body.scrollTop = restoreProgress && pct > 0
+          ? Math.max(0, sectionTop + (_bookSectionReadableHeight(body, section) * pct) / 100)
+          : Math.max(0, sectionTop);
+      } else {
+        body.scrollTop = 0;
+      }
+    } else if (page) {
+      page.scrollTop = restoreProgress && pct > 0 && _bookReadMode === 'page' ? targetScroll(page) : 0;
+    }
+    if (!_bookUsesContinuousScroll() && body && restoreProgress && pct > 0 && _bookReadMode === 'scroll') {
+      body.scrollTop = targetScroll(body);
+    } else if (!_bookUsesContinuousScroll() && body) {
+      body.scrollTop = 0;
+    }
+    _saveBookProgressNow(pct);
+  });
+}
+
+function _uploadBookFile(file) {
+  _bookUploadState = {
+    active: true,
+    percent: 0,
+    label: `Uploading ${file.name}`,
+    detail: _formatVaultSize(file.size || 0),
+  };
+  _renderNotes();
+  const form = new FormData();
+  form.append('file', file);
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', `${API_BASE}/api/books/upload`);
+    xhr.responseType = 'json';
+    xhr.upload.onprogress = (event) => {
+      if (event.lengthComputable) {
+        const pct = Math.max(0, Math.min(100, (event.loaded / event.total) * 100));
+        _bookUploadState = {
+          active: true,
+          percent: pct,
+          label: `Uploading ${file.name}`,
+          detail: `${_formatVaultSize(event.loaded)} / ${_formatVaultSize(event.total)}`,
+        };
+      } else {
+        _bookUploadState = { ..._bookUploadState, indeterminate: true };
+      }
+      _renderNotes();
+    };
+    xhr.onload = async () => {
+      const payload = xhr.response || {};
+      if (xhr.status >= 200 && xhr.status < 300 && payload.ok !== false) {
+        _bookUploadState = {
+          active: false,
+          percent: 100,
+          label: `${payload.file?.title || file.name} saved`,
+          detail: payload.indexing ? 'Indexing in the background' : 'Ready',
+        };
+        await _fetchBooks();
+        _renderNotes();
+        resolve(payload);
+      } else {
+        reject(new Error(payload.detail || payload.error || 'Upload failed'));
+      }
+    };
+    xhr.onerror = () => reject(new Error('Upload failed'));
+    xhr.onabort = () => reject(new Error('Upload cancelled'));
+    xhr.send(form);
+  });
+}
+
+function _scheduleVaultSearch() {
+  if (_vaultSearchTimer) clearTimeout(_vaultSearchTimer);
+  _vaultSearchTimer = setTimeout(async () => {
+    if (_notesMode !== 'vault') return;
+    await _fetchVaultFiles();
+    _renderNotes();
+  }, 180);
+}
+
+function _scheduleBooksSearch() {
+  if (_booksSearchTimer) clearTimeout(_booksSearchTimer);
+  _booksSearchTimer = setTimeout(async () => {
+    if (_notesMode !== 'books') return;
+    await _fetchBooks();
+    _renderNotes();
+  }, 180);
 }
 
 // ---- Helpers ----
@@ -1093,9 +1700,69 @@ export async function refreshDueBadge(opts = {}) {
   _updateRailBadge();
 }
 
+function _syncNotesModeChrome() {
+  const pane = document.getElementById('notes-pane');
+  const isVault = _notesMode === 'vault';
+  const isBooks = _notesMode === 'books';
+  pane?.classList.toggle('notes-pane-vault', isVault);
+  pane?.classList.toggle('notes-pane-books', isBooks);
+  pane?.classList.toggle('notes-view-grid', _viewMode === 'grid' && !isVault && !isBooks);
+  const title = document.querySelector('#notes-pane .notes-pane-title');
+  if (title) {
+    if (isVault) {
+      title.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2.5px;margin-right:6px"><path d="M3 7h5l2 2h11v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M3 7V5a2 2 0 0 1 2-2h4l2 2h4"/></svg>Vault`;
+    } else if (isBooks) {
+      title.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2.5px;margin-right:6px"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>Books`;
+    } else {
+      title.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2.5px;margin-right:6px"><path d="M5 3h10l4 4v14H5z"/><path d="M15 3v5h5"/><path d="M8 17.5 15.5 10l2.5 2.5L10.5 20H8z"/></svg>Notes`;
+    }
+  }
+  const search = document.getElementById('notes-search');
+  if (search) search.placeholder = isVault ? 'Search vault files…' : (isBooks ? 'Search books…' : 'Search notes…');
+  const vaultBtn = document.getElementById('notes-vault-toggle');
+  if (vaultBtn) {
+    vaultBtn.classList.toggle('active', isVault);
+    vaultBtn.title = 'Browse vault files';
+  }
+  const booksBtn = document.getElementById('notes-books-toggle');
+  if (booksBtn) {
+    booksBtn.classList.toggle('active', isBooks);
+    booksBtn.title = 'Read books';
+  }
+  const notesBtn = document.getElementById('notes-notes-toggle');
+  if (notesBtn) {
+    notesBtn.classList.toggle('active', _notesMode === 'notes');
+    notesBtn.title = 'Show notes';
+  }
+  const archiveToggle = document.getElementById('notes-archive-toggle');
+  const viewToggle = document.getElementById('notes-view-toggle');
+  [archiveToggle, viewToggle].forEach(btn => {
+    if (!btn) return;
+    const inactive = isVault || isBooks;
+    btn.classList.toggle('notes-header-spacer', inactive);
+    btn.disabled = inactive;
+    btn.setAttribute('aria-hidden', inactive ? 'true' : 'false');
+  });
+  document.getElementById('notes-select-btn')?.classList.toggle('hidden', isVault || isBooks);
+  document.querySelectorAll('.notes-vault-only').forEach(el => el.classList.toggle('visible', isVault));
+  document.querySelectorAll('.notes-books-only').forEach(el => el.classList.toggle('visible', isBooks));
+  if (isVault || isBooks) {
+    _selectMode = false;
+    _selectedIds.clear();
+    const bar = document.getElementById('notes-bulk-bar');
+    const btn = document.getElementById('notes-select-btn');
+    const all = document.getElementById('notes-select-all');
+    if (bar) bar.classList.add('hidden');
+    if (btn) { btn.classList.remove('active'); btn.textContent = 'Select'; }
+    if (all) all.checked = false;
+    _showingArchived = false;
+  }
+}
+
 // ---- Panel ----
 
 export function openPanel() {
+  _removeLegacyBooksModal();
   if (_open) return;
   _open = true;
   _editingId = null;
@@ -1134,6 +1801,18 @@ export function openPanel() {
     <div class="notes-pane-header">
       <h4 class="notes-pane-title"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2.5px;margin-right:6px"><path d="M5 3h10l4 4v14H5z"/><path d="M15 3v5h5"/><path d="M8 17.5 15.5 10l2.5 2.5L10.5 20H8z"/></svg>Notes</h4>
       <span style="flex:1"></span>
+      <button id="notes-notes-toggle" class="doc-action-icon-btn notes-header-text-btn active" title="Show notes" style="opacity:0.8;gap:5px;">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3h10l4 4v14H5z"/><path d="M15 3v5h5"/><path d="M8 17.5 15.5 10l2.5 2.5L10.5 20H8z"/></svg>
+        <span class="notes-header-btn-label">Notes</span>
+      </button>
+      <button id="notes-vault-toggle" class="doc-action-icon-btn notes-header-text-btn" title="Browse vault files" style="opacity:0.8;gap:5px;">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7h5l2 2h11v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M3 7V5a2 2 0 0 1 2-2h4l2 2h4"/></svg>
+        <span class="notes-header-btn-label">Vault</span>
+      </button>
+      <button id="notes-books-toggle" class="doc-action-icon-btn notes-header-text-btn" title="Read books" style="opacity:0.8;gap:5px;">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
+        <span class="notes-header-btn-label">Books</span>
+      </button>
       <button id="notes-archive-toggle" class="doc-action-icon-btn notes-header-text-btn" title="View archive" style="opacity:0.8;gap:5px;">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="5" rx="1"/><path d="M4 8v11a2 2 0 002 2h12a2 2 0 002-2V8"/><path d="M10 12h4"/></svg>
         <span class="notes-header-btn-label">Archive</span>
@@ -1146,6 +1825,9 @@ export function openPanel() {
     </div>
     <div class="notes-search-bar">
       <input type="text" id="notes-search" class="memory-search-input" placeholder="Search notes…" autocomplete="off" />
+      <button id="notes-vault-upload" class="notes-select-trigger notes-vault-only" type="button" title="Upload into the vault">Upload</button>
+      <button id="notes-vault-reindex" class="notes-select-trigger notes-vault-only" type="button" title="Reindex your vault folder">Reindex</button>
+      <button id="notes-books-upload" class="notes-select-trigger notes-books-only" type="button" title="Upload EPUB or PDF">Upload EPUB/PDF</button>
       <button id="notes-select-btn" class="notes-select-trigger" type="button">Select</button>
     </div>
     <div id="notes-bulk-bar" class="memory-bulk-bar hidden">
@@ -1189,6 +1871,7 @@ export function openPanel() {
   document.body.appendChild(backdrop);
   _wireNotesWindow(pane);
   _restoreNotesSidebarDock(pane);
+  _syncNotesModeChrome();
 
   // Events
   // (Close chevron removed — swipe down on mobile, tool-rail toggle on desktop.)
@@ -1210,7 +1893,123 @@ export function openPanel() {
   if (searchEl) {
     searchEl.addEventListener('input', () => {
       _searchQuery = searchEl.value.trim().toLowerCase();
+      if (_notesMode === 'vault') _scheduleVaultSearch();
+      else if (_notesMode === 'books') _scheduleBooksSearch();
+      else _renderNotes();
+    });
+  }
+
+  const notesBtn = document.getElementById('notes-notes-toggle');
+  if (notesBtn) {
+    notesBtn.addEventListener('click', () => {
+      if (_notesMode === 'notes') return;
+      _notesMode = 'notes';
+      _bookOpenBook = null;
+      _vaultOpenFile = null;
+      _epubOpenBook = null;
+      _syncNotesModeChrome();
       _renderNotes();
+    });
+  }
+
+  const vaultBtn = document.getElementById('notes-vault-toggle');
+  if (vaultBtn) {
+    vaultBtn.addEventListener('click', async () => {
+      if (_notesMode === 'vault') return;
+      _notesMode = 'vault';
+      _bookOpenBook = null;
+      _epubOpenBook = null;
+      _syncNotesModeChrome();
+      _vaultLoading = true;
+      _renderNotes();
+      await _fetchVaultFiles();
+      _renderNotes();
+    });
+  }
+
+  const booksBtn = document.getElementById('notes-books-toggle');
+  if (booksBtn) {
+    booksBtn.addEventListener('click', async () => {
+      if (_notesMode === 'books') return;
+      _notesMode = 'books';
+      _vaultOpenFile = null;
+      _epubOpenBook = null;
+      _syncNotesModeChrome();
+      _booksLoading = true;
+      _renderNotes();
+      await _fetchBooks();
+      _renderNotes();
+    });
+  }
+
+  const vaultUploadBtn = document.getElementById('notes-vault-upload');
+  if (vaultUploadBtn) {
+    vaultUploadBtn.addEventListener('click', () => {
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.multiple = true;
+      input.style.cssText = 'position:fixed;left:-9999px;top:-9999px;';
+      document.body.appendChild(input);
+      input.addEventListener('change', async () => {
+        try {
+          await _uploadVaultFiles(input.files);
+          uiModule.showToast?.('Uploaded to vault');
+          _renderNotes();
+        } catch (e) {
+          uiModule.showError?.(e?.message || 'Vault upload failed');
+        } finally {
+          input.remove();
+        }
+      }, { once: true });
+      input.click();
+    });
+  }
+
+  const booksUploadBtn = document.getElementById('notes-books-upload');
+  if (booksUploadBtn) {
+    booksUploadBtn.addEventListener('click', () => {
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.accept = '.epub,.pdf,application/epub+zip,application/pdf';
+      input.multiple = true;
+      input.style.cssText = 'position:fixed;left:-9999px;top:-9999px;';
+      document.body.appendChild(input);
+      input.addEventListener('change', async () => {
+        try {
+          for (const file of Array.from(input.files || [])) {
+            await _uploadBookFile(file);
+          }
+          uiModule.showToast?.('Uploaded to books');
+        } catch (e) {
+          _bookUploadState = {
+            active: false,
+            percent: 0,
+            label: 'Upload failed',
+            detail: e?.message || 'Upload failed',
+            error: true,
+          };
+          _renderNotes();
+          uiModule.showError?.(e?.message || 'Upload failed');
+        } finally {
+          input.remove();
+        }
+      }, { once: true });
+      input.click();
+    });
+  }
+  const vaultReindexBtn = document.getElementById('notes-vault-reindex');
+  if (vaultReindexBtn) {
+    vaultReindexBtn.addEventListener('click', async () => {
+      try {
+        vaultReindexBtn.disabled = true;
+        const count = await _reindexVaultFiles();
+        uiModule.showToast?.(`Indexed ${count} file${count === 1 ? '' : 's'}`);
+        _renderNotes();
+      } catch (e) {
+        uiModule.showError?.(e?.message || 'Vault reindex failed');
+      } finally {
+        vaultReindexBtn.disabled = false;
+      }
     });
   }
 
@@ -1231,6 +2030,7 @@ export function openPanel() {
     };
     syncArchiveBtn();
     archiveBtn.addEventListener('click', async () => {
+      if (_notesMode !== 'notes') return;
       _showingArchived = !_showingArchived;
       _selectedIds.clear();
       syncArchiveBtn();
@@ -1253,7 +2053,7 @@ export function openPanel() {
   }
   const viewBtn = document.getElementById('notes-view-toggle');
   if (viewBtn) {
-    pane.classList.toggle('notes-view-grid', _viewMode === 'grid');
+    pane.classList.toggle('notes-view-grid', _viewMode === 'grid' && _notesMode === 'notes');
     // Label shows what you'll switch TO — "Grid" while in list, "List" while in grid.
     const _setViewLabel = () => {
       const lbl = viewBtn.querySelector('.notes-header-btn-label');
@@ -1262,9 +2062,10 @@ export function openPanel() {
     _setViewLabel();
     requestAnimationFrame(() => _applyMasonry(document.querySelector('#notes-pane .notes-pane-body')));
     viewBtn.addEventListener('click', () => {
+      if (_notesMode !== 'notes') return;
       _viewMode = _viewMode === 'grid' ? 'list' : 'grid';
       try { localStorage.setItem('odysseus-notes-view', _viewMode); } catch {}
-      pane.classList.toggle('notes-view-grid', _viewMode === 'grid');
+      pane.classList.toggle('notes-view-grid', _viewMode === 'grid' && _notesMode === 'notes');
       _setViewLabel();
       requestAnimationFrame(() => _applyMasonry(document.querySelector('#notes-pane .notes-pane-body')));
     });
@@ -1369,11 +2170,23 @@ export function openPanel() {
   document.addEventListener('keydown', _notesKeydownHandler);
 
   // Load — show skeleton immediately, then fetch
-  _renderLoadingSkeleton();
+  if (_notesMode === 'vault') {
+    _vaultLoading = true;
+    _renderNotes();
+  } else if (_notesMode === 'books') {
+    _booksLoading = true;
+    _renderNotes();
+  } else {
+    _renderLoadingSkeleton();
+  }
   // Defer the highlight flush to the next frame so it runs *after* the cards
   // are committed to the DOM (and any FLIP animations have settled), giving
   // the querySelector lookups inside something to find.
-  _fetchNotes().then(() => {
+  Promise.all([
+    _fetchNotes(),
+    _notesMode === 'vault' ? _fetchVaultFiles() : Promise.resolve(),
+    _notesMode === 'books' ? _fetchBooks() : Promise.resolve(),
+  ]).then(() => {
     _renderNotes();
     requestAnimationFrame(() => _flushPendingHighlights());
     _startReminderLoop();
@@ -1640,6 +2453,45 @@ export function togglePanel() {
   else openPanel();
 }
 
+export async function openBooksPanel(initialPath = '') {
+  _removeLegacyBooksModal();
+  if (!_open) openPanel();
+  _notesMode = 'books';
+  _vaultOpenFile = null;
+  _epubOpenBook = null;
+  _syncNotesModeChrome();
+  if (initialPath) {
+    _booksLoading = true;
+    _renderNotes();
+    try {
+      await _openBook(initialPath);
+      await _fetchBooks();
+    } finally {
+      _booksLoading = false;
+    }
+  } else {
+    _booksLoading = true;
+    _renderNotes();
+    await _fetchBooks();
+  }
+  _renderNotes();
+  if (_bookOpenBook && (_bookOpenBook.kind !== 'pdf' || _bookPdfViewMode === 'text')) {
+    requestAnimationFrame(() => _setBookChapter(_bookOpenBook.progress?.chapter_index || 0, true));
+  }
+}
+
+export async function openVaultPanel() {
+  if (!_open) openPanel();
+  _notesMode = 'vault';
+  _bookOpenBook = null;
+  _epubOpenBook = null;
+  _syncNotesModeChrome();
+  _vaultLoading = true;
+  _renderNotes();
+  await _fetchVaultFiles();
+  _renderNotes();
+}
+
 export function isPanelOpen() { return _open; }
 
 // ---- Render ----
@@ -1682,10 +2534,581 @@ function _animateReflow(prevPositions) {
   });
 }
 
+function _formatVaultSize(bytes) {
+  const n = Number(bytes || 0);
+  if (!Number.isFinite(n) || n <= 0) return '0 B';
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(n < 10 * 1024 ? 1 : 0)} KB`;
+  return `${(n / 1024 / 1024).toFixed(n < 10 * 1024 * 1024 ? 1 : 0)} MB`;
+}
+
+function _vaultBasename(path) {
+  const raw = String(path || '').split('/').filter(Boolean).pop() || path || 'Untitled';
+  try { return decodeURIComponent(raw); } catch (_) { return raw; }
+}
+
+function _vaultTitleLooksNoisy(title) {
+  const t = String(title || '').trim();
+  if (!t || t === '---') return true;
+  if (t.length > 120) return true;
+  if (/^(type|tags|status|created|last_updated|week|aliases)\s*:/i.test(t)) return true;
+  if (/^converted ebook chapter\s+\d+/i.test(t)) return true;
+  return false;
+}
+
+function _vaultDisplayTitle(file) {
+  const title = String(file?.title || '').trim();
+  if (!_vaultTitleLooksNoisy(title)) return title;
+  return _vaultBasename(file?.path || title);
+}
+
+function _vaultDisplayExcerpt(file, kind) {
+  if (kind === 'image' || kind === 'audio' || kind === 'video' || kind === 'pdf' || kind === 'epub') return '';
+  const raw = String(file?.excerpt || '').replace(/\r/g, '').trim();
+  if (!raw) return '';
+  const lines = raw.split('\n');
+  let inFrontmatter = false;
+  const cleaned = [];
+  for (const line of lines) {
+    const t = line.trim();
+    if (!t) continue;
+    if (t === '---') {
+      inFrontmatter = !inFrontmatter;
+      continue;
+    }
+    if (inFrontmatter) continue;
+    if (/^(type|tags|status|created|last_updated|week|aliases)\s*:/i.test(t)) continue;
+    cleaned.push(t.replace(/^#+\s*/, ''));
+    if (cleaned.join(' ').length > 180) break;
+  }
+  return cleaned.join(' ').slice(0, 180);
+}
+
+function _vaultIconFor(file) {
+  const mime = (file?.mime || '').toLowerCase();
+  const path = (file?.path || '').toLowerCase();
+  if (path.endsWith('.epub') || mime === 'application/epub+zip') return 'epub';
+  if (mime.startsWith('image/')) return 'image';
+  if (mime.startsWith('audio/')) return 'audio';
+  if (mime.startsWith('video/')) return 'video';
+  if (path.endsWith('.md') || path.endsWith('.markdown')) return 'note';
+  if (path.endsWith('.pdf')) return 'pdf';
+  return 'file';
+}
+
+function _vaultIconSvg(kind) {
+  if (kind === 'epub') return '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M4 4.5A2.5 2.5 0 0 1 6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5z"/><path d="M8 6h8M8 10h7"/></svg>';
+  if (kind === 'image') return '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>';
+  if (kind === 'audio') return '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>';
+  if (kind === 'video') return '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="5" width="15" height="14" rx="2"/><path d="M17 9l5-3v12l-5-3z"/></svg>';
+  if (kind === 'pdf') return '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M8 17h8"/></svg>';
+  if (kind === 'note') return '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 3h10l4 4v14H5z"/><path d="M15 3v5h5"/><path d="M8 13h8M8 17h5"/></svg>';
+  return '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>';
+}
+
+function _renderEpubReader(body, baseHtml) {
+  const book = _epubOpenBook;
+  const chapters = book?.chapters || [];
+  const chapter = _currentEpubChapter();
+  if (!book || !chapter) {
+    body.innerHTML = baseHtml + `<div class="notes-empty-msg">This EPUB has no readable chapters.</div>`;
+    return;
+  }
+  const idx = chapter.index || 0;
+  const progressPct = Number(book.progress?.scroll_percent || 0);
+  const options = chapters.map(ch => `<option value="${ch.index}" ${ch.index === idx ? 'selected' : ''}>${_esc(ch.title || `Chapter ${ch.index + 1}`)}</option>`).join('');
+  const chapterList = chapters.map(ch => `<button type="button" class="notes-epub-chapter${ch.index === idx ? ' active' : ''}" data-chapter="${ch.index}">
+    <span>${_esc(ch.title || `Chapter ${ch.index + 1}`)}</span>
+    <small>${_esc(String(ch.word_count || 0))} words</small>
+  </button>`).join('');
+  body.innerHTML = baseHtml + `<div class="notes-epub-reader">
+    <div class="notes-vault-reader-head notes-epub-head">
+      <button type="button" class="notes-vault-back" title="Back to vault files">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+      </button>
+      <div class="notes-vault-reader-title">
+        <strong>${_esc(book.title || 'EPUB')}</strong>
+        <span>${_esc(book.author || book.path || '')}</span>
+      </div>
+      <div class="notes-epub-controls">
+        <button type="button" class="notes-select-trigger notes-epub-prev" ${idx <= 0 ? 'disabled' : ''}>Prev</button>
+        <select class="notes-select-trigger notes-epub-select">${options}</select>
+        <button type="button" class="notes-select-trigger notes-epub-next" ${idx >= chapters.length - 1 ? 'disabled' : ''}>Next</button>
+      </div>
+    </div>
+    <div class="notes-epub-layout">
+      <aside class="notes-epub-toc">${chapterList}</aside>
+      <article class="notes-epub-content">
+        <div class="notes-epub-progress-line"><span style="width:${Math.max(0, Math.min(progressPct, 100))}%"></span></div>
+        <h2>${_esc(chapter.title || `Chapter ${idx + 1}`)}</h2>
+        <div class="notes-epub-html">${chapter.html || ''}</div>
+      </article>
+    </div>
+  </div>`;
+  body.querySelector('.notes-vault-back')?.addEventListener('click', () => {
+    _saveEpubProgressNow();
+    _epubOpenBook = null;
+    _renderNotes();
+  });
+  body.querySelector('.notes-epub-prev')?.addEventListener('click', () => _setEpubChapter(idx - 1));
+  body.querySelector('.notes-epub-next')?.addEventListener('click', () => _setEpubChapter(idx + 1));
+  body.querySelector('.notes-epub-select')?.addEventListener('change', (e) => _setEpubChapter(e.target.value));
+  body.querySelectorAll('.notes-epub-chapter').forEach(btn => {
+    btn.addEventListener('click', () => _setEpubChapter(btn.dataset.chapter));
+  });
+  if (body._notesEpubScrollHandler) body.removeEventListener('scroll', body._notesEpubScrollHandler);
+  body._notesEpubScrollHandler = _scheduleEpubProgressSave;
+  body.addEventListener('scroll', body._notesEpubScrollHandler, { passive: true });
+}
+
+function _visibleVaultFiles() {
+  return (_vaultFiles || []).filter(file => {
+    const path = String(file?.path || '');
+    return !/^50_State\/book_(progress|metadata)\//.test(path);
+  });
+}
+
+function _buildVaultTree(files) {
+  const root = { name: '', path: '', folders: new Map(), files: [] };
+  for (const file of files || []) {
+    const path = String(file?.path || '').replace(/^\/+/, '');
+    const parts = path.split('/').filter(Boolean);
+    if (!parts.length) continue;
+    let node = root;
+    for (const name of parts.slice(0, -1)) {
+      const folderPath = node.path ? `${node.path}/${name}` : name;
+      if (!node.folders.has(name)) {
+        node.folders.set(name, { name, path: folderPath, folders: new Map(), files: [] });
+      }
+      node = node.folders.get(name);
+    }
+    node.files.push(file);
+  }
+  return root;
+}
+
+function _vaultTreeCount(node) {
+  let count = node?.files?.length || 0;
+  for (const child of (node?.folders || new Map()).values()) count += _vaultTreeCount(child);
+  return count;
+}
+
+function _renderVaultFileRow(f, depth = 0) {
+  const kind = _vaultIconFor(f);
+  const displayTitle = _vaultDisplayTitle(f);
+  const displayExcerpt = _vaultDisplayExcerpt(f, kind);
+  const indent = Math.max(0, Number(depth) || 0) * 18;
+  return `<button type="button" class="notes-vault-file notes-vault-kind-${_attrEsc(kind)}" data-path="${_attrEsc(f.path || '')}" title="${_attrEsc(f.path || '')}" style="--vault-depth:${Number(depth) || 0};--vault-indent:${indent}px">
+    <span class="notes-vault-file-icon">${_vaultIconSvg(kind)}</span>
+    <span class="notes-vault-file-main">
+      <span class="notes-vault-file-title">${_esc(displayTitle)}</span>
+      <span class="notes-vault-file-path">${_esc(f.path || '')}</span>
+      ${displayExcerpt ? `<span class="notes-vault-file-excerpt">${_esc(displayExcerpt)}</span>` : ''}
+    </span>
+    <span class="notes-vault-file-meta">${_esc(_formatVaultSize(f.size))}</span>
+  </button>`;
+}
+
+function _renderVaultTreeNode(node, depth = 0) {
+  const folders = Array.from((node?.folders || new Map()).values())
+    .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+  const files = [...(node?.files || [])]
+    .sort((a, b) => _vaultDisplayTitle(a).localeCompare(_vaultDisplayTitle(b), undefined, { sensitivity: 'base' }));
+  let html = '';
+  for (const folder of folders) {
+    const isOpen = Boolean(_searchQuery) || _vaultExpandedFolders.has(folder.path);
+    const indent = Math.max(0, Number(depth) || 0) * 18;
+    html += `<button type="button" class="notes-vault-folder${isOpen ? ' open' : ''}" data-path="${_attrEsc(folder.path)}" style="--vault-depth:${Number(depth) || 0};--vault-indent:${indent}px">
+      <span class="notes-vault-folder-chevron">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg>
+      </span>
+      <span class="notes-vault-folder-icon">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7h7l2 2h9v11H3z"/><path d="M3 7V5h8l2 2"/></svg>
+      </span>
+      <span class="notes-vault-folder-name">${_esc(folder.name)}</span>
+      <span class="notes-vault-folder-count">${_vaultTreeCount(folder)}</span>
+    </button>`;
+    if (isOpen) html += _renderVaultTreeNode(folder, depth + 1);
+  }
+  for (const file of files) html += _renderVaultFileRow(file, depth);
+  return html;
+}
+
+function _renderVaultFiles() {
+  const body = document.querySelector('#notes-pane .notes-pane-body');
+  if (!body) return;
+  _syncNotesModeChrome();
+  let html = '<div class="notes-vault-bar"><span>Your Obsidian vault files</span></div>';
+  if (_vaultLoading) {
+    html += `<div class="notes-skeleton"><div class="notes-skeleton-card"></div><div class="notes-skeleton-card short"></div><div class="notes-skeleton-card"></div></div>`;
+    body.innerHTML = html;
+    return;
+  }
+  if (_vaultError) {
+    body.innerHTML = html + `<div class="notes-empty-msg">${_esc(_vaultError)}</div>`;
+    return;
+  }
+  if (_epubOpenBook) {
+    _renderEpubReader(body, html);
+    return;
+  }
+  if (_vaultOpenFile) {
+    const f = _vaultOpenFile;
+    const content = typeof f.content === 'string' && f.content.length
+      ? `<pre class="notes-vault-reader-content">${_esc(f.content)}</pre>`
+      : `<div class="notes-empty-msg">This file is stored and indexed by metadata, but it is not text-previewable here.</div>`;
+    html += `<div class="notes-vault-reader">
+      <div class="notes-vault-reader-head">
+        <button type="button" class="notes-vault-back" title="Back to vault files">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+        </button>
+        <div class="notes-vault-reader-title">
+          <strong>${_esc(f.title || f.path || 'Vault file')}</strong>
+          <span>${_esc(f.path || '')}</span>
+        </div>
+      </div>
+      ${content}
+    </div>`;
+    body.innerHTML = html;
+    body.querySelector('.notes-vault-back')?.addEventListener('click', () => {
+      _vaultOpenFile = null;
+      _renderNotes();
+    });
+    return;
+  }
+  const visibleFiles = _visibleVaultFiles();
+  if (!visibleFiles.length) {
+    body.innerHTML = html + `<div class="notes-empty-msg">No vault files found</div>`;
+    return;
+  }
+  html += '<div class="notes-vault-list notes-vault-tree">';
+  html += _renderVaultTreeNode(_buildVaultTree(visibleFiles), 0);
+  html += '</div>';
+  body.innerHTML = html;
+  body.querySelectorAll('.notes-vault-folder').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const path = btn.dataset.path || '';
+      if (_vaultExpandedFolders.has(path)) _vaultExpandedFolders.delete(path);
+      else _vaultExpandedFolders.add(path);
+      _renderNotes();
+    });
+  });
+  body.querySelectorAll('.notes-vault-file').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const path = btn.dataset.path || '';
+      try {
+        btn.classList.add('loading');
+        if (/\.(epub|pdf)$/i.test(path)) {
+          _notesMode = 'books';
+          _syncNotesModeChrome();
+          await _openBook(path);
+          await _fetchBooks();
+          _renderNotes();
+          if (_bookOpenBook?.kind !== 'pdf' || _bookPdfViewMode === 'text') {
+            requestAnimationFrame(() => _setBookChapter(_bookOpenBook?.progress?.chapter_index || 0, true));
+          }
+        } else {
+          await _readVaultFile(path);
+          _renderNotes();
+        }
+      } catch (e) {
+        uiModule.showError?.(e?.message || 'Failed to open vault file');
+      } finally {
+        btn.classList.remove('loading');
+      }
+    });
+  });
+}
+
+function _renderBookReader(body, baseHtml) {
+  const book = _bookOpenBook;
+  const chapters = book?.chapters || [];
+  const chapter = _currentBookChapter();
+  const idx = _bookChapterIndex || 0;
+  const isPdf = book?.kind === 'pdf';
+  const label = book?.kind === 'pdf' ? 'Page' : 'Chapter';
+  const savedIndex = Number(book?.progress?.chapter_index || 0);
+  const progressPct = savedIndex === idx ? Number(book?.progress?.scroll_percent || 0) : 0;
+  const options = chapters.map((ch, i) => `<option value="${i}" ${i === idx ? 'selected' : ''}>${i + 1}. ${_esc(ch.title || `${label} ${i + 1}`)}</option>`).join('');
+  const loadingHtml = '<p class="notes-book-loading">Loading this section...</p>';
+  const contentHtml = _bookChapterLoading && !chapter?.html ? loadingHtml : (chapter?.html || '<p>No readable content found.</p>');
+  const continuousScroll = _bookUsesContinuousScroll();
+  const pageHtml = continuousScroll
+    ? (_bookChapterLoading && !chapter?.html ? loadingHtml : _renderBookChapterSection(chapter, idx, label))
+    : `<h2>${_esc(chapter?.title || `${label} ${idx + 1}`)}</h2><div class="notes-book-html">${contentHtml}</div>`;
+  const pdfToggleHtml = isPdf ? `<div class="notes-book-mode-toggle notes-book-pdf-toggle" role="group" aria-label="PDF view mode">
+          <button type="button" class="notes-book-mode-btn${_bookPdfViewMode === 'pdf' ? ' active' : ''}" data-pdf-mode="pdf">PDF</button>
+          <button type="button" class="notes-book-mode-btn${_bookPdfViewMode === 'text' ? ' active' : ''}" data-pdf-mode="text">Text</button>
+        </div>` : '';
+  const readerModeToggleHtml = `<div class="notes-book-mode-toggle" role="group" aria-label="Reading mode">
+          <button type="button" class="notes-book-mode-btn${_bookReadMode === 'scroll' ? ' active' : ''}" data-mode="scroll">Scroll</button>
+          <button type="button" class="notes-book-mode-btn${_bookReadMode === 'page' ? ' active' : ''}" data-mode="page">Pages</button>
+        </div>`;
+  if (isPdf && _bookPdfViewMode !== 'text') {
+    const pdfUrl = `${API_BASE}/api/books/file?path=${encodeURIComponent(book?.path || '')}#view=FitH&page=${Math.max(1, idx + 1)}`;
+    body.innerHTML = baseHtml + `<div class="notes-book-reader notes-book-reader-pdf">
+      <div class="notes-vault-reader-head notes-book-head">
+        <div class="notes-book-title-row">
+          <button type="button" class="notes-vault-back" title="Back to books">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+          </button>
+          <div class="notes-vault-reader-title">
+            <strong>${_esc(book?.title || book?.path || 'PDF')}</strong>
+            <span>${_esc(book?.author || book?.path || '')}</span>
+          </div>
+          <button type="button" class="notes-book-title-edit notes-book-reader-edit" data-path="${_attrEsc(book?.path || '')}" data-title="${_attrEsc(book?.title || '')}" title="Rename book" aria-label="Rename book">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
+          </button>
+        </div>
+        <div class="notes-book-controls-row notes-book-controls-row-pdf">
+          ${pdfToggleHtml}
+          <button type="button" class="notes-select-trigger notes-book-prev" ${idx <= 0 ? 'disabled' : ''}>Prev</button>
+          <select class="notes-select-trigger notes-book-select">${options}</select>
+          <button type="button" class="notes-select-trigger notes-book-next" ${idx >= chapters.length - 1 ? 'disabled' : ''}>Next</button>
+        </div>
+      </div>
+      <div class="notes-book-pdf-viewer">
+        <iframe class="notes-book-pdf-frame" src="${_attrEsc(pdfUrl)}" title="${_attrEsc(book?.title || 'PDF')}"></iframe>
+      </div>
+    </div>`;
+    body.querySelector('.notes-vault-back')?.addEventListener('click', () => {
+      _saveBookProgressNow(0);
+      if (_bookKeyHandler) {
+        document.removeEventListener('keydown', _bookKeyHandler);
+        _bookKeyHandler = null;
+      }
+      _bookOpenBook = null;
+      _renderNotes();
+    });
+    body.querySelector('.notes-book-reader-edit')?.addEventListener('click', async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      try {
+        await _renameBook(e.currentTarget.dataset.path || book?.path || '', e.currentTarget.dataset.title || book?.title || '');
+      } catch (err) {
+        uiModule.showError?.(err?.message || 'Failed to rename book');
+      }
+    });
+    body.querySelectorAll('.notes-book-pdf-toggle .notes-book-mode-btn').forEach(btn => {
+      btn.addEventListener('click', () => _setBookPdfViewMode(btn.dataset.pdfMode || 'pdf'));
+    });
+    body.querySelector('.notes-book-prev')?.addEventListener('click', () => _setBookChapter(idx - 1));
+    body.querySelector('.notes-book-next')?.addEventListener('click', () => _setBookChapter(idx + 1));
+    body.querySelector('.notes-book-select')?.addEventListener('change', (e) => _setBookChapter(e.target.value));
+    return;
+  }
+  body.innerHTML = baseHtml + `<div class="notes-book-reader notes-book-reader-${_attrEsc(_bookReadMode)}">
+    <div class="notes-vault-reader-head notes-book-head">
+      <div class="notes-book-title-row">
+        <button type="button" class="notes-vault-back" title="Back to books">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+        </button>
+        <div class="notes-vault-reader-title">
+          <strong>${_esc(book?.title || book?.path || 'Book')}</strong>
+          <span>${_esc(book?.author || book?.path || '')}</span>
+        </div>
+        <button type="button" class="notes-book-title-edit notes-book-reader-edit" data-path="${_attrEsc(book?.path || '')}" data-title="${_attrEsc(book?.title || '')}" title="Rename book" aria-label="Rename book">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
+        </button>
+      </div>
+      <div class="notes-book-controls-row${isPdf ? ' notes-book-controls-row-with-pdf' : ''}">
+        ${pdfToggleHtml}
+        <button type="button" class="notes-select-trigger notes-book-prev" ${idx <= 0 ? 'disabled' : ''}>Prev</button>
+        <select class="notes-select-trigger notes-book-select">${options}</select>
+        <button type="button" class="notes-select-trigger notes-book-next" ${idx >= chapters.length - 1 ? 'disabled' : ''}>Next</button>
+        ${readerModeToggleHtml}
+      </div>
+    </div>
+    <article class="notes-book-content notes-book-content-${_attrEsc(_bookReadMode)}${continuousScroll ? ' notes-book-content-continuous' : ''}">
+      <div class="notes-epub-progress-line"><span style="width:${Math.max(0, Math.min(progressPct, 100))}%"></span></div>
+      <div class="notes-book-page${continuousScroll ? ' notes-book-stream' : ''}" tabindex="0" ${continuousScroll ? `data-stream-start="${idx}" data-stream-end="${idx}"` : ''}>${pageHtml}</div>
+    </article>
+  </div>`;
+  body.querySelector('.notes-vault-back')?.addEventListener('click', () => {
+    _saveBookProgressNow();
+    if (_bookKeyHandler) {
+      document.removeEventListener('keydown', _bookKeyHandler);
+      _bookKeyHandler = null;
+    }
+    _bookOpenBook = null;
+    _renderNotes();
+  });
+  body.querySelector('.notes-book-reader-edit')?.addEventListener('click', async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    try {
+      await _renameBook(e.currentTarget.dataset.path || book?.path || '', e.currentTarget.dataset.title || book?.title || '');
+    } catch (err) {
+      uiModule.showError?.(err?.message || 'Failed to rename book');
+    }
+  });
+  body.querySelector('.notes-book-prev')?.addEventListener('click', () => _setBookChapter(idx - 1));
+  body.querySelector('.notes-book-next')?.addEventListener('click', () => _setBookChapter(idx + 1));
+  body.querySelector('.notes-book-select')?.addEventListener('change', (e) => _setBookChapter(e.target.value));
+  body.querySelectorAll('.notes-book-mode-btn').forEach(btn => {
+    if (btn.dataset.pdfMode) btn.addEventListener('click', () => _setBookPdfViewMode(btn.dataset.pdfMode || 'pdf'));
+    else btn.addEventListener('click', () => _setBookReadMode(btn.dataset.mode || 'scroll'));
+  });
+  if (body._notesBookScrollHandler) body.removeEventListener('scroll', body._notesBookScrollHandler);
+  const page = body.querySelector('.notes-book-page');
+  body._notesBookScrollHandler = () => {
+    if (_bookUsesContinuousScroll()) {
+      _updateBookVisibleChapterFromScroll();
+      const line = body.querySelector('.notes-epub-progress-line span');
+      if (line) line.style.width = `${_bookChapterScrollPercent()}%`;
+      _trimBookContinuousStream();
+      _scheduleBookProgressSave();
+      _appendNextBookChapterIfNeeded();
+      return;
+    }
+    _scheduleBookProgressSave();
+  };
+  const scrollNode = _bookReadMode === 'page' && page ? page : body;
+  scrollNode.addEventListener('scroll', body._notesBookScrollHandler, { passive: true });
+  if (continuousScroll) requestAnimationFrame(() => _appendNextBookChapterIfNeeded());
+  if (_bookKeyHandler) document.removeEventListener('keydown', _bookKeyHandler);
+  _bookKeyHandler = (e) => {
+    if (!_bookOpenBook || _notesMode !== 'books') return;
+    const target = e.target;
+    const tag = target?.tagName || '';
+    if (target?.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT', 'BUTTON'].includes(tag)) return;
+    if (e.key === 'ArrowRight') {
+      e.preventDefault();
+      _turnBookPage(1);
+    } else if (e.key === 'ArrowLeft') {
+      e.preventDefault();
+      _turnBookPage(-1);
+    }
+  };
+  document.addEventListener('keydown', _bookKeyHandler);
+  if (page) {
+    let touchStartX = 0;
+    let touchStartY = 0;
+    page.addEventListener('touchstart', (e) => {
+      const touch = e.touches?.[0];
+      if (!touch) return;
+      touchStartX = touch.clientX;
+      touchStartY = touch.clientY;
+    }, { passive: true });
+    page.addEventListener('touchend', (e) => {
+      if (_bookReadMode !== 'page') return;
+      const touch = e.changedTouches?.[0];
+      if (!touch) return;
+      const dx = touch.clientX - touchStartX;
+      const dy = touch.clientY - touchStartY;
+      if (Math.abs(dx) < 52 || Math.abs(dx) < Math.abs(dy) * 1.4) return;
+      _turnBookPage(dx < 0 ? 1 : -1);
+    }, { passive: true });
+  }
+}
+
+function _renderBooksFiles() {
+  const body = document.querySelector('#notes-pane .notes-pane-body');
+  if (!body) return;
+  _syncNotesModeChrome();
+  const uploadProgress = _bookUploadState ? `
+    <div class="notes-book-upload-progress${_bookUploadState.indeterminate ? ' indeterminate' : ''}${_bookUploadState.error ? ' error' : ''}">
+      <div class="notes-book-upload-top">
+        <span>${_esc(_bookUploadState.label || 'Uploading')}</span>
+        <span>${_bookUploadState.active ? `${Math.round(_bookUploadState.percent || 0)}%` : ''}</span>
+      </div>
+      <div class="notes-book-upload-track"><span style="width:${Math.max(2, Math.min(100, _bookUploadState.percent || 0))}%"></span></div>
+      ${_bookUploadState.detail ? `<div class="notes-book-upload-detail">${_esc(_bookUploadState.detail)}</div>` : ''}
+    </div>` : '';
+  let html = `<div class="notes-vault-bar"><span>Your books</span></div>${uploadProgress}`;
+  if (_booksLoading) {
+    html += `<div class="notes-skeleton"><div class="notes-skeleton-card"></div><div class="notes-skeleton-card short"></div><div class="notes-skeleton-card"></div></div>`;
+    body.innerHTML = html;
+    return;
+  }
+  if (_booksError) {
+    body.innerHTML = html + `<div class="notes-empty-msg">${_esc(_booksError)}</div>`;
+    return;
+  }
+  if (_bookOpenBook) {
+    _renderBookReader(body, html);
+    return;
+  }
+  if (!_books.length) {
+    body.innerHTML = html + `<div class="notes-empty-msg">No EPUB or PDF books found</div>`;
+    return;
+  }
+  html += '<div class="notes-vault-list notes-books-list">';
+  for (const book of _books) {
+    const kind = book.kind === 'pdf' ? 'pdf' : 'epub';
+    const progress = book.progress || {};
+    const loc = progress.updated_at
+      ? `${kind === 'pdf' ? 'page' : 'chapter'} ${Number(progress.chapter_index || 0) + 1}`
+      : 'not started';
+    const title = book.title || _vaultBasename(book.path || 'Book');
+    html += `<div class="notes-vault-file notes-book-file notes-vault-kind-${_attrEsc(kind)}" data-path="${_attrEsc(book.path || '')}" data-title="${_attrEsc(title)}" title="${_attrEsc(book.path || '')}" role="button" tabindex="0">
+      <span class="notes-book-row-main">
+        <span class="notes-book-row-top">
+          <span class="notes-book-kind-pill">${_esc((book.kind || kind).toUpperCase())}</span>
+          <span class="notes-book-row-title">${_esc(title)}</span>
+        </span>
+        <span class="notes-book-row-path">${_esc(book.path || '')}</span>
+        <span class="notes-book-row-meta">${_esc(loc)} · ${_esc(_formatVaultSize(book.size))}</span>
+      </span>
+      <button type="button" class="notes-book-title-edit" data-path="${_attrEsc(book.path || '')}" data-title="${_attrEsc(title)}" title="Rename book" aria-label="Rename book">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
+      </button>
+    </div>`;
+  }
+  html += '</div>';
+  body.innerHTML = html;
+  body.querySelectorAll('.notes-book-title-edit').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      try {
+        await _renameBook(btn.dataset.path || '', btn.dataset.title || '');
+      } catch (err) {
+        uiModule.showError?.(err?.message || 'Failed to rename book');
+      }
+    });
+  });
+  body.querySelectorAll('.notes-book-file').forEach(btn => {
+    const open = async () => {
+      const path = btn.dataset.path || '';
+      try {
+        btn.classList.add('loading');
+        await _openBook(path);
+        _renderNotes();
+        if (_bookOpenBook?.kind !== 'pdf' || _bookPdfViewMode === 'text') {
+          requestAnimationFrame(() => _setBookChapter(_bookOpenBook?.progress?.chapter_index || 0, true));
+        }
+      } catch (e) {
+        uiModule.showError?.(e?.message || 'Failed to open book');
+      } finally {
+        btn.classList.remove('loading');
+      }
+    };
+    btn.addEventListener('click', (e) => {
+      if (e.target.closest('button, input, select, textarea, a')) return;
+      open();
+    });
+    btn.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter' && e.key !== ' ') return;
+      if (e.target.closest('button, input, select, textarea, a')) return;
+      e.preventDefault();
+      open();
+    });
+  });
+}
+
 function _renderNotes() {
   _updateRailBadge();
   const body = document.querySelector('#notes-pane .notes-pane-body');
   if (!body) return;
+  if (_notesMode === 'vault') {
+    _renderVaultFiles();
+    return;
+  }
+  if (_notesMode === 'books') {
+    _renderBooksFiles();
+    return;
+  }
   const prevPositions = _captureCardPositions();
   const activeReminderHighlights = _loadActiveHighlights();
 
@@ -5113,7 +6536,7 @@ async function openNote(noteId) {
   setTimeout(tryNext, 120);
 }
 
-const notesModule = { openPanel, closePanel, togglePanel, isPanelOpen, openNote, openNotes: openPanel, closeNotes: closePanel, isNotesOpen: isPanelOpen, refreshDueBadge };
+const notesModule = { openPanel, closePanel, togglePanel, isPanelOpen, openNote, openBooksPanel, openVaultPanel, openNotes: openPanel, closeNotes: closePanel, isNotesOpen: isPanelOpen, refreshDueBadge };
 export default notesModule;
 export { openPanel as openNotes, closePanel as closeNotes, isPanelOpen as isNotesOpen, openNote };
 window.notesModule = notesModule;

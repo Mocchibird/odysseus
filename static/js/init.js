@@ -17,6 +17,8 @@ function clearFreshComposerRestore() {
 clearFreshComposerRestore();
 window.addEventListener('pageshow', clearFreshComposerRestore);
 
+Storage.applyAgenticDefaultMode();
+
 // SECURITY: defense-in-depth state wipe on user switch. If the authenticated
 // user is different from the one whose state is cached in this browser,
 // wipe localStorage + sessionStorage so the new account doesn't inherit

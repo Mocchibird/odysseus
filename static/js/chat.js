@@ -681,7 +681,11 @@ import { createStreamRenderer } from './streamingRenderer.js';
 
       let ids = [];
       try {
-        ids = await fileHandlerModule.uploadPending();
+        ids = await fileHandlerModule.uploadPending({
+          context: msg,
+          source: 'chat',
+          session: streamSessionId,
+        });
       } catch(e) {
         console.error('upload failed', e);
       }
@@ -802,7 +806,7 @@ import { createStreamRenderer } from './streamingRenderer.js';
       }
       // Web toggle: pre-search in Chat mode, tool permission in Agent mode
       const toggleState = Storage.loadToggleState();
-      let isAgentMode = (toggleState.mode || 'chat') === 'agent';
+      let isAgentMode = (toggleState.mode || 'agent') === 'agent';
       // Auto-escalate to agent mode when a document is open — the user expects
       // the AI to see the document and have tools to edit it
       if (!isAgentMode && documentModule && documentModule.isPanelOpen() && documentModule.getCurrentDocId()) {
@@ -862,7 +866,7 @@ import { createStreamRenderer } from './streamingRenderer.js';
       currentAbort = abortCtrl;
 
       const _tState = Storage.loadToggleState();
-      const _isAgent = (_tState.mode || 'chat') === 'agent';
+      const _isAgent = (_tState.mode || 'agent') === 'agent';
 
       // Timeout: 6 min for research and agent mode, 3 min otherwise
       const timeoutMs = el('research-toggle').checked || _isAgent ? RESEARCH_TIMEOUT_MS : DEFAULT_TIMEOUT_MS;

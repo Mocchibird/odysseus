@@ -185,6 +185,16 @@ class ChatProcessor:
                 "role": "system",
                 "content": preset_system_prompt
             })
+        try:
+            from src.obsidian_context import load_obsidian_session_context
+            obsidian_ctx = load_obsidian_session_context()
+            if obsidian_ctx:
+                preface.append({
+                    "role": "system",
+                    "content": obsidian_ctx,
+                })
+        except Exception:
+            logger.debug("Failed to add Obsidian session context", exc_info=True)
         if not agent_mode:
             try:
                 from src.user_time import current_datetime_prompt
@@ -314,6 +324,28 @@ class ChatProcessor:
             except Exception as e:
                 logger.debug(f"Skills index unavailable: {e}")
                 idx = []
+            try:
+                from services.memory.skills import QUIZ_SPOILER_MARKDOWN_SKILL_NAME
+                relevant_skills = self.skills_manager.get_relevant_skills(
+                    message,
+                    self.skills_manager.load(owner=owner),
+                    max_items=3,
+                    owner=owner,
+                )
+            except Exception as e:
+                logger.debug(f"Relevant skills unavailable: {e}")
+                relevant_skills = []
+            if any(s.get("name") == QUIZ_SPOILER_MARKDOWN_SKILL_NAME for s in relevant_skills):
+                preface.append({
+                    "role": "system",
+                    "content": (
+                        "Built-in skill quiz-spoiler-markdown is relevant. "
+                        "For quiz/self-test answers, write Iris reveal syntax directly: "
+                        "`{{answer}}` for a hidden answer, `||spoiler text||` for inline spoilers, "
+                        "and `[[front::back]]` for flashcards. Never write the skill name as visible "
+                        "text or as a pseudo-call such as `quiz-spoiler-markdown: **C) Saul**`."
+                    ),
+                })
             if idx:
                 by_cat: Dict[str, list] = {}
                 for s in idx:

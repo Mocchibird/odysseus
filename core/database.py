@@ -220,6 +220,26 @@ class Document(TimestampMixin, Base):
                            cascade="all, delete-orphan", order_by="DocumentVersion.version_number")
 
 
+class IrisVaultFile(TimestampMixin, Base):
+    """Obsidian-backed persistent file indexed for Iris retrieval."""
+    __tablename__ = "iris_vault_files"
+
+    id         = Column(String, primary_key=True, index=True)
+    owner      = Column(String, nullable=False, index=True)
+    rel_path   = Column(String, nullable=False, index=True)
+    title      = Column(String, nullable=False, default="")
+    mime       = Column(String, nullable=True)
+    size       = Column(Integer, nullable=False, default=0)
+    sha256     = Column(String(64), nullable=False, index=True)
+    mtime      = Column(DateTime, nullable=True, index=True)
+    excerpt    = Column(Text, nullable=True)
+    content    = Column(Text, nullable=True)
+
+    __table_args__ = (
+        Index("ix_iris_vault_owner_path", "owner", "rel_path", unique=True),
+    )
+
+
 class DocumentVersion(Base):
     """Immutable snapshot of a document at a point in time."""
     __tablename__ = "document_versions"
@@ -1100,7 +1120,7 @@ def _migrate_assign_legacy_owner():
             "calendars", "calendar_events", "integrations",
             "scheduled_tasks", "task_runs", "crew_members",
             "gallery_albums", "gallery_people", "user_tool_data",
-            "api_tokens", "webhooks",
+            "api_tokens", "webhooks", "iris_vault_files",
         ]
         for table in tables:
             try:
@@ -1458,11 +1478,15 @@ class CalendarCal(TimestampMixin, Base):
     owner = Column(String, nullable=True, index=True)
     name  = Column(String, nullable=False)
     color = Column(String, default="#5b8abf")
-    source = Column(String, default="local")  # "local" or "caldav"
+    source = Column(String, default="local")  # "local", "caldav", or "ics"
     # UUID of the CalDAV account in user prefs that owns this calendar.
     # NULL for local calendars and for CalDAV calendars created before
     # multi-account support was added (treated as "use any configured account").
     account_id = Column(String, nullable=True, index=True)
+    source_url = Column(Text, nullable=True)  # ICS/webcal feed URL for subscribed calendars
+    sync_enabled = Column(Boolean, default=True)
+    last_synced = Column(DateTime, nullable=True)
+    sync_status = Column(Text, nullable=True)
 
     events = relationship("CalendarEvent", back_populates="calendar", cascade="all, delete-orphan")
 
@@ -1624,6 +1648,7 @@ def init_db():
     _migrate_add_email_smtp_security()
     _migrate_seed_email_account()
     _migrate_add_calendar_metadata()
+    _migrate_add_calendar_subscription_columns()
     _migrate_add_calendar_is_utc()
     _migrate_add_calendar_origin()
     _migrate_add_calendar_account_id()
@@ -1927,6 +1952,31 @@ def _migrate_add_calendar_metadata():
         conn.close()
     except Exception as e:
         logging.getLogger(__name__).warning(f"calendar_events migration failed: {e}")
+
+
+def _migrate_add_calendar_subscription_columns():
+    """Add ICS subscription metadata to calendars."""
+    import sqlite3
+    db_path = DATABASE_URL.replace("sqlite:///", "")
+    if not os.path.exists(db_path):
+        return
+    try:
+        conn = sqlite3.connect(db_path)
+        cursor = conn.execute("PRAGMA table_info(calendars)")
+        columns = [row[1] for row in cursor.fetchall()]
+        if columns and "source_url" not in columns:
+            conn.execute("ALTER TABLE calendars ADD COLUMN source_url TEXT")
+        if columns and "sync_enabled" not in columns:
+            conn.execute("ALTER TABLE calendars ADD COLUMN sync_enabled BOOLEAN DEFAULT 1")
+        if columns and "last_synced" not in columns:
+            conn.execute("ALTER TABLE calendars ADD COLUMN last_synced DATETIME")
+        if columns and "sync_status" not in columns:
+            conn.execute("ALTER TABLE calendars ADD COLUMN sync_status TEXT")
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        logging.getLogger(__name__).warning(f"calendar subscription migration failed: {e}")
+
 
 def get_db():
     """

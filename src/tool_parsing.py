@@ -133,6 +133,10 @@ _TOOL_NAME_MAP = {
     "session_control": "manage_session",
     "manage_memory": "manage_memory",
     "memory": "manage_memory",
+    "manage_books": "manage_books",
+    "books": "manage_books",
+    "ereader": "manage_books",
+    "e_reader": "manage_books",
     "manage_tasks": "manage_tasks",
     "tasks": "manage_tasks",
     "schedule": "manage_tasks",
@@ -145,6 +149,10 @@ _TOOL_NAME_MAP = {
     "api_call": "api_call",
     "api": "api_call",
     "integration": "api_call",
+    "send_ping": "send_ping",
+    "ping": "send_ping",
+    "notify": "send_ping",
+    "notification": "send_ping",
     "ask_teacher": "ask_teacher",
     "teacher": "ask_teacher",
     "manage_skills": "manage_skills",
@@ -175,6 +183,10 @@ _TOOL_NAME_MAP = {
     "notes": "manage_notes",
     "todo": "manage_notes",
     "todos": "manage_notes",
+    "manage_iris_vault": "manage_iris_vault",
+    "iris_vault": "manage_iris_vault",
+    "vault_files": "manage_iris_vault",
+    "obsidian_files": "manage_iris_vault",
 }
 
 _MISFENCED_WEB_TOOL_NAMES = {

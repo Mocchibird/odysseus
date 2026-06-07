@@ -49,6 +49,31 @@ from routes.document_helpers import (
 )
 
 
+def _mirror_document_to_vault(owner: str | None, doc: Document) -> None:
+    if not owner or not doc or (doc.language or "").lower() == "email":
+        return
+    try:
+        from src import iris_vault
+
+        title = (doc.title or "Untitled Document").strip() or "Untitled Document"
+        rel_path = f"10_Notes/documents/{doc.id}.md"
+        language = (doc.language or "text").strip() or "text"
+        content = doc.current_content or ""
+        vault_text = (
+            "---\n"
+            "type: document\n"
+            "source: odysseus\n"
+            f"document_id: {doc.id}\n"
+            f"language: {language}\n"
+            "---\n\n"
+            f"# {title}\n\n"
+            f"{content}"
+        )
+        iris_vault.write_text_file(owner, rel_path, vault_text)
+    except Exception:
+        logger.debug("Document vault mirror skipped", exc_info=True)
+
+
 def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
     router = APIRouter(tags=["documents"])
 
@@ -128,6 +153,7 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
             db.add(ver)
             db.commit()
             db.refresh(doc)
+            _mirror_document_to_vault(doc.owner or user, doc)
             try:
                 from src.event_bus import fire_event
                 fire_event("document_created", doc.owner)
@@ -184,7 +210,13 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
 
         client_ip = request.client.host if request.client else "unknown"
         try:
-            meta = upload_handler.save_upload(file, client_ip, owner=user)
+            meta = upload_handler.save_upload(
+                file,
+                client_ip,
+                owner=user,
+                context="PDF document import",
+                source="documents",
+            )
         except HTTPException:
             raise
         except Exception as e:
@@ -241,6 +273,7 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
                 doc.owner = user
                 db.commit()
                 db.refresh(doc)
+            _mirror_document_to_vault(doc.owner or user, doc)
             return _doc_to_dict(doc)
         finally:
             db.close()
@@ -580,6 +613,7 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
             doc.current_content = req.content
             db.commit()
             db.refresh(doc)
+            _mirror_document_to_vault(doc.owner or user, doc)
             return _doc_to_dict(doc)
         except HTTPException:
             raise
@@ -619,6 +653,7 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
                         pass
             db.commit()
             db.refresh(doc)
+            _mirror_document_to_vault(doc.owner or user, doc)
             return _doc_to_dict(doc)
         except HTTPException:
             raise

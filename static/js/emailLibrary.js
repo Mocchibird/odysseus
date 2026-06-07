@@ -585,6 +585,84 @@ function _acct() {
   return state._libAccountId ? `&account_id=${encodeURIComponent(state._libAccountId)}` : '';
 }
 
+function _emailInlineCidKey(value) {
+  let raw = String(value || '').trim();
+  if (!raw) return '';
+  if (/^cid:/i.test(raw)) raw = raw.replace(/^cid:/i, '');
+  try { raw = decodeURIComponent(raw); } catch (_) {}
+  return raw.trim().replace(/^<+/, '').replace(/>+$/, '').trim().toLowerCase();
+}
+
+function _emailInlineAttachmentUrl(data, att) {
+  const uid = String(data?.uid || '').trim();
+  if (!uid || !att || att.index == null) return '';
+  const folder = String(data?.folder || state._libFolder || 'INBOX');
+  const params = new URLSearchParams();
+  params.set('folder', folder);
+  const accountId = String(data?.account_id || state._libAccountId || window.__odysseusActiveEmailAccount || '').trim();
+  if (accountId) params.set('account_id', accountId);
+  return `${API_BASE}/api/email/attachment/${encodeURIComponent(uid)}/${encodeURIComponent(att.index)}?${params.toString()}`;
+}
+
+function _rewriteInlineEmailImages(html, data) {
+  if (!html || !data?.uid || !Array.isArray(data.attachments) || !data.attachments.length) {
+    return html || '';
+  }
+  const byCid = new Map();
+  for (const att of data.attachments) {
+    if (!att || att.index == null) continue;
+    const keys = [
+      att.content_id,
+      att.content_location,
+    ].map(_emailInlineCidKey).filter(Boolean);
+    for (const key of keys) {
+      if (!byCid.has(key)) byCid.set(key, att);
+    }
+  }
+  if (!byCid.size) return html;
+
+  const replaceUrl = (value) => {
+    const key = _emailInlineCidKey(value);
+    if (!key) return '';
+    const att = byCid.get(key);
+    return att ? _emailInlineAttachmentUrl(data, att) : '';
+  };
+
+  try {
+    const doc = new DOMParser().parseFromString(String(html), 'text/html');
+    let changed = false;
+    doc.querySelectorAll('img[src], source[src], input[src]').forEach(el => {
+      const src = el.getAttribute('src') || '';
+      const replacement = replaceUrl(src);
+      if (!replacement) return;
+      el.setAttribute('src', replacement);
+      el.setAttribute('loading', 'lazy');
+      el.setAttribute('decoding', 'async');
+      el.classList.add('email-inline-image');
+      changed = true;
+    });
+    doc.querySelectorAll('[srcset]').forEach(el => {
+      const srcset = el.getAttribute('srcset') || '';
+      let srcsetChanged = false;
+      const next = srcset.split(',').map(candidate => {
+        const match = candidate.trim().match(/^(\S+)(.*)$/s);
+        if (!match) return candidate;
+        const replacement = replaceUrl(match[1]);
+        if (!replacement) return candidate;
+        srcsetChanged = true;
+        return `${replacement}${match[2] || ''}`;
+      }).join(', ');
+      if (!srcsetChanged) return;
+      el.setAttribute('srcset', next);
+      changed = true;
+    });
+    return changed ? doc.body.innerHTML : html;
+  } catch (e) {
+    console.warn('inline email image rewrite failed:', e);
+    return html;
+  }
+}
+
 // Per-(account, folder, filter, attachments) cache of the most recent
 // first-page list response. Lets reopen-after-close paint the previous
 // list instantly while the network refresh runs behind it — the modal
@@ -2579,7 +2657,7 @@ function _renderEmailBody(data) {
   const isHtml = !!data.body_html;
   let rendered;
   if (isHtml) {
-    rendered = _sanitizeHtml(data.body_html);
+    rendered = _sanitizeHtml(_rewriteInlineEmailImages(data.body_html, data));
   } else {
     const plainTurns = _renderPlaintextThread(data.body || '');
     if (plainTurns) return _foldSignature(plainTurns, hintSig);
@@ -2597,7 +2675,7 @@ function _safeRenderEmailBody(data) {
     console.error('email body render failed:', e);
     const plain = (typeof data?.body === 'string') ? data.body : '';
     if (plain) return _escLinkify(plain).replace(/\n/g, '<br>');
-    if (data?.body_html) return _sanitizeHtml(data.body_html);
+    if (data?.body_html) return _sanitizeHtml(_rewriteInlineEmailImages(data.body_html, data));
     return '<span style="opacity:.65">No body</span>';
   }
 }

@@ -24,7 +24,7 @@ import censorModule from './js/censor.js';
 import galleryModule from './js/gallery.js';
 import tasksModule from './js/tasks.js';
 import calendarModule from './js/calendar.js';
-import notesModule from './js/notes.js';
+import notesModule from './js/notes.js?v=341';
 import adminModule from './js/admin.js';
 import settingsModule from './js/settings.js';
 // Eagerly bind unified minimize/restore behavior across all tool modals.
@@ -67,6 +67,13 @@ window.fetch = async function(...args) {
 
 
 const el = uiModule.el;
+
+function _removeLegacyBooksModal() {
+  try {
+    document.querySelectorAll('#books-modal, .books-modal').forEach(node => node.remove());
+  } catch (_) {}
+}
+_removeLegacyBooksModal();
 
 // Default chat config — refreshed on every new-chat action so settings
 // changes take effect immediately (previously cached once at page load and
@@ -351,7 +358,7 @@ function initializeEventListeners() {
       e.stopPropagation();
       exportMenu.classList.remove('open');
       const meta = sessionModule.getSessions().find(s => s.id === sessionModule.getCurrentSessionId());
-      const sessionName = meta ? meta.name : 'Odysseus Chat';
+      const sessionName = meta ? meta.name : 'Iris Chat';
       const originalTitle = document.title;
       document.title = sessionName;
       const chatHistory = document.getElementById('chat-history');
@@ -706,7 +713,7 @@ function initializeEventListeners() {
       if (bashChk && bashChk.checked) {
         bashChk.checked = false;
         if (bashBtn) bashBtn.classList.remove('active');
-        saveToolPref('bash', (loadToggleState().mode || 'chat'), false);
+        saveToolPref('bash', (loadToggleState().mode || 'agent'), false);
       }
     }
     const s = loadToggleState(); s.research = active; saveToggleState(s);
@@ -737,7 +744,7 @@ function initializeEventListeners() {
       const _webChk = el('web-toggle');
       if (_webChk && _webChk.checked) {
         _webChk.checked = false;
-        saveToolPref('web', (loadToggleState().mode || 'chat'), false);
+        saveToolPref('web', (loadToggleState().mode || 'agent'), false);
       }
     }
     const s = loadToggleState(); s.group = active; saveToggleState(s);
@@ -749,7 +756,7 @@ function initializeEventListeners() {
     const welcomeName = document.querySelector('.welcome-name');
     const welcomeSub = el('welcome-sub');
     const tipEl = el('welcome-tip');
-    const _resIco = '<svg class="welcome-boat" style="position:relative;top:0.5px;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg>';
+    const _resIco = '<svg class="welcome-mark" style="position:relative;top:0.5px;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg>';
     if (active) {
       if (welcomeName) {
         if (!welcomeName.dataset.researchOrigHtml) welcomeName.dataset.researchOrigHtml = welcomeName.innerHTML;
@@ -873,6 +880,15 @@ function initializeEventListeners() {
         if (galleryModule.isGalleryOpen()) galleryModule.closeGallery();
         else galleryModule.openGallery();
       }
+    });
+  }
+
+  // Books / E-Reader tool button
+  const toolBooksBtn = el('tool-books-btn');
+  if (toolBooksBtn) {
+    toolBooksBtn.addEventListener('click', () => {
+      _removeLegacyBooksModal();
+      if (notesModule?.openBooksPanel) notesModule.openBooksPanel();
     });
   }
 
@@ -1005,6 +1021,10 @@ function initializeEventListeners() {
         setTimeout(_go, 50);
         setTimeout(_go, 200);
       }
+    },
+    '/books':    () => {
+      _removeLegacyBooksModal();
+      return notesModule?.openBooksPanel && notesModule.openBooksPanel();
     },
     '/calendar': () => calendarModule && calendarModule.openCalendar(),
     '/cookbook': () => document.getElementById('tool-cookbook-btn')?.click(),
@@ -1604,7 +1624,7 @@ function initializeEventListeners() {
     const chatBtn = el('mode-chat-btn');
     if (!agentBtn || !chatBtn) return;
     const state = loadToggleState();
-    let currentMode = state.mode || 'chat';
+    let currentMode = state.mode || 'agent';
 
     function setMode(mode) {
       currentMode = mode;
@@ -2003,7 +2023,7 @@ function initializeEventListeners() {
         if (webChk && webChk.checked) {
           webChk.checked = false;
           if (webBtn) webBtn.classList.remove('active');
-          saveToolPref('web', (st.mode || 'chat'), false);
+          saveToolPref('web', (st.mode || 'agent'), false);
         }
       }
 
@@ -2021,7 +2041,7 @@ function initializeEventListeners() {
           if (webChk && webChk.checked) {
             webChk.checked = false;
             if (webBtn) webBtn.classList.remove('active');
-            saveToolPref('web', (loadToggleState().mode || 'chat'), false);
+            saveToolPref('web', (loadToggleState().mode || 'agent'), false);
           }
           // Research requires chat mode — force switch from agent
           const rs = loadToggleState();
@@ -2195,7 +2215,7 @@ function initializeEventListeners() {
       pickerWrap.classList.toggle('picker-auto-hidden', w < PICKER_HIDE_WIDTH);
       // Hide placeholder text
       if (textarea) {
-        textarea.setAttribute('placeholder', w < PLACEHOLDER_HIDE_WIDTH ? '' : 'Message Odysseus...');
+        textarea.setAttribute('placeholder', w < PLACEHOLDER_HIDE_WIDTH ? '' : 'Message Iris...');
       }
       // Hide entire bottom toolbar (tools, mode toggle) — only send button remains
       if (inputBottom) {
@@ -2273,7 +2293,7 @@ function initializeEventListeners() {
         if (webChk && webChk.checked) {
           webChk.checked = false;
           if (webBtn) webBtn.classList.remove('active');
-          saveToolPref('web', (loadToggleState().mode || 'chat'), false);
+          saveToolPref('web', (loadToggleState().mode || 'agent'), false);
         }
         // Research requires chat mode
         const rs2 = loadToggleState();
@@ -2365,7 +2385,7 @@ function initializeEventListeners() {
         incognitoBtn.innerHTML = INCOGNITO_EYE_CLOSED + '<span class="incognito-label">Nobody</span>';
         if (welcomeName) {
           welcomeName.dataset.originalHtml = welcomeName.innerHTML;
-          welcomeName.innerHTML = '<svg class="welcome-boat" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><line x1="8" y1="16" x2="16" y2="8"/><line x1="8" y1="8" x2="16" y2="16"/></svg>Nobody';
+          welcomeName.innerHTML = '<svg class="welcome-mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><line x1="8" y1="16" x2="16" y2="8"/><line x1="8" y1="8" x2="16" y2="16"/></svg>Nobody';
           // Restart the L→R clip-wipe reveal on the new label
           welcomeName.style.animation = 'none';
           welcomeName.offsetHeight;
@@ -2420,7 +2440,7 @@ function initializeEventListeners() {
         });
         if (_dirty) Storage.setJSON(Storage.KEYS.TOGGLES, _ts);
         // Reapply the current mode's real defaults to the visible toggles
-        const _curMode = (Storage.getJSON(Storage.KEYS.TOGGLES, {}) || {}).mode || 'chat';
+        const _curMode = (Storage.getJSON(Storage.KEYS.TOGGLES, {}) || {}).mode || 'agent';
         try { applyModeToToggles(_curMode); } catch (_) {}
       }
       // If toggled off mid-chat (welcome screen hidden), hide the button
@@ -2471,6 +2491,7 @@ function initializeEventListeners() {
     // inside the Tools section in the sidebar.
     'tool-calendar':       '#tool-calendar-btn',
     'tool-compare':        '#tool-compare-btn',
+    'tool-books':          '#tool-books-btn',
     'tool-cookbook':       '#tool-cookbook-btn',
     'tool-research':       '#tool-research-btn',
     'tool-gallery':        '#tool-gallery-btn',
@@ -3484,6 +3505,7 @@ function startOdysseusApp() {
 
   // Rail tool buttons — delegate to sidebar tool buttons
   const _railToolMap = {
+    'rail-books':     'tool-books-btn',
     'rail-compare':   'tool-compare-btn',
     'rail-research':  'tool-research-btn',
     'rail-cookbook':   'tool-cookbook-btn',
