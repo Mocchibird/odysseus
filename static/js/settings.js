@@ -2352,6 +2352,9 @@ async function initReminderSettings() {
     'reminder_ntfy_topic',
     'reminder_email_account_id',
     'reminder_email_to',
+    'quiet_hours_enabled',
+    'quiet_hours_start',
+    'quiet_hours_end',
   ]);
   const REMINDER_PREF_ALLOW_EMPTY = new Set(['reminder_email_account_id', 'reminder_email_to']);
 
@@ -2570,6 +2573,17 @@ async function initReminderSettings() {
     llmToggle.checked = !!s.reminder_llm_synthesis;
     if (emailToIn) emailToIn.value = s.reminder_email_to || '';
     if (ntfyTopicIn) ntfyTopicIn.value = s.reminder_ntfy_topic || 'Reminders';
+    // Quiet hours: initial values + show/hide the time row.
+    {
+      const qhEnabled = el('set-quiet-hours-enabled');
+      const qhStart = el('set-quiet-hours-start');
+      const qhEnd = el('set-quiet-hours-end');
+      const qhRow = el('set-quiet-hours-row');
+      if (qhEnabled) qhEnabled.checked = !!s.quiet_hours_enabled;
+      if (qhStart) qhStart.value = s.quiet_hours_start || '22:00';
+      if (qhEnd) qhEnd.value = s.quiet_hours_end || '07:00';
+      if (qhRow) qhRow.style.display = s.quiet_hours_enabled ? 'flex' : 'none';
+    }
     populateWebhookIntegrations(s.reminder_webhook_integration_id || '');
     if (webhookTemplateIn) {
       webhookTemplateIn.value = s.reminder_webhook_payload_template || '';
@@ -2644,6 +2658,19 @@ async function initReminderSettings() {
       clearTimeout(topicDebounce);
       topicDebounce = setTimeout(() => save({ reminder_ntfy_topic: ntfyTopicIn.value.trim() || 'reminders' }), 600);
     });
+  }
+  // Quiet hours wiring
+  {
+    const qhEnabled = el('set-quiet-hours-enabled');
+    const qhStart = el('set-quiet-hours-start');
+    const qhEnd = el('set-quiet-hours-end');
+    const qhRow = el('set-quiet-hours-row');
+    if (qhEnabled) qhEnabled.addEventListener('change', () => {
+      if (qhRow) qhRow.style.display = qhEnabled.checked ? 'flex' : 'none';
+      save({ quiet_hours_enabled: qhEnabled.checked });
+    });
+    if (qhStart) qhStart.addEventListener('change', () => save({ quiet_hours_start: qhStart.value || '22:00' }));
+    if (qhEnd) qhEnd.addEventListener('change', () => save({ quiet_hours_end: qhEnd.value || '07:00' }));
   }
   if (webhookIntgSel) {
     webhookIntgSel.addEventListener('change', () => {

@@ -165,6 +165,19 @@ async def dispatch_reminder(
 
     channel = _setting("reminder_channel", "browser")
     llm_on = bool(_setting("reminder_llm_synthesis", False))
+    # Quiet hours: suppress the actual push (the reminder still lands in the
+    # Pings feed, so nothing is lost). Test reminders bypass it. Evaluated in
+    # server local time; the window may wrap past midnight.
+    suppress_push = False
+    if not str(note_id or "").startswith("test-") and bool(_setting("quiet_hours_enabled", False)):
+        from datetime import datetime as _dtq
+        _qs = (str(_setting("quiet_hours_start", "22:00") or "22:00")).strip()
+        _qe = (str(_setting("quiet_hours_end", "07:00") or "07:00")).strip()
+        _now = _dtq.now().strftime("%H:%M")
+        if _qs != _qe:
+            suppress_push = (_qs <= _now < _qe) if _qs < _qe else (_now >= _qs or _now < _qe)
+    if suppress_push:
+        llm_on = False  # don't synthesize a line we won't push
     title = (title or "").strip()
     note_body = (note_body or "").strip()
     cache_key = str(note_id) if note_id else ""
@@ -299,7 +312,7 @@ async def dispatch_reminder(
 
     email_sent = False
     email_error = ""
-    if channel == "email":
+    if channel == "email" and not suppress_push:
         try:
             from routes.email_routes import _get_email_config
             from email.mime.text import MIMEText
@@ -396,7 +409,7 @@ async def dispatch_reminder(
 
     webhook_sent = False
     webhook_error = ""
-    if channel == "webhook":
+    if channel == "webhook" and not suppress_push:
         try:
             import httpx
             import json as _wjson
@@ -466,7 +479,7 @@ async def dispatch_reminder(
 
     ntfy_sent = False
     ntfy_error = ""
-    if channel == "ntfy":
+    if channel == "ntfy" and not suppress_push:
         try:
             from src.integrations import load_integrations
             from src.ntfy_client import resolve_ntfy_integration, send_ntfy_notification
@@ -505,7 +518,7 @@ async def dispatch_reminder(
     # primary channel is email/ntfy and the tab is open.
     browser_sent = False
     local_browser_sent = (not queue_browser and channel == "browser")
-    if queue_browser and _scheduler_ref is not None:
+    if queue_browser and not suppress_push and _scheduler_ref is not None:
         try:
             _scheduler_ref.add_notification(
                 task_name=title or "Reminder",
@@ -526,7 +539,8 @@ async def dispatch_reminder(
             from src import pings_store
             pings_store.create(
                 owner, title or "Reminder", synthesis or note_body or title or "",
-                kind="reminder", source="reminder", source_ref=f"note:{note_id}",
+                kind="reminder", source="reminder (quiet hours)" if suppress_push else "reminder",
+                source_ref=f"note:{note_id}",
             )
         except Exception as _pe:
             logger.debug(f"dispatch_reminder: ping write failed: {_pe}")
@@ -536,7 +550,7 @@ async def dispatch_reminder(
     # second send for the same note within 25 min. Without this, a note
     # whose due_date fires while the user has the app open got TWO emails
     # (frontend-fired here + background-fired by ping_notes 0–5 min later).
-    if (email_sent or ntfy_sent or webhook_sent or browser_sent or local_browser_sent) and note_id:
+    if (email_sent or ntfy_sent or webhook_sent or browser_sent or local_browser_sent or suppress_push) and note_id:
         try:
             import json as _json
             from datetime import datetime as _dt, timezone as _tz
@@ -552,7 +566,7 @@ async def dispatch_reminder(
                 _cache = cache or (_json.loads(_STATE.read_text(encoding="utf-8")) if _STATE.exists() else {})
             except Exception:
                 _cache = {}
-            sent_channel = "email" if email_sent else "ntfy" if ntfy_sent else "webhook" if webhook_sent else "browser"
+            sent_channel = "email" if email_sent else "ntfy" if ntfy_sent else "webhook" if webhook_sent else "quiet" if suppress_push else "browser"
             _cache[cache_key or str(note_id)] = {
                 "at": _dt.now(_tz.utc).isoformat(),
                 "channel": sent_channel,
@@ -571,6 +585,7 @@ async def dispatch_reminder(
         "webhook_sent": webhook_sent,
         "webhook_error": webhook_error,
         "browser_sent": browser_sent or local_browser_sent,
+        "quiet_hours": suppress_push,
     }
 
 
@@ -833,11 +848,12 @@ def setup_note_routes(task_scheduler=None):
 
         caller = _owner(request)
         is_test = note_id.startswith("test-")
-        is_admin = _is_admin_or_single_user(request, user or caller)
         _override: dict = {}
         if is_test:
-            if not is_admin:
-                raise HTTPException(403, "Admin only")
+            # Any authenticated user may fire a TEST reminder to their OWN
+            # configured channel/topic (previously admin-only). require_user
+            # above gates anonymous callers, and dispatch_reminder is
+            # owner-scoped, so a test only ever exercises the caller's delivery.
             title = (body.get("title") or "Test Reminder").strip() or "Test Reminder"
             note_body = (body.get("body") or "").strip()
             # Optional overrides let the admin settings test button pass the

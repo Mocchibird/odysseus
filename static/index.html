@@ -2021,6 +2021,21 @@
                 <textarea id="set-reminder-webhook-template" class="settings-select" rows="3" style="font-family:inherit;resize:vertical;flex:1" placeholder='{"content": "{{title}}: {{message}}"}'></textarea>
               </div>
               <div id="set-reminder-channel-hint" style="font-size:11px;opacity:0.6;"></div>
+              <div class="settings-row" style="margin-top:6px">
+                <label class="settings-label" for="set-quiet-hours-enabled">Quiet hours</label>
+                <label style="display:flex;align-items:center;gap:8px;flex:1;cursor:pointer;">
+                  <input type="checkbox" id="set-quiet-hours-enabled" />
+                  <span style="font-size:12px;opacity:0.7;">Don't push reminders overnight — they still appear in Pings</span>
+                </label>
+              </div>
+              <div id="set-quiet-hours-row" class="settings-row" style="display:none">
+                <label class="settings-label">From / to</label>
+                <div style="display:flex;gap:8px;align-items:center;flex:1;">
+                  <input id="set-quiet-hours-start" class="settings-select" type="time" style="flex:0 0 auto;width:auto;" />
+                  <span style="opacity:0.6;">to</span>
+                  <input id="set-quiet-hours-end" class="settings-select" type="time" style="flex:0 0 auto;width:auto;" />
+                </div>
+              </div>
               <div style="font-size:11px;opacity:0.6;margin-top:4px;">Configure email account, ntfy server, etc. in <a href="#" id="set-reminders-open-integrations" style="color:var(--accent, var(--red));text-decoration:none;font-weight:600;">Integrations</a>.</div>
             </div>
           </div>

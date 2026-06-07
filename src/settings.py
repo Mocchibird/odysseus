@@ -148,6 +148,13 @@ DEFAULT_SETTINGS = {
     # Optional explicit ntfy connection (integration id). Empty = auto-pick the
     # connection whose `ntfy_topic` matches reminder_ntfy_topic, else the first.
     "reminder_ntfy_integration_id": "",
+    # Quiet hours: during this window, reminders are NOT pushed (ntfy/email/
+    # webhook/browser) — they still land in the Pings feed so nothing is lost.
+    # Evaluated in server local time (TZ). Window may wrap midnight. Test
+    # reminders always bypass it.
+    "quiet_hours_enabled": False,
+    "quiet_hours_start": "22:00",
+    "quiet_hours_end": "07:00",
     "reminder_email_account_id": "",
     "reminder_email_to": "",
     # Generic outbound webhook channel: pick any saved Integration as the
@@ -259,6 +266,7 @@ _PER_USER_KEYS = {
     "reminder_channel", "reminder_llm_synthesis", "reminder_ntfy_topic",
     "reminder_ntfy_integration_id",
     "reminder_email_account_id", "reminder_email_to",
+    "quiet_hours_enabled", "quiet_hours_start", "quiet_hours_end",
 }
 
 _ALLOW_EMPTY_USER_KEYS = {
