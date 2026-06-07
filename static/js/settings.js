@@ -2669,18 +2669,40 @@ async function initReminderSettings() {
   }
   if (ntfyTopicIn) {
     let topicDebounce;
-    const saveTopic = async () => {
-      const ok = await save({ reminder_ntfy_topic: ntfyTopicIn.value.trim() || 'reminders' });
-      // Confirm on success so it's clear the (per-account) topic persisted.
-      if (ok) { try { uiModule.showToast?.('Your reminder topic was saved'); } catch (_) {} }
+    const statusEl = el('set-reminder-ntfy-topic-status');
+    const setStatus = (msg, color) => { if (statusEl) { statusEl.textContent = msg; statusEl.style.color = color || 'inherit'; } };
+    const saveTopic = async (announce) => {
+      const val = ntfyTopicIn.value.trim() || 'reminders';
+      setStatus('Saving…', 'inherit');
+      const ok = await save({ reminder_ntfy_topic: val });
+      if (!ok) {
+        setStatus('Couldn’t save (HTTP error above) — not saved', 'var(--red)');
+        return;
+      }
+      // Verify it actually persisted for THIS account by reading it back, so a
+      // 200-that-didn't-stick can't masquerade as success.
+      let persisted = null;
+      try {
+        const r = await fetch('/api/prefs/reminder_ntfy_topic', { credentials: 'same-origin' });
+        if (r.ok) persisted = (await r.json()).value;
+      } catch (_) {}
+      if (persisted === val) {
+        setStatus(`Saved ✓ verified — your reminders go to “${val}”`, 'var(--green, #50fa7b)');
+        if (announce) { try { uiModule.showToast?.('Reminder topic saved'); } catch (_) {} }
+      } else {
+        setStatus(`Save returned OK but didn’t persist (server has “${persisted ?? 'nothing'}”). Likely stale cached JS — hard-refresh (Ctrl/Cmd+Shift+R).`, 'var(--red)');
+      }
     };
     ntfyTopicIn.addEventListener('input', () => {
+      setStatus('Unsaved…', 'var(--warn, #f0ad4e)');
       clearTimeout(topicDebounce);
-      topicDebounce = setTimeout(saveTopic, 700);
+      topicDebounce = setTimeout(() => saveTopic(false), 700);
     });
-    // Belt-and-suspenders: also save immediately on blur, in case the user
-    // tabs/clicks away before the debounce fires.
-    ntfyTopicIn.addEventListener('blur', () => { clearTimeout(topicDebounce); saveTopic(); });
+    // Belt-and-suspenders: also save on blur, and an explicit Save button so
+    // there's an obvious, confirmable way to persist it.
+    ntfyTopicIn.addEventListener('blur', () => { clearTimeout(topicDebounce); saveTopic(false); });
+    const saveBtn = el('set-reminder-ntfy-topic-save');
+    if (saveBtn) saveBtn.addEventListener('click', () => { clearTimeout(topicDebounce); saveTopic(true); });
   }
   // Quiet hours wiring
   {
