@@ -172,6 +172,10 @@ if AUTH_ENABLED:
         "/api/health",
         "/api/version",
         "/login",
+        # ntfy reminder action buttons: the signed token in the query IS the
+        # credential (validated in the handler), so a tap from the phone's ntfy
+        # app needs no session cookie — same pattern as the task webhook URLs.
+        "/api/notes/reminder-action",
     }
     AUTH_EXEMPT_PREFIXES = ["/static"]
     # Dynamic paths whose own handler proves identity via a path-embedded

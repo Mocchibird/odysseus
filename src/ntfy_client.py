@@ -96,9 +96,14 @@ async def send_ntfy_notification(
     title: str = "Iris",
     priority: str = "high",
     tags: str = "bell",
+    actions: Optional[str] = None,
     timeout: float = 10.0,
 ) -> Dict[str, Any]:
-    """Send a plain-text ntfy notification through a saved integration."""
+    """Send a plain-text ntfy notification through a saved integration.
+
+    ``actions`` is an optional ntfy ``Actions`` header value (e.g. snooze/done
+    http buttons) — see https://docs.ntfy.sh/publish/#action-buttons.
+    """
     base_url = str(integration.get("base_url") or "").rstrip("/")
     clean_topic = str(topic or "").strip()
     clean_message = str(message or "").strip()
@@ -115,6 +120,8 @@ async def send_ntfy_notification(
     }
     if tags:
         headers["Tags"] = str(tags)
+    if actions:
+        headers["Actions"] = str(actions)
 
     url = f"{base_url}/{quote(clean_topic, safe='')}"
     url, auth = _apply_auth(integration, url, headers)

@@ -134,6 +134,46 @@ def _reminder_text_from_note(note: Note) -> tuple[str, str]:
 _scheduler_ref = None
 
 
+def _reminder_ntfy_actions(note_id, owner):
+    """Build the ntfy `Actions` header (Done / Snooze 1h / Tomorrow 9am) for a
+    reminder push. Returns None when ODYSSEUS_PUBLIC_URL isn't set (the phone
+    needs a reachable URL to act) or for test reminders. Each button is a signed,
+    expiring token so the auth-exempt endpoint can trust the tap without a cookie."""
+    import os
+    from urllib.parse import quote
+    base = os.environ.get("ODYSSEUS_PUBLIC_URL", "").strip().rstrip("/")
+    if not base or not note_id or str(note_id).startswith("test-"):
+        return None
+    try:
+        from src.reminder_tokens import mint
+        tok = quote(mint(str(note_id), owner or ""), safe="")
+    except Exception:
+        return None
+    url = f"{base}/api/notes/reminder-action?token={tok}"
+    return "; ".join([
+        f"action=http, label=Done, url={url}&do=done, method=POST, clear=true",
+        f"action=http, label=Snooze 1h, url={url}&do=snooze1h, method=POST, clear=true",
+        f"action=http, label=Tomorrow 9am, url={url}&do=tomorrow, method=POST, clear=true",
+    ])
+
+
+def _clear_note_ping_cache(owner, note_id):
+    """Drop a note's dedupe entry so a snoozed reminder re-fires at its new time."""
+    try:
+        import json as _json
+        from pathlib import Path as _P
+        slug = "".join(c if (c.isalnum() or c in "-_.@") else "_" for c in (owner or "default"))
+        p = _P(f"data/note_pings_{slug}.json")
+        if not p.exists():
+            return
+        cache = _json.loads(p.read_text(encoding="utf-8"))
+        if str(note_id) in cache:
+            del cache[str(note_id)]
+            p.write_text(_json.dumps(cache), encoding="utf-8")
+    except Exception:
+        pass
+
+
 async def dispatch_reminder(
     title: str,
     note_body: str,
@@ -501,6 +541,7 @@ async def dispatch_reminder(
                     title=title or "Reminder",
                     priority="high",
                     tags="bell",
+                    actions=_reminder_ntfy_actions(note_id, owner),
                 )
                 ntfy_sent = result.get("exit_code") == 0
                 if not ntfy_sent:
@@ -882,6 +923,52 @@ def setup_note_routes(task_scheduler=None):
             queue_browser=False,
             settings_override=_override or None,
         )
+
+    # --- REMINDER ACTION (ntfy snooze/done buttons) ---
+    # Auth-exempt (see app.py AUTH_EXEMPT_EXACT): the signed token IS the
+    # credential, so a tap from the ntfy app on the user's phone acts without a
+    # session cookie. `do` is unsigned but validated + harmless (all three are
+    # benign ops on the user's own note; no valid token = rejected).
+    @router.api_route("/reminder-action", methods=["GET", "POST"])
+    async def reminder_action(token: str = "", do: str = ""):
+        from src.reminder_tokens import verify, VALID_ACTIONS
+        from datetime import datetime as _dt, timedelta as _td
+        res = verify(token)
+        if not res:
+            raise HTTPException(401, "Invalid or expired token")
+        note_id, owner = res
+        action = (do or "").strip()
+        if action not in VALID_ACTIONS:
+            raise HTTPException(400, "Unknown action")
+        db = SessionLocal()
+        try:
+            note = db.query(Note).filter(Note.id == note_id).first()
+            if not note or (owner and note.owner != owner):
+                raise HTTPException(404, "Reminder not found")
+            if action == "done":
+                note.due_date = None
+                msg = "Reminder dismissed."
+            elif action == "snooze1h":
+                note.due_date = (_dt.now() + _td(hours=1)).isoformat()
+                msg = "Snoozed 1 hour."
+            else:  # tomorrow
+                t = (_dt.now() + _td(days=1)).replace(hour=9, minute=0, second=0, microsecond=0)
+                note.due_date = t.isoformat()
+                msg = "Snoozed to tomorrow 9:00."
+            db.commit()
+        finally:
+            db.close()
+        # Let the snoozed reminder re-fire at its new time, and record the action.
+        _clear_note_ping_cache(owner, note_id)
+        try:
+            from src import pings_store
+            pings_store.create(
+                owner, "Reminder " + ("dismissed" if action == "done" else "snoozed"),
+                msg, kind="reminder", source="reminder action", source_ref=f"note:{note_id}",
+            )
+        except Exception:
+            pass
+        return {"ok": True, "action": action, "message": msg}
 
     # --- REORDER NOTES ---
     @router.post("/reorder")
