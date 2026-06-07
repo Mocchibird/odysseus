@@ -702,6 +702,14 @@ logger.info("Webhook & API token routes initialized")
 from routes.note_routes import setup_note_routes
 app.include_router(setup_note_routes(task_scheduler))
 
+# Health / Habits / Training
+from routes.health_routes import setup_health_routes
+app.include_router(setup_health_routes())
+
+# Pings & Reminders feed
+from routes.ping_routes import setup_ping_routes
+app.include_router(setup_ping_routes())
+
 # Email
 from routes.email_routes import setup_email_routes
 email_router = setup_email_routes()

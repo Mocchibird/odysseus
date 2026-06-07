@@ -3656,6 +3656,7 @@ async function initUnifiedIntegrations() {
           <div class="settings-row"><label class="settings-label">Name</label><input id="uf-api-name" class="settings-input" placeholder="My Service"></div>
           <div class="settings-row"><label class="settings-label">Base URL</label><input id="uf-api-url" class="settings-input" placeholder="http://localhost:8080"></div>
           <div id="uf-api-ntfy-hint" style="display:none;font-size:11px;line-height:1.35;opacity:0.68;margin:-2px 0 2px 106px;"></div>
+          <div class="settings-row" id="uf-api-ntfy-topic-row" style="display:none"><label class="settings-label">Topic${_apiHint('Optional. The ntfy topic that this connection (and its token) is scoped to. When set, reminders whose topic matches are sent through THIS connection — so you can add one connection (with its own token) per topic/user. Leave blank for a single shared connection.')}</label><input id="uf-api-ntfy-topic" class="settings-input" placeholder="Iris-Reminders-Eqira"></div>
           <div class="settings-row"><label class="settings-label">Auth${_apiHint('How this service expects the credential to be sent. <b>Bearer</b> = sends "Authorization: Bearer YOUR_KEY" (most modern APIs, ntfy, OpenAI-style). <b>Header</b> = sends YOUR_KEY verbatim under a header name you choose (Miniflux uses X-Auth-Token). <b>Basic</b> = HTTP basic auth (user:pass). <b>None</b> = the API is open / no auth.')}</label><select id="uf-api-auth" class="settings-input"><option value="bearer">Bearer (most common)</option><option value="header">Header</option><option value="basic">Basic</option><option value="none">None</option></select></div>
           <div class="settings-row" id="uf-api-header-row"><label class="settings-label">Header${_apiHint('The HTTP header name the key goes under (Miniflux: X-Auth-Token; most others: Authorization). Only used when Auth = Header.')}</label><input id="uf-api-header" class="settings-input" placeholder="X-Auth-Token"></div>
           <div class="settings-row"><label class="settings-label">API Key${_apiHint('The secret token the service issued you (generated in its admin panel / settings). Used to prove your identity on each request. Required for any Auth mode except None.')}</label><input id="uf-api-key" class="settings-input" type="password" placeholder="Token/key"></div>
@@ -3704,7 +3705,7 @@ async function initUnifiedIntegrations() {
       _setFromKey(sel.value || '');
     })();
 
-    const preset = el('uf-api-preset'), name = el('uf-api-name'), url = el('uf-api-url'), auth = el('uf-api-auth'), header = el('uf-api-header'), key = el('uf-api-key'), ntfyHint = el('uf-api-ntfy-hint');
+    const preset = el('uf-api-preset'), name = el('uf-api-name'), url = el('uf-api-url'), auth = el('uf-api-auth'), header = el('uf-api-header'), key = el('uf-api-key'), ntfyHint = el('uf-api-ntfy-hint'), ntfyTopic = el('uf-api-ntfy-topic');
     let _editId = editId && editId !== 'new' ? editId : null;
     // Load existing
     if (_editId) {
@@ -3712,7 +3713,7 @@ async function initUnifiedIntegrations() {
         const r = await fetch('/api/auth/integrations', { credentials: 'same-origin' });
         const d = await r.json();
         const item = (d.integrations || []).find(i => i.id === _editId);
-        if (item) { name.value = item.name || ''; url.value = item.base_url || ''; auth.value = item.auth_type || 'none'; header.value = item.auth_header || ''; }
+        if (item) { name.value = item.name || ''; url.value = item.base_url || ''; auth.value = item.auth_type || 'none'; header.value = item.auth_header || ''; if (ntfyTopic) ntfyTopic.value = item.ntfy_topic || ''; }
       } catch (_) {}
     }
     // Native <select>: the option `value` is the preset key directly, so
@@ -3727,6 +3728,8 @@ async function initUnifiedIntegrations() {
           ntfyHint.innerHTML = 'Enter the ntfy server URL Odysseus can reach. Examples: <code>http://127.0.0.1:8091</code>, <code>http://100.x.y.z:8091</code>, or <code>https://ntfy.example.com</code>.';
         }
       }
+      const ntfyTopicRow = el('uf-api-ntfy-topic-row');
+      if (ntfyTopicRow) ntfyTopicRow.style.display = isNtfy ? '' : 'none';
       if (url) {
         url.placeholder = isNtfy ? 'http://127.0.0.1:8091' : isUrlAuth ? 'https://discord.com/api/webhooks/...' : 'http://localhost:8080';
       }
@@ -3750,6 +3753,8 @@ async function initUnifiedIntegrations() {
       const presetKey = preset.value || undefined;
       const body = { name: name.value, base_url: url.value, auth_type: auth.value, auth_header: header.value, preset: presetKey };
       if (key.value) body.api_key = key.value;
+      const _isNtfy = presetKey === 'ntfy' || (name.value || '').toLowerCase() === 'ntfy';
+      if (_isNtfy && ntfyTopic) body.ntfy_topic = ntfyTopic.value.trim();
       try {
         const u = _editId ? `/api/auth/integrations/${_editId}` : '/api/auth/integrations';
         const m = _editId ? 'PUT' : 'POST';

@@ -2202,8 +2202,182 @@ async def action_cookbook_serve(
     return f"Launched {repo_id} (session {sid})", True
 
 
+def _allow_null_owner() -> bool:
+    """True only on single-user (unconfigured) deploys — gates the owner==NULL
+    OR-branch so one user's wrap-up never folds in another's events/notes."""
+    try:
+        from core.auth import AuthManager
+        return not AuthManager().is_configured
+    except Exception:
+        return False
+
+
+async def action_evening_wrapup(owner: str, **kwargs) -> Tuple[str, bool]:
+    """End-of-day summary: today's events, open todos, habit status, and a
+    preview of tomorrow's first events. Read-only — a counterpart to daily_brief."""
+    try:
+        from datetime import datetime as _dt, timedelta as _td
+        import json as _json
+        from core.database import SessionLocal, CalendarEvent, CalendarCal, Note
+
+        today = _dt.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        tomorrow = today + _td(days=1)
+        day_after = tomorrow + _td(days=1)
+        allow_null = _allow_null_owner()
+        db = SessionLocal()
+        try:
+            def _events(lo, hi):
+                q = db.query(CalendarEvent).join(CalendarCal).filter(
+                    CalendarEvent.dtstart < hi, CalendarEvent.dtend > lo,
+                    CalendarEvent.status != "cancelled",
+                )
+                if owner:
+                    q = owner_filter(q, CalendarCal, owner, include_shared=allow_null)
+                return q.order_by(CalendarEvent.dtstart).all()
+
+            today_events = _events(today, tomorrow)
+            tomorrow_events = _events(tomorrow, day_after)
+            n_q = db.query(Note).filter(Note.archived == False)  # noqa: E712
+            if owner:
+                n_q = owner_filter(n_q, Note, owner, include_shared=allow_null)
+            notes = n_q.all()
+        finally:
+            db.close()
+
+        open_todos = []
+        for n in notes:
+            if n.note_type == "checklist" and n.items:
+                try:
+                    items = _json.loads(n.items)
+                    for it in items:
+                        if not it.get("done") and it.get("text"):
+                            open_todos.append(f"{n.title or 'Checklist'}: {it['text']}")
+                except Exception:
+                    continue
+
+        habit_line = ""
+        try:
+            from src import health_store as hs
+            habits = hs.list_habits(owner or "")
+            if habits:
+                done = [h["name"] for h in habits if h["done_today"]]
+                pending = [h["name"] for h in habits if not h["done_today"]]
+                habit_line = f"Habits: {len(done)}/{len(habits)} done" + (
+                    f" · pending: {', '.join(pending)}" if pending else " · all done 🎉")
+        except Exception:
+            pass
+
+        date_label = today.strftime(f"%A, %B {today.day}, %Y")
+        out = [f"Evening wrap-up — {date_label}", ""]
+        out.append(f"Today you had {len(today_events)} event(s).")
+        for e in today_events:
+            t = e.dtstart.strftime("%H:%M") if not e.all_day else "all day"
+            out.append(f"  {t}  {e.summary}")
+        out.append("")
+        if habit_line:
+            out.append(habit_line)
+            out.append("")
+        if open_todos:
+            out.append(f"Still open ({len(open_todos)}):")
+            for t in open_todos[:10]:
+                out.append(f"  · {t}")
+        else:
+            out.append("No open todos. Nice and clear.")
+        out.append("")
+        if tomorrow_events:
+            out.append("Tomorrow:")
+            for e in tomorrow_events[:5]:
+                t = e.dtstart.strftime("%H:%M") if not e.all_day else "all day"
+                out.append(f"  {t}  {e.summary}")
+        else:
+            out.append("Tomorrow: nothing scheduled yet.")
+        return "\n".join(out), True
+    except Exception as e:
+        logger.error(f"evening_wrapup action failed: {e}")
+        return str(e), False
+
+
+async def action_weekly_review(owner: str, **kwargs) -> Tuple[str, bool]:
+    """ISO-week roll-up: events this week, notes created, open todos, habit
+    completion, and weight change. Read-only."""
+    try:
+        from datetime import datetime as _dt, timedelta as _td
+        import json as _json
+        from core.database import SessionLocal, CalendarEvent, CalendarCal, Note
+
+        now = _dt.now()
+        week_start = (now - _td(days=now.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
+        week_end = week_start + _td(days=7)
+        allow_null = _allow_null_owner()
+        db = SessionLocal()
+        try:
+            ev_q = db.query(CalendarEvent).join(CalendarCal).filter(
+                CalendarEvent.dtstart < week_end, CalendarEvent.dtend > week_start,
+                CalendarEvent.status != "cancelled",
+            )
+            if owner:
+                ev_q = owner_filter(ev_q, CalendarCal, owner, include_shared=allow_null)
+            events = ev_q.all()
+            n_q = db.query(Note).filter(Note.archived == False)  # noqa: E712
+            if owner:
+                n_q = owner_filter(n_q, Note, owner, include_shared=allow_null)
+            notes = n_q.all()
+        finally:
+            db.close()
+
+        created_this_week = sum(
+            1 for n in notes if getattr(n, "created_at", None) and n.created_at >= week_start
+        )
+        open_todos = 0
+        for n in notes:
+            if n.note_type == "checklist" and n.items:
+                try:
+                    open_todos += sum(1 for it in _json.loads(n.items) if not it.get("done"))
+                except Exception:
+                    continue
+
+        out = [f"Weekly review — week of {week_start.strftime(f'%B {week_start.day}, %Y')}", ""]
+        out.append(f"Calendar: {len(events)} event(s) this week.")
+        out.append(f"Notes: {created_this_week} created this week, {open_todos} todo(s) still open.")
+
+        try:
+            from src import health_store as hs
+            habits = hs.list_habits(owner or "")
+            if habits:
+                out.append("")
+                out.append("Habits this week:")
+                for h in habits:
+                    hm = hs.habit_heatmap(owner or "", h["id"], days=7)
+                    out.append(f"  · {h['name']}: {hm['total']}/7 · streak {h['streak']}🔥")
+            trend = hs.weight_trend(owner or "", days=7)
+            if trend.get("count"):
+                out.append("")
+                d = trend["delta_kg"]
+                out.append(f"Weight: {trend['first_kg']} → {trend['last_kg']} kg ({'+' if d > 0 else ''}{d} kg this week).")
+        except Exception:
+            pass
+
+        return "\n".join(out), True
+    except Exception as e:
+        logger.error(f"weekly_review action failed: {e}")
+        return str(e), False
+
+
+async def action_tidy_pings(owner: str, **kwargs) -> Tuple[str, bool]:
+    """Expire old pings from the feed (default 30 days), except those marked keep."""
+    try:
+        from src import pings_store
+        days = int(kwargs.get("days", 30) or 30)
+        n = pings_store.expire_old(days=days)
+        return f"Expired {n} old ping(s).", True
+    except Exception as e:
+        logger.error(f"tidy_pings action failed: {e}")
+        return str(e), False
+
+
 BUILTIN_ACTIONS = {
     "tidy_sessions": action_tidy_sessions,
+    "tidy_pings": action_tidy_pings,
     "tidy_documents": action_tidy_documents,
     "consolidate_memory": action_consolidate_memory,
     "tidy_research": action_tidy_research,
@@ -2214,6 +2388,8 @@ BUILTIN_ACTIONS = {
     # ping_events removed from the user-facing registry. Calendar reminders
     # are represented as Notes, so note pings are the single dispatch path.
     "daily_brief": action_daily_brief,
+    "evening_wrapup": action_evening_wrapup,
+    "weekly_review": action_weekly_review,
     "learn_sender_signatures": action_learn_sender_signatures,
     "ssh_command": action_ssh_command,
     "run_script": action_run_script,
@@ -2228,6 +2404,7 @@ BUILTIN_ACTIONS = {
 # Descriptions for the UI/API
 BUILTIN_ACTION_INFO = {
     "tidy_sessions": "Clean up empty chat sessions and auto-sort into folders",
+    "tidy_pings": "Expire old pings from the Pings & Reminders feed (keeps anything you marked Keep)",
     "tidy_documents": "Remove junk/empty documents",
     "consolidate_memory": "Remove duplicate memories",
     "tidy_research": "Remove orphaned research files (sessions that were deleted)",
@@ -2236,6 +2413,8 @@ BUILTIN_ACTION_INFO = {
     "extract_email_events": "Scan emails for booking/meeting confirmations and auto-add to calendar",
     "classify_events": "Tag upcoming events with importance (low/normal/high/critical) and type (work/health/travel/etc.); colors them too",
     "daily_brief": "Build a morning digest: today's calendar, unread email count + top senders, active todos",
+    "evening_wrapup": "End-of-day summary: today's events, open todos, habit status, and a preview of tomorrow's schedule",
+    "weekly_review": "ISO-week roll-up: events, notes created, open todos, habit completion (x/7 + streaks), and weight change",
     "learn_sender_signatures": "LLM learns each sender's signature from 3+ of their recent emails; cached per address so future renders fold sigs reliably without heuristics",
     "ssh_command": "Run a shell command on a local or remote host",
     "run_script": "Run a script locally or on ODYSSEUS_SCRIPT_HOST",

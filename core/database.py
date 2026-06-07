@@ -2,7 +2,7 @@ import os
 import logging
 import sqlite3
 from datetime import datetime, timezone
-from sqlalchemy import event, create_engine, Column, String, Text, Boolean, DateTime, Integer, ForeignKey, JSON, Index, func, text
+from sqlalchemy import event, create_engine, Column, String, Text, Boolean, DateTime, Integer, Float, ForeignKey, JSON, Index, func, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.types import TypeDecorator
 from sqlalchemy.ext.declarative import declarative_base, declared_attr
@@ -1602,6 +1602,127 @@ def _migrate_seed_email_account():
             logging.getLogger(__name__).info("Seeded email_accounts 'Default' from settings.json")
     except Exception as e:
         logging.getLogger(__name__).warning(f"seed email account migration: {e}")
+
+
+# ---------------------------------------------------------------------------
+# Health / Habits / Training — native Odysseus tables. Owner is the username
+# string (consistent with Note/Calendar), unlike the iris-mcp vault DB which
+# keys on an integer user_id. The UI (static/js/health.js), the REST routes
+# (routes/health_routes.py) and the agent MCP server (mcp_servers/health_server.py)
+# all read/write these through the shared src/health_store.py service.
+# ---------------------------------------------------------------------------
+
+class Habit(TimestampMixin, Base):
+    """A trackable habit. Completions live in HabitLog (one row per day)."""
+    __tablename__ = "habits"
+
+    id          = Column(Integer, primary_key=True, autoincrement=True)
+    owner       = Column(String, nullable=True, index=True)
+    name        = Column(String, nullable=False)
+    category    = Column(String, default="")
+    cadence     = Column(String, default="daily")   # daily | weekdays | weekends | every_n_days
+    cadence_n   = Column(Integer, nullable=True)     # for every_n_days
+    target_time = Column(String, default="")         # optional "HH:MM" reminder hint
+    color       = Column(String, default="")          # optional accent for the heatmap
+    icon        = Column(String, default="")          # optional emoji
+    description = Column(Text, default="")
+    status      = Column(String, default="active")    # active | archived
+    sort_order  = Column(Integer, default=0)
+
+    logs = relationship("HabitLog", back_populates="habit", cascade="all, delete-orphan")
+
+
+class HabitLog(Base):
+    """A single day's completion record for a habit (heatmap cell)."""
+    __tablename__ = "habit_logs"
+
+    id           = Column(Integer, primary_key=True, autoincrement=True)
+    habit_id     = Column(Integer, ForeignKey("habits.id", ondelete="CASCADE"), nullable=False, index=True)
+    day          = Column(String, nullable=False, index=True)  # YYYY-MM-DD
+    done         = Column(Boolean, default=True)
+    duration_min = Column(Integer, nullable=True)
+    notes        = Column(Text, default="")
+    created_at   = Column(DateTime, default=utcnow_naive, nullable=False)
+
+    habit = relationship("Habit", back_populates="logs")
+
+    __table_args__ = (Index("ix_habit_logs_habit_day", "habit_id", "day", unique=True),)
+
+
+class Meal(TimestampMixin, Base):
+    """A logged meal / calorie entry."""
+    __tablename__ = "meals"
+
+    id          = Column(Integer, primary_key=True, autoincrement=True)
+    owner       = Column(String, nullable=True, index=True)
+    eaten_at    = Column(String, nullable=False, index=True)  # ISO timestamp
+    description = Column(String, nullable=False, default="")
+    kcal        = Column(Integer, nullable=False, default=0)
+    protein_g   = Column(Float, nullable=True)
+    carbs_g     = Column(Float, nullable=True)
+    fat_g       = Column(Float, nullable=True)
+    source      = Column(String, default="manual")
+    notes       = Column(Text, default="")
+
+
+class WeightEntry(TimestampMixin, Base):
+    """A body-weight measurement (kg)."""
+    __tablename__ = "weight_entries"
+
+    id          = Column(Integer, primary_key=True, autoincrement=True)
+    owner       = Column(String, nullable=True, index=True)
+    measured_at = Column(String, nullable=False, index=True)  # ISO timestamp
+    kg          = Column(Float, nullable=False)
+    notes       = Column(Text, default="")
+    source      = Column(String, default="manual")
+
+
+class HealthProfile(TimestampMixin, Base):
+    """Per-user health profile used for TDEE/target calculations."""
+    __tablename__ = "health_profiles"
+
+    owner                 = Column(String, primary_key=True)  # one row per user
+    height_cm             = Column(Float, nullable=True)
+    date_of_birth         = Column(String, nullable=True)     # YYYY-MM-DD
+    sex                   = Column(String, nullable=True)      # M | F
+    activity_level        = Column(String, default="moderately_active")
+    target_kg             = Column(Float, nullable=True)
+    target_weekly_loss_kg = Column(Float, nullable=True)
+    daily_kcal_target     = Column(Integer, nullable=True)     # manual override; else computed
+    notes                 = Column(Text, default="")
+
+
+class TrainingSession(TimestampMixin, Base):
+    """A logged training/workout session."""
+    __tablename__ = "training_sessions"
+
+    id           = Column(Integer, primary_key=True, autoincrement=True)
+    owner        = Column(String, nullable=True, index=True)
+    session_at   = Column(String, nullable=False, index=True)  # ISO timestamp
+    kind         = Column(String, default="")
+    duration_min = Column(Integer, nullable=True)
+    rpe          = Column(Integer, nullable=True)               # 1-10
+    summary      = Column(Text, default="")
+
+
+class Ping(TimestampMixin, Base):
+    """A durable feed entry posted by the assistant — reminders, briefs, ntfy
+    pings, and scheduled-task results all land here (the Pings & Reminders feed).
+    Read-only cards in the UI; each can branch into a chat session. Auto-expired
+    by the `tidy_pings` housekeeping action unless `keep` is set."""
+    __tablename__ = "pings"
+
+    id         = Column(String, primary_key=True, index=True)
+    owner      = Column(String, nullable=True, index=True)
+    kind       = Column(String, default="ping")     # ping | reminder | brief | task | email
+    source     = Column(String, default="")          # producer label (task name, etc.)
+    title      = Column(String, default="")
+    body       = Column(Text, nullable=True)
+    source_ref = Column(String, nullable=True)        # e.g. "note:<id>", "email:<uid>" — lets Iris pull it
+    status     = Column(String, default="")           # success|error for task pings
+    read       = Column(Boolean, default=False, index=True)
+    keep       = Column(Boolean, default=False)       # exempt from auto-expire
+    session_id = Column(String, nullable=True)        # branched chat session, if any
 
 
 # WARNING: Foreign-key enforcement is enabled globally for all SQLite connections.

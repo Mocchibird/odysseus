@@ -594,6 +594,38 @@ FUNCTION_TOOL_SCHEMAS = [
     {
         "type": "function",
         "function": {
+            "name": "manage_health",
+            "description": "Log and query the user's health/habits/training (same data shown in the Health panel). Use for 'log my lunch', 'I weigh 72kg', 'mark meditation done', 'how many calories today', 'weight progress'. Calories/weight feed the charts; habit check-ins fill the GitHub-style heatmap.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string",
+                               "enum": ["log_meal", "log_weight", "log_training", "check_habit",
+                                        "list_habits", "habit_heatmap", "calories", "weight_trend", "summary"],
+                               "description": "What to do."},
+                    "description": {"type": "string", "description": "Meal description (for log_meal)."},
+                    "kcal": {"type": "integer", "description": "Calories for the meal (log_meal)."},
+                    "protein_g": {"type": "number", "description": "Optional protein grams (log_meal)."},
+                    "carbs_g": {"type": "number", "description": "Optional carbohydrate grams (log_meal)."},
+                    "fat_g": {"type": "number", "description": "Optional fat grams (log_meal)."},
+                    "kg": {"type": "number", "description": "Body weight in kilograms (log_weight)."},
+                    "habit": {"type": "string", "description": "Habit name or id (check_habit/habit_heatmap)."},
+                    "done": {"type": "boolean", "description": "For check_habit: set explicitly, or omit to toggle today."},
+                    "kind": {"type": "string", "description": "Training type, e.g. 'Strength' (log_training)."},
+                    "duration_min": {"type": "integer", "description": "Training duration in minutes (log_training)."},
+                    "rpe": {"type": "integer", "description": "Rate of perceived exertion 1-10 (log_training)."},
+                    "summary": {"type": "string", "description": "Training notes (log_training)."},
+                    "date": {"type": "string", "description": "YYYY-MM-DD; defaults to today (calories/check_habit)."},
+                    "days": {"type": "integer", "description": "Lookback window (weight_trend/habit_heatmap)."},
+                    "notes": {"type": "string", "description": "Optional note (log_meal/log_weight)."}
+                },
+                "required": ["action"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "api_call",
             "description": "Call a registered API integration (RSS reader, git forge, bookmark manager, smart home, etc.). Check the system context for available integrations and their endpoints.",
             "parameters": {

@@ -24,7 +24,9 @@ import censorModule from './js/censor.js';
 import galleryModule from './js/gallery.js';
 import tasksModule from './js/tasks.js';
 import calendarModule from './js/calendar.js';
-import notesModule from './js/notes.js?v=342';
+import notesModule from './js/notes.js?v=343';
+import healthModule from './js/health.js';
+import pingsModule from './js/pings.js';
 import adminModule from './js/admin.js';
 import settingsModule from './js/settings.js';
 // Eagerly bind unified minimize/restore behavior across all tool modals.
@@ -906,6 +908,31 @@ function initializeEventListeners() {
         tasksModule.isTasksOpen() ? tasksModule.closeTasks() : tasksModule.openTasks();
       }
     });
+  }
+
+  // Health tool button
+  const toolHealthBtn = el('tool-health-btn');
+  if (toolHealthBtn) {
+    toolHealthBtn.addEventListener('click', () => {
+      if (healthModule) {
+        healthModule.isHealthOpen() ? healthModule.closeHealth() : healthModule.openHealth();
+      }
+    });
+  }
+
+  // Pings & Reminders tool button
+  const toolPingsBtn = el('tool-pings-btn');
+  if (toolPingsBtn) {
+    toolPingsBtn.addEventListener('click', () => {
+      if (pingsModule) {
+        pingsModule.isPingsOpen() ? pingsModule.closePings() : pingsModule.openPings();
+      }
+    });
+  }
+  // Consolidated unread indicator on the rail bell + periodic refresh.
+  if (pingsModule && pingsModule.refreshUnreadBadge) {
+    pingsModule.refreshUnreadBadge();
+    setInterval(() => pingsModule.refreshUnreadBadge(), 60 * 1000);
   }
 
   // Calendar tool button
@@ -3512,6 +3539,8 @@ function startOdysseusApp() {
     'rail-archive':   'tool-library-btn',
     'rail-gallery':   'tool-gallery-btn',
     'rail-tasks':     'tool-tasks-btn',
+    'rail-health':    'tool-health-btn',
+    'rail-pings':     'tool-pings-btn',
     'rail-calendar':  'tool-calendar-btn',
     'rail-notes':     'tool-notes-btn',
     'rail-memory':    'tool-memory-btn',

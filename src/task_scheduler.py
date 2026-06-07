@@ -204,6 +204,7 @@ def _resolve_task_timezone(db, task) -> str | None:
 # "cron" uses cron_expression.
 HOUSEKEEPING_DEFAULTS = {
     "tidy_sessions":        {"name": "Chat Sessions Tidy",       "trigger_type": "event", "trigger_event": "session_created", "trigger_count": 5, "schedule": None, "scheduled_time": None, "cron_expression": None, "legacy_names": ["Tidy Chat Sessions"]},
+    "tidy_pings":           {"name": "Pings Tidy",               "schedule": "cron",  "scheduled_time": None,    "cron_expression": "0 3 * * *", "legacy_names": []},
     "tidy_documents":       {"name": "Documents Tidy",           "trigger_type": "event", "trigger_event": "document_created", "trigger_count": 5, "schedule": None, "scheduled_time": None, "cron_expression": None, "legacy_names": ["Tidy Documents"]},
     "consolidate_memory":   {"name": "Memory Tidy",              "trigger_type": "event", "trigger_event": "memory_added", "trigger_count": 5, "schedule": None, "scheduled_time": None, "cron_expression": None, "legacy_names": ["Tidy Memory"]},
     "tidy_research":        {"name": "Research Tidy",            "trigger_type": "event", "trigger_event": "research_completed", "trigger_count": 5, "schedule": None, "scheduled_time": None, "cron_expression": None, "legacy_names": ["Tidy Research"]},
@@ -833,6 +834,20 @@ class TaskScheduler:
                     owner=task.owner,
                     body=run.result if output == "notification" else None,
                 )
+
+            # Mirror notify-worthy runs into the durable Pings feed (briefs,
+            # research results, action outputs, errors). Muted housekeeping
+            # crons set notifications_enabled=False, so the feed stays signal.
+            if getattr(task, "notifications_enabled", True) and run.status in ("success", "error"):
+                try:
+                    from src import pings_store
+                    pings_store.create(
+                        task.owner, task.name, run.result or "",
+                        kind="task", source=task.name, status=run.status,
+                        source_ref=f"task:{task_id}",
+                    )
+                except Exception as _pe:
+                    logger.debug(f"pings_store.create (task) failed: {_pe}")
 
             # Log result to the assistant chat so all task activity is visible.
             # Skip skipped/error rows — user shouldn't see "skipped: …" noise

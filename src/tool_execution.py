@@ -1146,6 +1146,7 @@ async def execute_tool_block(
         do_manage_skills, do_api_call, do_send_ping, do_manage_endpoints,
         do_manage_mcp, do_manage_webhooks, do_manage_tokens,
         do_manage_documents, do_manage_settings, do_manage_notes,
+        do_manage_health,
         do_manage_calendar, do_manage_iris_vault, do_manage_books,
         do_download_model, do_serve_model, do_list_served_models, do_stop_served_model,
         do_tail_serve_output,
@@ -1394,6 +1395,9 @@ async def execute_tool_block(
     elif tool == "manage_notes":
         desc = "manage_notes"
         result = await do_manage_notes(content, owner=owner)
+    elif tool == "manage_health":
+        desc = "manage_health"
+        result = await do_manage_health(content, owner=owner)
     elif tool == "manage_calendar":
         desc = "manage_calendar"
         result = await do_manage_calendar(content, owner=owner)

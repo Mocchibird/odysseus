@@ -469,10 +469,17 @@ async def dispatch_reminder(
     if channel == "ntfy":
         try:
             from src.integrations import load_integrations
-            from src.ntfy_client import find_ntfy_integration, send_ntfy_notification
-            intg = find_ntfy_integration(load_integrations())
+            from src.ntfy_client import resolve_ntfy_integration, send_ntfy_notification
+            topic = _setting("reminder_ntfy_topic", "reminders") or "reminders"
+            # Pick the connection whose token is scoped to this topic so a
+            # "one connection + token per topic" multi-user setup routes to
+            # the right place. Falls back to the first ntfy connection.
+            intg = resolve_ntfy_integration(
+                load_integrations(),
+                topic=topic,
+                integration_id=_setting("reminder_ntfy_integration_id", "") or None,
+            )
             if intg:
-                topic = _setting("reminder_ntfy_topic", "reminders") or "reminders"
                 ntfy_body = synthesis or note_body or title
                 result = await send_ntfy_notification(
                     intg,
@@ -510,6 +517,19 @@ async def dispatch_reminder(
             browser_sent = True
         except Exception as _e:
             logger.debug(f"dispatch_reminder: in-app notif push failed: {_e}")
+
+    # Land every real reminder in the durable Pings feed (skip the settings
+    # "test-" reminders so they don't clutter it). source_ref lets Iris pull
+    # the originating note when the user branches a chat from the card.
+    if note_id and not str(note_id).startswith("test-"):
+        try:
+            from src import pings_store
+            pings_store.create(
+                owner, title or "Reminder", synthesis or note_body or title or "",
+                kind="reminder", source="reminder", source_ref=f"note:{note_id}",
+            )
+        except Exception as _pe:
+            logger.debug(f"dispatch_reminder: ping write failed: {_pe}")
 
     # Dedupe across paths: write to the same cache file `action_ping_notes`
     # reads, so the background scanner's REPING_MIN window suppresses a

@@ -32196,23 +32196,71 @@ body.notes-mobile-mode.notes-drag-mode .note-card-pin.active {
 .notes-book-reader-pdf {
   min-height: min(720px, calc(100vh - 190px));
 }
-.notes-book-pdf-viewer {
-  width: 100%;
-  min-width: 0;
-  min-height: min(680px, calc(100vh - 245px));
+.notes-book-content-pdf {
+  max-width: 980px;
   flex: 1 1 auto;
-  border: 1px solid var(--border);
-  border-radius: 7px;
-  overflow: hidden;
-  background: color-mix(in srgb, var(--fg) 3%, transparent);
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 10px 4px 6px;
 }
-.notes-book-pdf-frame {
+/* The PDF canvas host is its own scroller so the controls/progress stay pinned. */
+.notes-book-pdf-canvas {
+  flex: 1 1 auto;
+  min-height: 320px;
+  height: calc(100vh - 240px);
+  overflow: auto;
+  overscroll-behavior: contain;
+  scroll-behavior: smooth;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--fg) 3%, transparent);
+  padding: 14px;
+}
+.pdfjs-reader {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--pdfjs-gap, 14px);
+}
+.pdfjs-page {
+  position: relative;
+  width: 100%;
+  max-width: 900px;
+  background: #fff;
+  border-radius: 4px;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.3);
+  overflow: hidden;
+}
+.pdfjs-canvas {
   display: block;
   width: 100%;
-  height: 100%;
-  min-height: inherit;
-  border: 0;
-  background: color-mix(in srgb, var(--fg) 4%, transparent);
+  height: auto;
+}
+.pdfjs-page-num {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+.pdfjs-page:hover .pdfjs-page-num { opacity: 1; }
+/* Center + show the page number on placeholders that haven't rasterized yet. */
+.pdfjs-page:not(:has(.pdfjs-canvas)) .pdfjs-page-num {
+  opacity: 0.45;
+  top: 50%;
+  right: auto;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 13px;
+  background: color-mix(in srgb, #000 35%, transparent);
 }
 @media (max-width: 760px) {
   .notes-pane-books .notes-pane-body {
@@ -32266,9 +32314,15 @@ body.notes-mobile-mode.notes-drag-mode .note-card-pin.active {
   .notes-book-reader-pdf {
     min-height: calc(100svh - 210px);
   }
-  .notes-book-pdf-viewer {
-    min-height: calc(100svh - 330px);
+  .notes-book-content-pdf {
+    padding: 6px 0 4px;
   }
+  .notes-book-pdf-canvas {
+    height: calc(100svh - 250px);
+    padding: 8px;
+    border-radius: 6px;
+  }
+  .pdfjs-reader { gap: 10px; }
 }
 .notes-epub-reader {
   display: flex;
@@ -37593,4 +37647,305 @@ body.theme-frosted .modal {
   .books-reader-body {
     padding: 22px 18px 44px;
   }
+}
+
+/* ── Health / Habits / Training panel ──────────────────────────────────────── */
+.health-modal-content {
+  width: min(760px, 94vw);
+  max-width: 760px;
+  height: min(82vh, 860px);
+  display: flex;
+  flex-direction: column;
+}
+.health-modal-content .modal-body {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: 12px 14px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.health-loading, .health-error, .health-empty {
+  padding: 18px 8px;
+  font-size: 13px;
+  opacity: 0.7;
+  text-align: center;
+}
+.health-error { color: var(--red); opacity: 0.95; }
+.health-muted { opacity: 0.6; font-weight: 400; font-size: 11px; }
+
+.health-card {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--fg) 3%, transparent);
+  padding: 12px 12px 14px;
+}
+.health-card-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+.health-card-head strong { font-size: 13px; }
+.health-big { font-size: 22px; font-weight: 700; line-height: 1; }
+.health-unit { font-size: 12px; font-weight: 500; opacity: 0.6; }
+.health-delta { font-size: 12px; font-weight: 700; padding: 1px 7px; border-radius: 999px; }
+.health-delta.down { color: var(--green, #50fa7b); background: color-mix(in srgb, var(--green, #50fa7b) 15%, transparent); }
+.health-delta.up { color: var(--warn, #f0ad4e); background: color-mix(in srgb, var(--warn, #f0ad4e) 15%, transparent); }
+.health-chip {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--fg) 8%, transparent);
+  opacity: 0.85;
+}
+
+/* Inputs + buttons — mirror the app's compact control styling. */
+.health-input {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--fg);
+  border-radius: 7px;
+  padding: 6px 9px;
+  font: inherit;
+  font-size: 13px;
+  min-width: 0;
+}
+.health-input:focus { outline: none; border-color: color-mix(in srgb, var(--accent-primary, var(--red)) 55%, var(--border)); }
+.health-input-sm { width: 78px; flex: 0 0 auto; }
+.health-input-icon { width: 52px; flex: 0 0 auto; text-align: center; }
+.health-btn {
+  background: color-mix(in srgb, var(--accent-primary, var(--red)) 18%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent-primary, var(--red)) 38%, var(--border));
+  color: var(--fg);
+  border-radius: 7px;
+  padding: 6px 12px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+.health-btn:hover { background: color-mix(in srgb, var(--accent-primary, var(--red)) 28%, transparent); }
+.health-icon-btn {
+  background: transparent;
+  border: 0;
+  color: color-mix(in srgb, var(--fg) 55%, transparent);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 2px 5px;
+  border-radius: 5px;
+}
+.health-icon-btn:hover { color: var(--red); background: color-mix(in srgb, var(--red) 12%, transparent); }
+.health-add-habit, .health-inline-form {
+  display: flex;
+  gap: 7px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.health-add-habit .health-input[name="name"], .health-inline-form .health-input:first-child { flex: 1 1 140px; }
+.health-toolbar { margin-bottom: 2px; }
+
+/* Habit cards + GitHub-style heatmap */
+.health-habit-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+.health-habit-title { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.health-habit-title strong { font-size: 13.5px; }
+.health-habit-icon { font-size: 15px; }
+.health-habit-stats { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.health-streak { font-size: 12px; font-weight: 700; }
+.health-30d { font-size: 11px; opacity: 0.6; }
+.health-check-btn {
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--fg);
+  border-radius: 999px;
+  padding: 3px 11px;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.health-check-btn.done {
+  background: color-mix(in srgb, var(--green, #50fa7b) 20%, transparent);
+  border-color: color-mix(in srgb, var(--green, #50fa7b) 45%, var(--border));
+}
+.health-check-btn:hover { border-color: color-mix(in srgb, var(--accent-primary, var(--red)) 50%, var(--border)); }
+.health-hm-scroll { overflow-x: auto; padding-bottom: 4px; }
+.health-hm { display: block; }
+.health-hm-cell { fill: color-mix(in srgb, var(--fg) 9%, transparent); }
+.health-hm-cell.done { fill: var(--accent-primary, var(--red)); }
+.health-hm-cell.today { stroke: var(--fg); stroke-width: 1.2; }
+.health-hm-month, .health-hm-dow { fill: color-mix(in srgb, var(--fg) 55%, transparent); font-size: 9px; }
+
+/* Charts */
+.health-chart { width: 100%; height: auto; display: block; }
+.health-line { fill: none; stroke: var(--accent-primary, var(--red)); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.health-line-dot { fill: var(--accent-primary, var(--red)); }
+.health-bar { fill: color-mix(in srgb, var(--accent-primary, var(--red)) 60%, transparent); }
+.health-bar.over { fill: var(--warn, #f0ad4e); }
+.health-target-line { stroke: color-mix(in srgb, var(--fg) 40%, transparent); stroke-width: 1; stroke-dasharray: 4 3; }
+.health-axis-label { fill: color-mix(in srgb, var(--fg) 50%, transparent); font-size: 9px; }
+
+/* Today calorie progress + macros + lists */
+.health-progress {
+  height: 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--fg) 9%, transparent);
+  overflow: hidden;
+  margin: 4px 0 8px;
+}
+.health-progress span { display: block; height: 100%; background: var(--green, #50fa7b); transition: width 0.25s ease; }
+.health-progress span.over { background: var(--warn, #f0ad4e); }
+.health-macros { display: flex; gap: 14px; font-size: 12px; opacity: 0.75; margin-bottom: 8px; }
+.health-list { display: flex; flex-direction: column; gap: 2px; }
+.health-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 12.5px;
+  padding: 5px 2px;
+  border-bottom: 1px solid color-mix(in srgb, var(--fg) 7%, transparent);
+}
+.health-row:last-child { border-bottom: 0; }
+.health-meal-form, .health-train-form { margin: 8px 0; }
+
+/* Profile / goals */
+.health-profile summary { cursor: pointer; font-size: 13px; }
+.health-profile-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-top: 12px;
+}
+.health-profile-grid label { display: flex; flex-direction: column; gap: 4px; font-size: 11px; opacity: 0.8; }
+.health-profile-grid .health-btn { grid-column: 1 / -1; justify-self: start; }
+
+@media (max-width: 768px) {
+  .health-modal-content { width: 100vw; max-width: 100vw; height: 100%; }
+  .health-profile-grid { grid-template-columns: 1fr; }
+  .health-habit-stats { width: 100%; justify-content: space-between; }
+}
+
+/* ── Pings & Reminders feed ────────────────────────────────────────────────── */
+.pings-modal-content {
+  width: min(640px, 94vw);
+  max-width: 640px;
+  height: min(80vh, 820px);
+  display: flex;
+  flex-direction: column;
+}
+.pings-modal-content .modal-body {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: 10px 12px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.pings-empty { padding: 24px 8px; text-align: center; opacity: 0.6; font-size: 13px; }
+.ping-filter-toggle {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: color-mix(in srgb, var(--fg) 72%, transparent);
+  border-radius: 7px;
+  padding: 3px 9px;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  margin-right: 6px;
+}
+.ping-filter-toggle:hover { color: var(--fg); }
+.ping-filter-toggle.active {
+  color: var(--fg);
+  background: color-mix(in srgb, var(--accent-primary, var(--red)) 18%, transparent);
+  border-color: color-mix(in srgb, var(--accent-primary, var(--red)) 40%, var(--border));
+}
+.ping-card {
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--fg) 2.5%, transparent);
+  padding: 9px 11px 8px;
+}
+.ping-card.unread {
+  border-color: color-mix(in srgb, var(--accent-primary, var(--red)) 40%, var(--border));
+  background: color-mix(in srgb, var(--accent-primary, var(--red)) 6%, transparent);
+}
+.ping-card-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.ping-kind {
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--fg) 10%, transparent);
+  color: color-mix(in srgb, var(--fg) 75%, transparent);
+  flex: 0 0 auto;
+}
+.ping-kind-reminder { background: color-mix(in srgb, var(--accent-primary, var(--red)) 22%, transparent); color: var(--fg); }
+.ping-kind-brief    { background: color-mix(in srgb, var(--color-accent, #00aaff) 22%, transparent); color: var(--fg); }
+.ping-kind-task     { background: color-mix(in srgb, var(--green, #50fa7b) 20%, transparent); color: var(--fg); }
+.ping-title { font-size: 13px; font-weight: 600; flex: 1 1 auto; min-width: 0; }
+.ping-keep-flag { color: var(--warn, #f0ad4e); font-size: 12px; }
+.ping-time { font-size: 11px; opacity: 0.55; flex: 0 0 auto; }
+.ping-body {
+  font-size: 12.5px;
+  line-height: 1.5;
+  opacity: 0.85;
+  margin: 5px 0 7px;
+  white-space: pre-wrap;
+  max-height: 8.5em;
+  overflow: auto;
+}
+.ping-actions { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.ping-btn {
+  background: color-mix(in srgb, var(--accent-primary, var(--red)) 16%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent-primary, var(--red)) 36%, var(--border));
+  color: var(--fg);
+  border-radius: 7px;
+  padding: 4px 11px;
+  font-size: 11.5px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.ping-btn:hover { background: color-mix(in srgb, var(--accent-primary, var(--red)) 26%, transparent); }
+.ping-btn-sub {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: color-mix(in srgb, var(--fg) 65%, transparent);
+  border-radius: 7px;
+  padding: 4px 9px;
+  font-size: 11px;
+  cursor: pointer;
+}
+.ping-btn-sub:hover { color: var(--fg); border-color: color-mix(in srgb, var(--fg) 35%, var(--border)); }
+.ping-del { margin-left: auto; }
+.ping-del:hover { color: var(--red); border-color: color-mix(in srgb, var(--red) 45%, var(--border)); }
+/* Rail unread badge on the bell */
+#rail-pings { position: relative; }
+.rail-ping-badge {
+  position: absolute;
+  top: 1px;
+  right: 1px;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  border-radius: 999px;
+  background: var(--red);
+  color: var(--bg);
+  font-size: 9px;
+  font-weight: 800;
+  line-height: 14px;
+  text-align: center;
+  pointer-events: none;
+}
+@media (max-width: 768px) {
+  .pings-modal-content { width: 100vw; max-width: 100vw; height: 100%; }
 }

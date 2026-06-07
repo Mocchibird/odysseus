@@ -8,16 +8,56 @@ from urllib.parse import quote
 import httpx
 
 
+def _is_ntfy(integration: Dict[str, Any]) -> bool:
+    """True for an enabled ntfy integration that has a base URL."""
+    if not integration.get("enabled", True) or not integration.get("base_url"):
+        return False
+    preset = str(integration.get("preset") or "").lower()
+    name = str(integration.get("name") or "").lower()
+    return preset == "ntfy" or name == "ntfy"
+
+
+def resolve_ntfy_integration(
+    integrations: Iterable[Dict[str, Any]],
+    *,
+    topic: Optional[str] = None,
+    integration_id: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+    """Pick the ntfy connection whose token matches the target topic.
+
+    Resolution order (first match wins):
+      1. ``integration_id`` — an explicit per-user/connection choice.
+      2. ``topic`` — the connection whose ``ntfy_topic`` field equals the
+         topic (trimmed, case-insensitive). This is what makes a
+         "one connection + token per topic" setup work: the admin adds a
+         connection per topic, each tagged with its topic + scoped token,
+         and the right token is used automatically.
+      3. Fallback: the first enabled ntfy connection (legacy behaviour, so
+         single-connection setups keep working unchanged).
+
+    Only enabled ntfy connections with a base_url are considered.
+    """
+    ntfy = [i for i in integrations if _is_ntfy(i)]
+    if not ntfy:
+        return None
+
+    if integration_id:
+        for i in ntfy:
+            if str(i.get("id") or "") == str(integration_id):
+                return i
+
+    want = str(topic or "").strip().lower()
+    if want:
+        for i in ntfy:
+            if str(i.get("ntfy_topic") or "").strip().lower() == want:
+                return i
+
+    return ntfy[0]
+
+
 def find_ntfy_integration(integrations: Iterable[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
-    """Return the enabled ntfy integration, if one is configured."""
-    for integration in integrations:
-        if not integration.get("enabled", True) or not integration.get("base_url"):
-            continue
-        preset = str(integration.get("preset") or "").lower()
-        name = str(integration.get("name") or "").lower()
-        if preset == "ntfy" or name == "ntfy":
-            return integration
-    return None
+    """Return the first enabled ntfy integration (back-compat wrapper)."""
+    return resolve_ntfy_integration(integrations)
 
 
 def _apply_auth(

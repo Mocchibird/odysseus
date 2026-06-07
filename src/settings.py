@@ -145,6 +145,9 @@ DEFAULT_SETTINGS = {
     "reminder_channel": "browser",   # "browser" | "email" | "ntfy" | "webhook"
     "reminder_llm_synthesis": False,
     "reminder_ntfy_topic": "Reminders",
+    # Optional explicit ntfy connection (integration id). Empty = auto-pick the
+    # connection whose `ntfy_topic` matches reminder_ntfy_topic, else the first.
+    "reminder_ntfy_integration_id": "",
     "reminder_email_account_id": "",
     "reminder_email_to": "",
     # Generic outbound webhook channel: pick any saved Integration as the
@@ -251,13 +254,16 @@ _PER_USER_KEYS = {
     "utility_endpoint_id", "utility_model", "utility_model_fallbacks",
     "research_endpoint_id", "research_model",
     # Reminder delivery is personal: one user may want browser-only alerts,
-    # another may subscribe to a private ntfy topic.
+    # another may subscribe to a private ntfy topic (and, optionally, pin the
+    # specific ntfy connection whose token is scoped to that topic).
     "reminder_channel", "reminder_llm_synthesis", "reminder_ntfy_topic",
+    "reminder_ntfy_integration_id",
     "reminder_email_account_id", "reminder_email_to",
 }
 
 _ALLOW_EMPTY_USER_KEYS = {
     "reminder_email_account_id", "reminder_email_to",
+    "reminder_ntfy_integration_id",
     "default_persona",
 }
 

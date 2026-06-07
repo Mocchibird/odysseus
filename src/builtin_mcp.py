@@ -127,6 +127,19 @@ def _obsidian_mcp_config_from_env() -> dict | None:
     if vault_root:
         env["IRIS_VAULT_ROOT"] = vault_root
 
+    # Load only the vault-management tool groups (plus anime + warranties) from
+    # iris-mcp; Odysseus has no Discord and ships its own calendar/tasks and
+    # native Health/Habits, so those iris groups are deliberately left out to
+    # avoid duplicate/competing tool surfaces. Override with a comma list of
+    # group names (vault,calendar,health,anime,vocab,warranties,discord,web,
+    # voice,users) or set to empty to load every iris tool. See
+    # obsidian-iris-mcp/_iris/tools/__init__.py for the group map.
+    tool_groups = os.environ.get(
+        "ODYSSEUS_OBSIDIAN_MCP_TOOL_GROUPS", "vault,anime,warranties"
+    ).strip()
+    if tool_groups:
+        env["IRIS_TOOL_GROUPS"] = tool_groups
+
     command = os.environ.get("ODYSSEUS_OBSIDIAN_MCP_COMMAND", "").strip() or sys.executable
     return {
         "server_id": _OBSIDIAN_MCP_SERVER_ID,

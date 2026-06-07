@@ -1828,7 +1828,7 @@ async def do_send_ping(content: str, owner: Optional[str] = None) -> Dict:
         args = {"message": content}
 
     from src.integrations import load_integrations
-    from src.ntfy_client import find_ntfy_integration, send_ntfy_notification
+    from src.ntfy_client import resolve_ntfy_integration, send_ntfy_notification
     from src.settings import get_user_setting, load_settings
 
     message = str(args.get("message") or args.get("body") or args.get("text") or "").strip()
@@ -1847,14 +1847,18 @@ async def do_send_ping(content: str, owner: Optional[str] = None) -> Dict:
     priority = str(args.get("priority") or "high").strip() or "high"
     tags = str(args.get("tags") or "bell").strip()
 
-    integration = find_ntfy_integration(load_integrations())
+    integration = resolve_ntfy_integration(
+        load_integrations(),
+        topic=topic,
+        integration_id=get_user_setting("reminder_ntfy_integration_id", owner or "", "") or None,
+    )
     if not integration:
         return {
             "error": "No enabled ntfy integration found. Configure Settings -> Integrations -> ntfy first.",
             "exit_code": 1,
         }
 
-    return await send_ntfy_notification(
+    result = await send_ntfy_notification(
         integration,
         topic,
         message,
@@ -1862,11 +1866,141 @@ async def do_send_ping(content: str, owner: Optional[str] = None) -> Dict:
         priority=priority,
         tags=tags,
     )
+    # Mirror the ping into the durable feed so it's not just an ephemeral push.
+    if result.get("exit_code") == 0:
+        try:
+            from src import pings_store
+            pings_store.create(owner, title, message, kind="ping", source="ntfy")
+        except Exception:
+            pass
+    return result
 
 
 # ---------------------------------------------------------------------------
 # Notes / checklists management tool
 # ---------------------------------------------------------------------------
+
+async def do_manage_health(content: str, owner: Optional[str] = None) -> Dict:
+    """Handle manage_health tool calls: log meals/weight, check habits, query.
+
+    Backed by src/health_store.py (the same store the Health panel UI uses), so
+    anything logged here shows up in the UI for the same user and vice versa.
+    Actions: log_meal, log_weight, log_training, check_habit, list_habits,
+    habit_heatmap, calories, weight_trend, summary.
+    """
+    from src import health_store as hs
+
+    try:
+        args = _parse_tool_args(content)
+    except ValueError:
+        return {"error": "Invalid JSON arguments", "exit_code": 1}
+
+    action = (args.get("action") or "").replace("-", "_").strip().lower()
+    _ALIASES = {
+        "meal": "log_meal", "add_meal": "log_meal", "eat": "log_meal",
+        "weight": "log_weight", "add_weight": "log_weight",
+        "training": "log_training", "workout": "log_training", "log_workout": "log_training",
+        "habit": "check_habit", "mark_habit": "check_habit", "complete_habit": "check_habit",
+        "habits": "list_habits",
+        "daily_calories": "calories", "kcal": "calories",
+        "weight_progress": "weight_trend", "weight": "weight_trend",
+    }
+    action = _ALIASES.get(action, action)
+    ow = owner or ""
+
+    def _resolve_habit_id(value) -> Optional[int]:
+        if value is None:
+            return None
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            pass
+        name = str(value).strip().lower()
+        for h in hs.list_habits(ow, include_archived=True):
+            if h["name"].strip().lower() == name:
+                return h["id"]
+        return None
+
+    try:
+        if action == "log_meal":
+            desc = str(args.get("description") or args.get("food") or args.get("name") or "").strip()
+            if not desc:
+                return {"error": "description is required", "exit_code": 1}
+            meal = hs.log_meal(
+                ow, desc, args.get("kcal") or args.get("calories") or 0,
+                protein_g=args.get("protein_g"), carbs_g=args.get("carbs_g"),
+                fat_g=args.get("fat_g"), notes=args.get("notes") or "", source="agent",
+            )
+            day = hs.daily_calories(ow)
+            tgt = f" (today: {day['total_kcal']} kcal{', target ' + str(day['target_kcal']) if day.get('target_kcal') else ''})"
+            return {"output": f"Logged {meal['description']} — {meal['kcal']} kcal{tgt}.", "meal": meal, "exit_code": 0}
+
+        if action == "log_weight":
+            kg = args.get("kg") or args.get("weight")
+            if kg is None:
+                return {"error": "kg is required", "exit_code": 1}
+            entry = hs.log_weight(ow, kg, notes=args.get("notes") or "")
+            trend = hs.weight_trend(ow)
+            d = trend.get("delta_kg")
+            extra = f" ({'+' if (d or 0) > 0 else ''}{d} kg over {trend.get('count', 1)} readings)" if d is not None else ""
+            return {"output": f"Logged weight {entry['kg']} kg{extra}.", "weight": entry, "exit_code": 0}
+
+        if action == "log_training":
+            kind = str(args.get("kind") or args.get("type") or "").strip()
+            sess = hs.log_training(
+                ow, kind, duration_min=args.get("duration_min"),
+                rpe=args.get("rpe"), summary=args.get("summary") or "",
+            )
+            return {"output": f"Logged training: {kind or 'session'}.", "session": sess, "exit_code": 0}
+
+        if action == "check_habit":
+            hid = _resolve_habit_id(args.get("habit") or args.get("habit_id") or args.get("name"))
+            if hid is None:
+                return {"error": "Unknown habit. Pass habit name or id.", "exit_code": 1}
+            res = hs.set_habit_day(ow, hid, day=args.get("day"), done=args.get("done"))
+            if res is None:
+                return {"error": "Habit not found", "exit_code": 1}
+            return {"output": f"Habit marked {'done' if res['done'] else 'not done'} for {res['day']}.", **res, "exit_code": 0}
+
+        if action == "list_habits":
+            habits = hs.list_habits(ow)
+            lines = [f"- {h['name']}: {'✓ today' if h['done_today'] else 'pending'}, streak {h['streak']}" for h in habits]
+            return {"output": "Habits:\n" + ("\n".join(lines) if lines else "(none)"), "habits": habits, "exit_code": 0}
+
+        if action == "habit_heatmap":
+            hid = _resolve_habit_id(args.get("habit") or args.get("habit_id") or args.get("name"))
+            if hid is None:
+                return {"error": "Unknown habit. Pass habit name or id.", "exit_code": 1}
+            hm = hs.habit_heatmap(ow, hid, days=args.get("days") or 365)
+            return {"output": f"{hm['total']} completions, current streak {hm['streak']} days.", "heatmap": hm, "exit_code": 0}
+
+        if action == "calories":
+            day = hs.daily_calories(ow, day=args.get("date") or args.get("day"))
+            rem = f", {day['remaining_kcal']} remaining" if day.get("remaining_kcal") is not None else ""
+            return {"output": f"{day['day']}: {day['total_kcal']} kcal from {day['meal_count']} meals{rem}.", **day, "exit_code": 0}
+
+        if action == "weight_trend":
+            trend = hs.weight_trend(ow, days=args.get("days") or 90)
+            if not trend.get("count"):
+                return {"output": "No weight entries yet.", **trend, "exit_code": 0}
+            return {"output": f"{trend['first_kg']} → {trend['last_kg']} kg ({'+' if trend['delta_kg'] > 0 else ''}{trend['delta_kg']} kg).", **trend, "exit_code": 0}
+
+        if action == "summary":
+            return {
+                "output": "Health summary.",
+                "habits": hs.list_habits(ow),
+                "calories": hs.daily_calories(ow),
+                "weight": hs.weight_trend(ow, days=90),
+                "tdee": hs.tdee(ow),
+                "exit_code": 0,
+            }
+
+        return {"error": f"Unknown action '{action}'. Use log_meal, log_weight, log_training, check_habit, list_habits, habit_heatmap, calories, weight_trend, or summary.", "exit_code": 1}
+    except ValueError as e:
+        return {"error": str(e), "exit_code": 1}
+    except Exception as e:
+        return {"error": f"manage_health failed: {e}", "exit_code": 1}
+
 
 async def do_manage_notes(content: str, owner: Optional[str] = None) -> Dict:
     """Handle manage_notes tool calls: CRUD on notes and checklists."""

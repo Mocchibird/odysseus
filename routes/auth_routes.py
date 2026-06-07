@@ -562,8 +562,12 @@ def setup_auth_routes(auth_manager: AuthManager) -> APIRouter:
             parsed = urlparse(raw_base)
             base = f"{parsed.scheme}://{parsed.netloc}" if parsed.scheme and parsed.netloc else raw_base.rstrip("/")
             settings = _load_settings()
+            # Testing a specific connection: if it's tagged with the topic its
+            # token is scoped to, send there so the green check proves THIS
+            # connection works. Otherwise fall back to the admin's per-user topic.
             topic = str(
-                get_user_setting(
+                (integ.get("ntfy_topic") or "").strip()
+                or get_user_setting(
                     "reminder_ntfy_topic",
                     user or "",
                     settings.get("reminder_ntfy_topic") or "reminders",
