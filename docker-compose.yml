@@ -24,12 +24,9 @@ services:
       # Odysseus stores per-user files under /vault/<username>/ and indexes
       # them in data/app.db.
       - ${ODYSSEUS_OBSIDIAN_VAULT_DIR:?Set ODYSSEUS_OBSIDIAN_VAULT_DIR to your AI_Memory vault path}:/vault
-      # Iris MCP is VENDORED into this repo at vendor/iris-mcp and baked into the
-      # image — no sibling obsidian-iris-mcp checkout or bind mount is needed.
-      # To develop against a live local checkout instead, set
-      # ODYSSEUS_OBSIDIAN_MCP_SCRIPT=/opt/obsidian-iris-mcp/obsidian_memory_mcp.py
-      # and uncomment the mount below.
-      # - ${ODYSSEUS_IRIS_MCP_REPO_DIR:-../obsidian-iris-mcp}:/opt/obsidian-iris-mcp:ro
+      # Iris MCP is vendored at vendor/iris-mcp (baked into the image) — no sibling
+      # checkout or bind mount needed. For a live local checkout instead, point
+      # ODYSSEUS_OBSIDIAN_MCP_SCRIPT at its obsidian_memory_mcp.py and add a mount.
     extra_hosts:
       # Lets the container reach local services on the Docker host, including
       # Ollama at http://host.docker.internal:11434 and Proton Mail Bridge
