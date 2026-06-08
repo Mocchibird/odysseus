@@ -24,10 +24,10 @@ import censorModule from './js/censor.js';
 import galleryModule from './js/gallery.js';
 import tasksModule from './js/tasks.js';
 import calendarModule from './js/calendar.js';
-import notesModule from './js/notes.js?v=368';
-import healthModule from './js/health.js?v=368';
-import pingsModule from './js/pings.js?v=368';
-import todayModule from './js/today.js?v=368';
+import notesModule from './js/notes.js?v=369';
+import healthModule from './js/health.js?v=369';
+import pingsModule from './js/pings.js?v=369';
+import todayModule from './js/today.js?v=369';
 import adminModule from './js/admin.js';
 import settingsModule from './js/settings.js';
 // Eagerly bind unified minimize/restore behavior across all tool modals.
@@ -1650,7 +1650,15 @@ function initializeEventListeners() {
   function applyModeToToggles(mode) {
     MODE_TOOLS.forEach(({ btnId, checkboxId, stateKey }) => {
       const btn = el(btnId);
-      if (!btn || btn.style.display === 'none') return;
+      if (!btn) return;
+      // Hide bash and plan buttons in chat mode
+      if (mode === 'chat' && (stateKey === 'bash' || stateKey === 'plan')) {
+        btn.style.display = 'none';
+        return;
+      }
+      // Show buttons in agent mode (or for web toggle in any mode)
+      btn.style.display = '';
+      if (btn.style.display === 'none') return;
       const on = loadToolPref(stateKey, mode);
       btn.classList.toggle('active', on);
       if (checkboxId) { const chk = el(checkboxId); if (chk) chk.checked = on; }
@@ -1664,6 +1672,14 @@ function initializeEventListeners() {
     if (!agentBtn || !chatBtn) return;
     const state = loadToggleState();
     let currentMode = state.mode || 'agent';
+
+    // Immediately hide bash/plan buttons in chat mode on page load
+    if (currentMode === 'chat') {
+      const bashBtn = el('bash-toggle-btn');
+      const planBtn = el('plan-toggle-btn');
+      if (bashBtn) bashBtn.style.display = 'none';
+      if (planBtn) planBtn.style.display = 'none';
+    }
 
     function setMode(mode) {
       currentMode = mode;

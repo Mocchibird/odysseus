@@ -12,7 +12,8 @@ import os
 import re
 from typing import Any, Dict, List, Optional
 
-from src.constants import MAX_OUTPUT_CHARS, MAX_READ_CHARS
+from src.constants import MAX_OUTPUT_CHARS, MAX_READ_CHARS, DEEP_RESEARCH_DIR, VAULT_FILE
+from core.constants import internal_api_base
 
 
 def get_mcp_manager():
@@ -2903,24 +2904,12 @@ async def do_manage_books(content: str, owner: Optional[str] = None) -> Dict:
 
 # ── Cookbook tools ──
 
-# Cookbook routes loopback. The agent's tool calls run in-process but
-# need to reach admin-gated cookbook routes; we ride the per-process
-# internal token so require_admin lets us through. See core/middleware.py.
-#
-# Resolution order:
-#   1. ODYSSEUS_INTERNAL_BASE — explicit override (e.g. behind a TLS proxy).
-#   2. APP_PORT — derive http://127.0.0.1:$APP_PORT (matches docker-compose).
-#   3. Fallback http://127.0.0.1:7000 — preserves legacy default.
-#
-# 127.0.0.1 (not "localhost") avoids IPv6/DNS ambiguity for a strictly-local
-# call. Without this, tools that loop back (app_api, trigger_research,
-# cookbook state read/write) fail with "All connection attempts failed"
-# whenever the running uvicorn isn't on 7000 — which is most non-default
-# deployments and any side-by-side multi-instance setup.
-_COOKBOOK_BASE = os.environ.get(
-    "ODYSSEUS_INTERNAL_BASE",
-    f"http://127.0.0.1:{os.environ.get('APP_PORT', '7000')}",
-)
+# In-process loopback base for agent tools that call Odysseus's own API
+# (cookbook state, model serve, gallery, email, calendar). We ride the
+# per-process internal token so require_admin lets us through. See
+# core/middleware.py. Resolution (override / APP_PORT / 7000) lives in
+# core.constants.internal_api_base().
+_INTERNAL_BASE = internal_api_base()
 
 
 def _internal_headers(owner: Optional[str] = None) -> Dict[str, str]:
@@ -2946,7 +2935,7 @@ async def _cookbook_servers() -> Dict[str, Any]:
     import httpx
     try:
         async with httpx.AsyncClient(timeout=10) as client:
-            r = await client.get(f"{_COOKBOOK_BASE}/api/cookbook/state", headers=_internal_headers())
+            r = await client.get(f"{_INTERNAL_BASE}/api/cookbook/state", headers=_internal_headers())
             state = r.json() if r.headers.get("content-type", "").startswith("application/json") else {}
     except Exception:
         return {"default_host": "", "hosts": []}
@@ -3012,7 +3001,7 @@ async def _cookbook_env_for_host(host: str) -> Dict[str, Any]:
     state: Dict[str, Any] = {}
     try:
         async with httpx.AsyncClient(timeout=10) as client:
-            r = await client.get(f"{_COOKBOOK_BASE}/api/cookbook/state", headers=headers)
+            r = await client.get(f"{_INTERNAL_BASE}/api/cookbook/state", headers=headers)
             state = r.json() if r.headers.get("content-type", "").startswith("application/json") else {}
     except Exception as e:
         logger.debug(f"cookbook env lookup failed for host={host!r}: {e}")
@@ -3072,7 +3061,7 @@ async def _cookbook_register_task(session_id: str, model: str, host: str,
     headers = _internal_headers()
     try:
         async with httpx.AsyncClient(timeout=10) as client:
-            r = await client.get(f"{_COOKBOOK_BASE}/api/cookbook/state", headers=headers)
+            r = await client.get(f"{_INTERNAL_BASE}/api/cookbook/state", headers=headers)
             state = r.json() if r.headers.get("content-type", "").startswith("application/json") else {}
     except Exception as e:
         logger.debug(f"cookbook state read failed: {e}")
@@ -3116,7 +3105,7 @@ async def _cookbook_register_task(session_id: str, model: str, host: str,
     state["tasks"] = tasks
     try:
         async with httpx.AsyncClient(timeout=10) as client:
-            r = await client.post(f"{_COOKBOOK_BASE}/api/cookbook/state",
+            r = await client.post(f"{_INTERNAL_BASE}/api/cookbook/state",
                                   json=state, headers=headers)
         return r.status_code < 400
     except Exception as e:
@@ -3199,7 +3188,7 @@ async def do_app_api(content: str, owner: Optional[str] = None) -> Dict:
         return {"error": "Invalid JSON arguments", "exit_code": 1}
 
     action = (args.get("action") or "call").lower()
-    base = _COOKBOOK_BASE
+    base = _INTERNAL_BASE
 
     if action == "endpoints":
         # Fetch FastAPI's OpenAPI schema so the agent can discover any
@@ -3460,7 +3449,7 @@ async def do_download_model(content: str, owner: Optional[str] = None) -> Dict:
     if env_cfg.get("ssh_port"):   payload["ssh_port"]   = env_cfg["ssh_port"]
     try:
         async with httpx.AsyncClient(timeout=30) as client:
-            resp = await client.post(f"{_COOKBOOK_BASE}/api/model/download",
+            resp = await client.post(f"{_INTERNAL_BASE}/api/model/download",
                                      json=payload, headers=_internal_headers())
             data = resp.json()
         if data.get("ok"):
@@ -3536,7 +3525,7 @@ async def do_serve_model(content: str, owner: Optional[str] = None) -> Dict:
     if env_cfg.get("ssh_port"):   payload["ssh_port"]   = env_cfg["ssh_port"]
     try:
         async with httpx.AsyncClient(timeout=30) as client:
-            resp = await client.post(f"{_COOKBOOK_BASE}/api/model/serve",
+            resp = await client.post(f"{_INTERNAL_BASE}/api/model/serve",
                                      json=payload, headers=_internal_headers())
             data = resp.json()
         if data.get("ok"):
@@ -3576,7 +3565,7 @@ async def do_list_served_models(content: str, owner: Optional[str] = None) -> Di
     cookbook_tasks: List[Dict[str, Any]] = []
     try:
         async with httpx.AsyncClient(timeout=15) as client:
-            resp = await client.get(f"{_COOKBOOK_BASE}/api/cookbook/tasks/status",
+            resp = await client.get(f"{_INTERNAL_BASE}/api/cookbook/tasks/status",
                                     headers=_internal_headers())
             cookbook_tasks = (resp.json() or {}).get("tasks") or []
     except Exception as e:
@@ -3695,7 +3684,7 @@ async def _cookbook_kill_session(session_id: str, *, remote_host: str = "",
     state: Dict[str, Any] = {}
     try:
         async with httpx.AsyncClient(timeout=10) as client:
-            resp = await client.get(f"{_COOKBOOK_BASE}/api/cookbook/state", headers=headers)
+            resp = await client.get(f"{_INTERNAL_BASE}/api/cookbook/state", headers=headers)
             state = resp.json() or {}
     except Exception as e:
         logger.debug(f"cookbook state lookup failed for {session_id}: {e}")
@@ -3724,7 +3713,7 @@ async def _cookbook_kill_session(session_id: str, *, remote_host: str = "",
 
     try:
         async with httpx.AsyncClient(timeout=15) as client:
-            resp = await client.post(f"{_COOKBOOK_BASE}/api/shell/exec",
+            resp = await client.post(f"{_INTERNAL_BASE}/api/shell/exec",
                                      json={"command": cmd}, headers=headers)
         if resp.status_code >= 400:
             return {"error": f"shell/exec returned HTTP {resp.status_code}: {resp.text[:200]}", "exit_code": 1}
@@ -3745,7 +3734,7 @@ async def _cookbook_kill_session(session_id: str, *, remote_host: str = "",
             try:
                 matched["status"] = "stopped"
                 async with httpx.AsyncClient(timeout=10) as client:
-                    await client.post(f"{_COOKBOOK_BASE}/api/cookbook/state",
+                    await client.post(f"{_INTERNAL_BASE}/api/cookbook/state",
                                       json=state, headers=headers)
             except Exception as e:
                 logger.debug(f"failed to mark {session_id} stopped in state: {e}")
@@ -3808,7 +3797,7 @@ async def do_tail_serve_output(content: str, owner: Optional[str] = None) -> Dic
         state: Dict[str, Any] = {}
         try:
             async with httpx.AsyncClient(timeout=10) as client:
-                resp = await client.get(f"{_COOKBOOK_BASE}/api/cookbook/state", headers=headers)
+                resp = await client.get(f"{_INTERNAL_BASE}/api/cookbook/state", headers=headers)
                 state = resp.json() or {}
         except Exception as e:
             logger.debug(f"cookbook state lookup failed for {session_id}: {e}")
@@ -3846,7 +3835,7 @@ async def do_tail_serve_output(content: str, owner: Optional[str] = None) -> Dic
         host_label = "local"
     try:
         async with httpx.AsyncClient(timeout=20) as client:
-            resp = await client.post(f"{_COOKBOOK_BASE}/api/shell/exec",
+            resp = await client.post(f"{_INTERNAL_BASE}/api/shell/exec",
                                      json={"command": cmd}, headers=headers)
         if resp.status_code >= 400:
             return {"error": f"shell/exec returned HTTP {resp.status_code}: {resp.text[:200]}", "exit_code": 1}
@@ -3897,7 +3886,7 @@ async def do_list_downloads(content: str, owner: Optional[str] = None) -> Dict:
     import httpx
     try:
         async with httpx.AsyncClient(timeout=15) as client:
-            resp = await client.get(f"{_COOKBOOK_BASE}/api/cookbook/tasks/status",
+            resp = await client.get(f"{_INTERNAL_BASE}/api/cookbook/tasks/status",
                                     headers=_internal_headers())
             data = resp.json()
         tasks = [t for t in data.get("tasks", []) if (t.get("type") or "").lower() == "download"]
@@ -3948,7 +3937,7 @@ async def do_search_hf_models(content: str, owner: Optional[str] = None) -> Dict
         params["limit"] = str(limit)
     try:
         async with httpx.AsyncClient(timeout=30) as client:
-            resp = await client.get(f"{_COOKBOOK_BASE}/api/cookbook/hf-latest",
+            resp = await client.get(f"{_INTERNAL_BASE}/api/cookbook/hf-latest",
                                     params=params, headers=_internal_headers())
             data = resp.json()
         models = data.get("models") if isinstance(data, dict) else data
@@ -4014,7 +4003,7 @@ async def do_adopt_served_model(content: str, owner: Optional[str] = None) -> Di
         check = f"tmux has-session -t {shlex.quote(sess)} 2>&1"
     try:
         async with httpx.AsyncClient(timeout=10) as client:
-            r = await client.post(f"{_COOKBOOK_BASE}/api/shell/exec",
+            r = await client.post(f"{_INTERNAL_BASE}/api/shell/exec",
                                   json={"command": check}, headers=headers)
             data = r.json() if r.headers.get("content-type", "").startswith("application/json") else {}
         if r.status_code >= 400 or (data.get("exit_code") not in (None, 0)):
@@ -4031,7 +4020,7 @@ async def do_adopt_served_model(content: str, owner: Optional[str] = None) -> Di
     server_up = False
     try:
         async with httpx.AsyncClient(timeout=10) as client:
-            r = await client.post(f"{_COOKBOOK_BASE}/api/shell/exec",
+            r = await client.post(f"{_INTERNAL_BASE}/api/shell/exec",
                                   json={"command": health_cmd}, headers=headers)
             body = (r.json() or {}).get("stdout", "") if r.headers.get("content-type", "").startswith("application/json") else ""
             server_up = '"data"' in body or '"object"' in body
@@ -4042,7 +4031,7 @@ async def do_adopt_served_model(content: str, owner: Optional[str] = None) -> Di
     # overwrite the whole file (that'd nuke presets).
     try:
         async with httpx.AsyncClient(timeout=10) as client:
-            r = await client.get(f"{_COOKBOOK_BASE}/api/cookbook/state", headers=headers)
+            r = await client.get(f"{_INTERNAL_BASE}/api/cookbook/state", headers=headers)
             state = r.json() if r.headers.get("content-type", "").startswith("application/json") else {}
     except Exception as e:
         return {"error": f"could not read cookbook state: {e}", "exit_code": 1}
@@ -4078,7 +4067,7 @@ async def do_adopt_served_model(content: str, owner: Optional[str] = None) -> Di
         state["tasks"] = tasks
         try:
             async with httpx.AsyncClient(timeout=10) as client:
-                await client.post(f"{_COOKBOOK_BASE}/api/cookbook/state",
+                await client.post(f"{_INTERNAL_BASE}/api/cookbook/state",
                                   json=state, headers=headers)
         except Exception as e:
             return {"error": f"could not save cookbook state: {e}", "exit_code": 1}
@@ -4155,7 +4144,7 @@ async def do_list_serve_presets(content: str, owner: Optional[str] = None) -> Di
     import httpx
     try:
         async with httpx.AsyncClient(timeout=10) as client:
-            resp = await client.get(f"{_COOKBOOK_BASE}/api/cookbook/state",
+            resp = await client.get(f"{_INTERNAL_BASE}/api/cookbook/state",
                                     headers=_internal_headers())
             state = resp.json() or {}
     except Exception as e:
@@ -4203,7 +4192,7 @@ async def do_serve_preset(content: str, owner: Optional[str] = None) -> Dict:
 
     try:
         async with httpx.AsyncClient(timeout=10) as client:
-            resp = await client.get(f"{_COOKBOOK_BASE}/api/cookbook/state",
+            resp = await client.get(f"{_INTERNAL_BASE}/api/cookbook/state",
                                     headers=_internal_headers())
             state = resp.json() or {}
     except Exception as e:
@@ -4247,7 +4236,7 @@ async def do_serve_preset(content: str, owner: Optional[str] = None) -> Dict:
 
     try:
         async with httpx.AsyncClient(timeout=30) as client:
-            resp = await client.post(f"{_COOKBOOK_BASE}/api/model/serve",
+            resp = await client.post(f"{_INTERNAL_BASE}/api/model/serve",
                                      json=payload, headers=_internal_headers())
             data = resp.json()
         if data.get("ok"):
@@ -4299,7 +4288,7 @@ async def do_list_cached_models(content: str, owner: Optional[str] = None) -> Di
             p["platform"] = args["platform"]
         try:
             async with httpx.AsyncClient(timeout=60) as client:
-                resp = await client.get(f"{_COOKBOOK_BASE}/api/model/cached",
+                resp = await client.get(f"{_INTERNAL_BASE}/api/model/cached",
                                         params=p, headers=headers)
                 data = resp.json()
             ms = data.get("models", []) if isinstance(data, dict) else (data or [])
@@ -4319,7 +4308,7 @@ async def do_list_cached_models(content: str, owner: Optional[str] = None) -> Di
         servers: list = []
         try:
             async with httpx.AsyncClient(timeout=10) as client:
-                st = await client.get(f"{_COOKBOOK_BASE}/api/cookbook/state", headers=headers)
+                st = await client.get(f"{_INTERNAL_BASE}/api/cookbook/state", headers=headers)
                 st_data = st.json() if st.headers.get("content-type", "").startswith("application/json") else {}
             servers = (st_data.get("env", {}) or {}).get("servers") or []
         except Exception as e:
@@ -4390,7 +4379,7 @@ async def do_list_cached_models(content: str, owner: Optional[str] = None) -> Di
             downloaded = []
             try:
                 async with httpx.AsyncClient(timeout=10) as client:
-                    st = await client.get(f"{_COOKBOOK_BASE}/api/cookbook/state", headers=headers)
+                    st = await client.get(f"{_INTERNAL_BASE}/api/cookbook/state", headers=headers)
                     state = st.json() if st.headers.get("content-type", "").startswith("application/json") else {}
                 for t in (state.get("tasks") or []):
                     if not isinstance(t, dict) or t.get("type") != "download":
@@ -4461,7 +4450,7 @@ async def do_edit_image(content: str, owner: Optional[str] = None) -> Dict:
         payload["scale"] = args["scale"]
     try:
         async with httpx.AsyncClient(timeout=120) as client:
-            resp = await client.post(f"http://localhost:7000/api/gallery/{action}", json=payload)
+            resp = await client.post(f"{_INTERNAL_BASE}/api/gallery/{action}", json=payload)
             data = resp.json()
         if data.get("success") or data.get("id"):
             return {"output": f"Image edited ({action}). New image ID: {data.get('id', '?')}", "exit_code": 0}
@@ -4486,7 +4475,7 @@ async def do_manage_research(content: str, owner: Optional[str] = None) -> Dict:
         args = {}
     action = (args.get("action") or "list").lower()
     rid = (args.get("id") or args.get("session_id") or args.get("research_id") or "").strip()
-    data_dir = _Path("data/deep_research")
+    data_dir = _Path(DEEP_RESEARCH_DIR)
 
     # SECURITY: the research id is interpolated straight into a filesystem
     # path (data/deep_research/<rid>.json) for read AND delete. Without this
@@ -4577,7 +4566,7 @@ async def do_trigger_research(content: str, owner: Optional[str] = None) -> Dict
         payload["search_provider"] = args["search_provider"]
     try:
         async with httpx.AsyncClient(timeout=30) as client:
-            resp = await client.post(f"{_COOKBOOK_BASE}/api/research/start",
+            resp = await client.post(f"{_INTERNAL_BASE}/api/research/start",
                                      json=payload, headers=_internal_headers(owner))
         if resp.status_code >= 400:
             return {"error": f"research/start returned HTTP {resp.status_code}: {resp.text[:200]}", "exit_code": 1}
@@ -4637,7 +4626,7 @@ async def do_resolve_contact(content: str, owner: Optional[str] = None) -> Dict:
     async with httpx.AsyncClient(timeout=30) as client:
         # 2. Email history (sent/received)
         try:
-            resp = await client.get("http://localhost:7000/api/email/resolve-contact", params={"name": name})
+            resp = await client.get(f"{_INTERNAL_BASE}/api/email/resolve-contact", params={"name": name})
             if resp.status_code == 200:
                 for c in (resp.json().get("contacts") or []):
                     email = (c.get("email") or "").strip().lower()
@@ -4731,7 +4720,7 @@ async def do_manage_contact(content: str, owner: Optional[str] = None) -> Dict:
 def _load_vault_config() -> Dict:
     """Load Vaultwarden config from data/vault.json."""
     from pathlib import Path
-    p = Path("data/vault.json")
+    p = Path(VAULT_FILE)
     if p.exists():
         try:
             return json.loads(p.read_text(encoding="utf-8"))
@@ -4885,7 +4874,7 @@ async def do_vault_unlock(content: str, owner: Optional[str] = None) -> Dict:
 
     # Save session to vault.json
     from pathlib import Path
-    p = Path("data/vault.json")
+    p = Path(VAULT_FILE)
     cfg = {}
     if p.exists():
         try:

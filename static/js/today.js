@@ -5,7 +5,7 @@
  * Aggregates GET /api/today (events + reminders + habits, owner-scoped).
  */
 import uiModule from './ui.js';
-import { makeToolModalDraggable } from './modalFullscreen.js?v=368';
+import { makeToolModalDraggable } from './modalFullscreen.js?v=369';
 import * as Modals from './modalManager.js';
 
 const API_BASE = window.location.origin;

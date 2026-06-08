@@ -4,7 +4,7 @@
  * agent's manage_health tool shares, so chat-logged data shows up here too.
  */
 import uiModule from './ui.js';
-import { makeToolModalDraggable } from './modalFullscreen.js?v=368';
+import { makeToolModalDraggable } from './modalFullscreen.js?v=369';
 import * as Modals from './modalManager.js';
 
 const API_BASE = window.location.origin;
