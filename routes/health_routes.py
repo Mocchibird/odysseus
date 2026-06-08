@@ -4,11 +4,52 @@ Thin owner-scoped wrapper over src/health_store.py. The same store backs the
 agent MCP server (mcp_servers/health_server.py), so the UI and the assistant
 share one set of rows.
 """
-from fastapi import APIRouter, HTTPException, Request
+import json
+import os
+import re
+import tempfile
+
+from fastapi import APIRouter, File, HTTPException, Request, UploadFile
 from fastapi.responses import PlainTextResponse
 
 from src.auth_helpers import require_user
 from src import health_store as hs
+
+
+def _parse_meal_json(text: str):
+    """Pull a meal estimate out of a vision model's reply (which may wrap JSON
+    in prose/markdown)."""
+    m = re.search(r"\{.*\}", text or "", re.DOTALL)
+    if not m:
+        return None
+    try:
+        obj = json.loads(m.group(0))
+    except Exception:
+        return None
+    if not isinstance(obj, dict):
+        return None
+
+    def _num(*keys):
+        for k in keys:
+            v = obj.get(k)
+            if v is not None:
+                try:
+                    return float(v)
+                except (TypeError, ValueError):
+                    pass
+        return None
+
+    desc = str(obj.get("description") or obj.get("name") or obj.get("food") or "").strip()
+    kcal = _num("kcal", "calories")
+    if not desc and kcal is None:
+        return None
+    return {
+        "description": desc or "Meal",
+        "kcal": int(round(kcal)) if kcal is not None else 0,
+        "protein_g": _num("protein_g", "protein"),
+        "carbs_g": _num("carbs_g", "carbs", "carbohydrates"),
+        "fat_g": _num("fat_g", "fat"),
+    }
 
 
 def setup_health_routes():
@@ -82,6 +123,43 @@ def setup_health_routes():
     @router.get("/meals")
     def list_meals(request: Request, day: str = "", days: int = 1):
         return {"meals": hs.list_meals(_owner(request), day=day or None, days=days)}
+
+    @router.post("/estimate-meal")
+    async def estimate_meal(request: Request, file: UploadFile = File(...)):
+        """Estimate a meal's calories/macros from a photo via the vision model.
+        Returns an estimate for the user to confirm — does not auto-log."""
+        _owner(request)  # gate anonymous
+        owner = require_user(request)
+        data = await file.read(8 * 1024 * 1024 + 1)
+        if len(data) > 8 * 1024 * 1024:
+            raise HTTPException(413, "Image too large (max 8MB)")
+        suffix = os.path.splitext(file.filename or "meal.jpg")[1] or ".jpg"
+        tmp = None
+        try:
+            with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tf:
+                tf.write(data)
+                tmp = tf.name
+            from src.document_processor import analyze_image_with_vl_result
+            prompt = (
+                "You are a nutrition estimator. Estimate the food in this photo for the whole "
+                "portion shown. Reply with ONLY a compact JSON object and nothing else: "
+                '{"description": "<short dish name>", "kcal": <integer>, '
+                '"protein_g": <number>, "carbs_g": <number>, "fat_g": <number>}.'
+            )
+            res = analyze_image_with_vl_result(tmp, owner=owner, prompt=prompt)
+        finally:
+            if tmp:
+                try:
+                    os.unlink(tmp)
+                except OSError:
+                    pass
+        text = (res.get("text") or "").strip()
+        if text.startswith("[") and ("model" in text.lower() or "vision" in text.lower()):
+            raise HTTPException(503, text.strip("[]"))  # vision disabled / not configured
+        est = _parse_meal_json(text)
+        if not est:
+            raise HTTPException(422, "Couldn't read an estimate from the photo — try a clearer shot or log it manually.")
+        return {"ok": True, "estimate": est, "model": res.get("model", "")}
 
     @router.post("/meals")
     async def log_meal(request: Request):

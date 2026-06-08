@@ -275,7 +275,9 @@ async function _renderCalories() {
         <input name="description" class="health-input" placeholder="Meal" required>
         <input name="kcal" type="number" class="health-input health-input-sm" placeholder="kcal" required>
         <button class="health-btn" type="submit">Add</button>
+        <label class="health-btn-sub" style="cursor:pointer;padding:6px 10px;" title="Estimate from a photo">📷<input id="health-meal-photo" type="file" accept="image/*" capture="environment" style="display:none"></label>
       </form>
+      <div id="health-meal-est-note" class="health-muted" style="display:none;margin:-2px 0 8px;"></div>
       <div class="health-list">${meals.length ? meals.map((m) => `<div class="health-row"><span>${esc(m.description)}</span><span>${m.kcal} kcal <button class="health-icon-btn" data-del-meal="${m.id}" aria-label="Delete">✕</button></span></div>`).join('') : '<div class="health-empty">No meals logged today.</div>'}</div>
     </div>
     <div class="health-card">
@@ -305,14 +307,40 @@ async function _renderCalories() {
         <button class="health-btn" type="submit">Save profile</button>
       </form>
     </details>`;
+  let _pendingMacros = null;  // macros from a photo estimate, sent on the next Add
   b.querySelector('#health-log-meal')?.addEventListener('submit', async (e) => {
     e.preventDefault();
     const fd = new FormData(e.target);
     const description = (fd.get('description') || '').toString().trim();
     const kcal = parseInt(fd.get('kcal'), 10);
     if (!description || !Number.isFinite(kcal)) return;
-    try { await _api('/meals', { method: 'POST', body: JSON.stringify({ description, kcal }) }); _renderCalories(); }
+    const payload = { description, kcal };
+    if (_pendingMacros) Object.assign(payload, _pendingMacros, { source: 'photo' });
+    try { await _api('/meals', { method: 'POST', body: JSON.stringify(payload) }); _renderCalories(); }
     catch (err) { uiModule.showError?.(err.message); }
+  });
+  // Photo → vision estimate → pre-fill the form for the user to confirm.
+  b.querySelector('#health-meal-photo')?.addEventListener('change', async (e) => {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    const note = document.getElementById('health-meal-est-note');
+    const descIn = b.querySelector('#health-log-meal [name="description"]');
+    const kcalIn = b.querySelector('#health-log-meal [name="kcal"]');
+    if (note) { note.style.display = ''; note.textContent = 'Estimating from photo…'; }
+    try {
+      const form = new FormData(); form.append('file', file);
+      const res = await fetch(`${API_BASE}/api/health/estimate-meal`, { method: 'POST', credentials: 'same-origin', body: form });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || 'Estimate failed');
+      const est = data.estimate || {};
+      if (descIn) descIn.value = est.description || '';
+      if (kcalIn) kcalIn.value = est.kcal || '';
+      _pendingMacros = {};
+      ['protein_g', 'carbs_g', 'fat_g'].forEach((k) => { if (est[k] != null) _pendingMacros[k] = est[k]; });
+      if (note) note.textContent = `Estimated: ${est.kcal || 0} kcal${est.protein_g != null ? ` · P${Math.round(est.protein_g)} C${Math.round(est.carbs_g || 0)} F${Math.round(est.fat_g || 0)}` : ''} — review and press Add.`;
+    } catch (err) {
+      if (note) note.textContent = `Couldn’t estimate: ${err.message}`;
+    } finally { e.target.value = ''; }
   });
   b.querySelectorAll('[data-del-meal]').forEach((btn) => btn.addEventListener('click', async () => {
     try { await _api(`/meals/${btn.dataset.delMeal}`, { method: 'DELETE' }); _renderCalories(); }

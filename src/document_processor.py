@@ -281,8 +281,9 @@ def _resolve_vl_model(configured: str, owner: str | None = None) -> tuple:
     raise ValueError("No vision model available")
 
 
-def analyze_image_with_vl_result(image_path: str, owner: str | None = None) -> dict:
-    """Analyze an image and return both text and the model that produced it."""
+def analyze_image_with_vl_result(image_path: str, owner: str | None = None, prompt: str = "Describe this image in detail") -> dict:
+    """Analyze an image and return both text and the model that produced it.
+    `prompt` lets callers ask for something specific (e.g. a calorie estimate)."""
     logger.info(f"Analyzing image with VL model: {image_path}")
     try:
         settings = _load_vl_settings()
@@ -306,7 +307,7 @@ def analyze_image_with_vl_result(image_path: str, owner: str | None = None) -> d
             {
                 "role": "user",
                 "content": [
-                    {"type": "text", "text": "Describe this image in detail"},
+                    {"type": "text", "text": prompt},
                     {"type": "image_url", "image_url": {"url": f"data:image/{img_format};base64,{img_data}"}},
                 ],
             }
