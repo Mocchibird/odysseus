@@ -6,6 +6,7 @@
  */
 import uiModule from './ui.js';
 import { makeWindowDraggable } from './windowDrag.js';
+import * as Modals from './modalManager.js';
 
 const API_BASE = window.location.origin;
 let _open = false;
@@ -131,6 +132,10 @@ async function _carryForward(btn) {
 }
 
 export function openToday() {
+  if (Modals.isRegistered('today-modal') && Modals.isMinimized('today-modal')) {
+    Modals.restore('today-modal');
+    return;
+  }
   if (_open) { closeToday(); return; }
   _open = true;
   const modal = document.createElement('div');
@@ -152,6 +157,13 @@ export function openToday() {
   const content = modal.querySelector('.modal-content');
   const header = modal.querySelector('.modal-header');
   if (content && header) makeWindowDraggable(modal, { content, header });
+  Modals.register('today-modal', {
+    railBtnId: 'rail-today',
+    sidebarBtnId: 'tool-today-btn',
+    closeFn: () => _doCloseToday(),
+    restoreFn: () => {},
+  });
+  try { Modals.injectMinimizeButton(modal, 'today-modal'); } catch (_) {}
   document.getElementById('today-close').addEventListener('click', closeToday);
   document.getElementById('today-refresh').addEventListener('click', () => { _data = null; _load(); });
   modal.addEventListener('click', (e) => {
@@ -164,8 +176,7 @@ export function openToday() {
   _load();
 }
 
-export function closeToday() {
-  if (!_open) return;
+function _doCloseToday() {
   _open = false;
   const modal = document.getElementById('today-modal');
   if (modal) {
@@ -179,7 +190,16 @@ export function closeToday() {
   if (_escHandler) { document.removeEventListener('keydown', _escHandler); _escHandler = null; }
 }
 
-export function isTodayOpen() { return _open; }
+export function closeToday() {
+  if (!_open && !Modals.isMinimized('today-modal')) return;
+  if (Modals.isRegistered('today-modal')) Modals.close('today-modal');
+  else _doCloseToday();
+}
+
+export function isTodayOpen() {
+  if (Modals.isMinimized('today-modal')) return false;
+  return _open;
+}
 
 const todayModule = { openToday, closeToday, isTodayOpen };
 export default todayModule;

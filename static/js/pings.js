@@ -7,6 +7,7 @@
 import uiModule from './ui.js';
 import { makeWindowDraggable } from './windowDrag.js';
 import { selectSession } from './sessions.js';
+import * as Modals from './modalManager.js';
 
 const API_BASE = window.location.origin;
 let _open = false;
@@ -172,6 +173,10 @@ async function _branch(id) {
 }
 
 export function openPings() {
+  if (Modals.isRegistered('pings-modal') && Modals.isMinimized('pings-modal')) {
+    Modals.restore('pings-modal');
+    return;
+  }
   if (_open) return;
   _open = true;
   const modal = document.createElement('div');
@@ -193,6 +198,13 @@ export function openPings() {
   const content = modal.querySelector('.modal-content');
   const header = modal.querySelector('.modal-header');
   if (content && header) makeWindowDraggable(modal, { content, header });
+  Modals.register('pings-modal', {
+    railBtnId: 'rail-pings',
+    sidebarBtnId: 'tool-pings-btn',
+    closeFn: () => _doClosePings(),
+    restoreFn: () => {},
+  });
+  try { Modals.injectMinimizeButton(modal, 'pings-modal'); } catch (_) {}
   document.getElementById('pings-close').addEventListener('click', closePings);
   const unreadBtn = document.getElementById('pings-unread-toggle');
   unreadBtn.addEventListener('click', () => {
@@ -216,8 +228,7 @@ export function openPings() {
 
 let _escHandler = null;
 
-export function closePings() {
-  if (!_open) return;
+function _doClosePings() {
   _open = false;
   const modal = document.getElementById('pings-modal');
   if (modal) {
@@ -231,7 +242,16 @@ export function closePings() {
   if (_escHandler) { document.removeEventListener('keydown', _escHandler); _escHandler = null; }
 }
 
-export function isPingsOpen() { return _open; }
+export function closePings() {
+  if (!_open && !Modals.isMinimized('pings-modal')) return;
+  if (Modals.isRegistered('pings-modal')) Modals.close('pings-modal');
+  else _doClosePings();
+}
+
+export function isPingsOpen() {
+  if (Modals.isMinimized('pings-modal')) return false;
+  return _open;
+}
 
 const pingsModule = { openPings, closePings, isPingsOpen, refreshUnreadBadge };
 export default pingsModule;

@@ -5,6 +5,7 @@
  */
 import uiModule from './ui.js';
 import { makeWindowDraggable } from './windowDrag.js';
+import * as Modals from './modalManager.js';
 
 const API_BASE = window.location.origin;
 let _open = false;
@@ -436,6 +437,12 @@ function _switchTab(tab) {
 
 export function openHealth(tab) {
   const want = _TABS[tab] ? tab : null;
+  // Minimized → restore in place (consistent with gallery/calendar/etc.).
+  if (Modals.isRegistered('health-modal') && Modals.isMinimized('health-modal')) {
+    Modals.restore('health-modal');
+    if (want) _switchTab(want);
+    return;
+  }
   if (_open) {
     // Already open: same view again → toggle closed; otherwise switch tabs.
     if (want && _tab === want) { closeHealth(); return; }
@@ -468,6 +475,15 @@ export function openHealth(tab) {
   const content = modal.querySelector('.modal-content');
   const header = modal.querySelector('.modal-header');
   if (content && header) makeWindowDraggable(modal, { content, header });
+  // Register with the Modals manager so Health gets the same minimize→dock,
+  // restore and rail/sidebar badge behavior as every other tool window.
+  Modals.register('health-modal', {
+    railBtnId: 'rail-health',
+    sidebarBtnId: 'tool-health-btn',
+    closeFn: () => _doCloseHealth(),
+    restoreFn: () => {},
+  });
+  try { Modals.injectMinimizeButton(modal, 'health-modal'); } catch (_) {}
   document.getElementById('health-close').addEventListener('click', closeHealth);
   modal.addEventListener('click', (e) => {
     if (uiModule.isTouchInsideModal?.()) return;
@@ -481,8 +497,8 @@ export function openHealth(tab) {
 
 let _escHandler = null;
 
-export function closeHealth() {
-  if (!_open) return;
+// Actual teardown — invoked by Modals.close() via the registered closeFn.
+function _doCloseHealth() {
   _open = false;
   const modal = document.getElementById('health-modal');
   if (modal) {
@@ -496,7 +512,16 @@ export function closeHealth() {
   if (_escHandler) { document.removeEventListener('keydown', _escHandler); _escHandler = null; }
 }
 
-export function isHealthOpen() { return _open; }
+export function closeHealth() {
+  if (!_open && !Modals.isMinimized('health-modal')) return;
+  if (Modals.isRegistered('health-modal')) Modals.close('health-modal');
+  else _doCloseHealth();
+}
+
+export function isHealthOpen() {
+  if (Modals.isMinimized('health-modal')) return false;
+  return _open;
+}
 
 const healthModule = { openHealth, closeHealth, isHealthOpen };
 export default healthModule;
