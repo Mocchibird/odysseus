@@ -99,8 +99,12 @@ export function makeWindowResizable(content, options = {}) {
     startRect = { left: r.left, top: r.top, width: r.width, height: r.height };
     startX = cx; startY = cy;
     // Pin to fixed with explicit box, same as the drag helper does, so the
-    // centering transform / margin stops fighting the new dimensions. Drop the
-    // max-width/height caps (e.g. 85vh) so the window can actually grow.
+    // centering transform / margin stops fighting the new dimensions. Raise the
+    // caps (the CSS default is max-height:85vh) to the FULL viewport so the
+    // window can grow to fill the screen — but never past it. Using viewport
+    // units (not `none`) keeps a RESPONSIVE ceiling: if the viewport later
+    // shrinks below the explicit pixel size, the window re-clamps to the screen
+    // and its body scroller engages instead of overflowing off-screen.
     content.style.position = 'fixed';
     content.style.margin = '0';
     content.style.transform = 'none';
@@ -108,8 +112,8 @@ export function makeWindowResizable(content, options = {}) {
     content.style.top = r.top + 'px';
     content.style.width = r.width + 'px';
     content.style.height = r.height + 'px';
-    content.style.maxWidth = 'none';
-    content.style.maxHeight = 'none';
+    content.style.maxWidth = '100vw';
+    content.style.maxHeight = '100dvh';
     document.body.classList.add('window-resizing-active');
     document.body.style.cursor = cursorFor(edges);
   }
@@ -224,8 +228,11 @@ export function makeWindowResizable(content, options = {}) {
           const h = Math.max(minH, Math.min(saved.h, window.innerHeight));
           content.style.width = w + 'px';
           content.style.height = h + 'px';
-          content.style.maxWidth = 'none';
-          content.style.maxHeight = 'none';
+          // Cap to the viewport (not `none`): a stored pixel size from a larger
+          // screen/session then re-clamps to the current viewport and the body
+          // scrolls, instead of overflowing off-screen with no way to scroll.
+          content.style.maxWidth = '100vw';
+          content.style.maxHeight = '100dvh';
         }
       } catch (_) {}
     });
