@@ -24,10 +24,10 @@ import censorModule from './js/censor.js';
 import galleryModule from './js/gallery.js';
 import tasksModule from './js/tasks.js';
 import calendarModule from './js/calendar.js';
-import notesModule from './js/notes.js?v=366';
-import healthModule from './js/health.js?v=366';
-import pingsModule from './js/pings.js?v=366';
-import todayModule from './js/today.js?v=366';
+import notesModule from './js/notes.js?v=367';
+import healthModule from './js/health.js?v=367';
+import pingsModule from './js/pings.js?v=367';
+import todayModule from './js/today.js?v=367';
 import adminModule from './js/admin.js';
 import settingsModule from './js/settings.js';
 // Eagerly bind unified minimize/restore behavior across all tool modals.
@@ -2525,7 +2525,11 @@ function initializeEventListeners() {
     'sessions-section':    '#sessions-section',
     'email-section':       '#email-section',
     'models-section':      '#models-section',
+    'planner-section':     '#planner-section',
     'tools-section':       '#tools-section',
+    'library-section':     '#library-section',
+    'ai-section':          '#ai-section',
+    'theme-section':       '#theme-section',
     // Per-tool visibility — fine-grained control over which entries show
     // inside the Tools section in the sidebar.
     'tool-calendar':       '#tool-calendar-btn',
