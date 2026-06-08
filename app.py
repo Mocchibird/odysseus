@@ -714,6 +714,10 @@ app.include_router(setup_health_routes())
 from routes.ping_routes import setup_ping_routes
 app.include_router(setup_ping_routes())
 
+# "Today" dashboard (events + reminders + habits)
+from routes.today_routes import setup_today_routes
+app.include_router(setup_today_routes())
+
 # Email
 from routes.email_routes import setup_email_routes
 email_router = setup_email_routes()

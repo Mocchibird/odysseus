@@ -918,6 +918,22 @@ def daily_note_rel_path() -> str:
     return f"{folder}/{datetime.now().strftime('%Y-%m-%d')}.md"
 
 
+def ensure_daily_note(owner: str | None) -> dict:
+    """Create today's daily note (with a date header) if it doesn't exist yet."""
+    owner_key = owner_folder_name(owner)
+    rel = daily_note_rel_path()
+    path = resolve_owner_file(owner_key, rel)
+    if path.exists():
+        return {"path": rel, "created": False}
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(f"# {datetime.now().strftime('%Y-%m-%d')}\n\n", encoding="utf-8")
+    try:
+        index_file(owner_key, path)
+    except Exception:
+        pass
+    return {"path": rel, "created": True}
+
+
 def append_daily_note(owner: str | None, text: str) -> dict:
     """Append a timestamped bullet to today's daily note (quick-capture)."""
     text = (text or "").strip()

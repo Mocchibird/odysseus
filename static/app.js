@@ -24,9 +24,10 @@ import censorModule from './js/censor.js';
 import galleryModule from './js/gallery.js';
 import tasksModule from './js/tasks.js';
 import calendarModule from './js/calendar.js';
-import notesModule from './js/notes.js?v=353';
+import notesModule from './js/notes.js?v=354';
 import healthModule from './js/health.js';
 import pingsModule from './js/pings.js';
+import todayModule from './js/today.js';
 import adminModule from './js/admin.js';
 import settingsModule from './js/settings.js';
 // Eagerly bind unified minimize/restore behavior across all tool modals.
@@ -919,6 +920,16 @@ function initializeEventListeners() {
   const toolHabitsBtn = el('tool-habits-btn');
   if (toolHabitsBtn) {
     toolHabitsBtn.addEventListener('click', () => healthModule && healthModule.openHealth('habits'));
+  }
+
+  // "Today" dashboard tool button (toggles open/closed)
+  const toolTodayBtn = el('tool-today-btn');
+  if (toolTodayBtn) {
+    toolTodayBtn.addEventListener('click', () => {
+      if (todayModule) {
+        todayModule.isTodayOpen() ? todayModule.closeToday() : todayModule.openToday();
+      }
+    });
   }
 
   // Pings & Reminders tool button
@@ -3533,6 +3544,7 @@ function startOdysseusApp() {
 
   // Rail tool buttons — delegate to sidebar tool buttons
   const _railToolMap = {
+    'rail-today':     'tool-today-btn',
     'rail-books':     'tool-books-btn',
     'rail-compare':   'tool-compare-btn',
     'rail-research':  'tool-research-btn',

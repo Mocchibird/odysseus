@@ -2375,6 +2375,92 @@ async def action_tidy_pings(owner: str, **kwargs) -> Tuple[str, bool]:
         return str(e), False
 
 
+def _parse_due_dt(value: str):
+    """Parse a Note.due_date string (ISO datetime or YYYY-MM-DD) → naive datetime."""
+    from datetime import datetime as _dt
+    s = (value or "").strip()
+    if not s:
+        return None
+    s = s.replace("Z", "+00:00")
+    try:
+        d = _dt.fromisoformat(s)
+        return d.replace(tzinfo=None) if d.tzinfo else d
+    except ValueError:
+        try:
+            return _dt.strptime(s[:10], "%Y-%m-%d")
+        except ValueError:
+            return None
+
+
+async def action_carry_forward(owner: str, **kwargs) -> Tuple[str, bool]:
+    """Reschedule overdue note reminders (due before today) to today 09:00 so they
+    resurface instead of silently rotting in the past. Mutating but conservative."""
+    try:
+        from datetime import datetime as _dt
+        from core.database import SessionLocal, Note
+
+        start = _dt.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        target = start.replace(hour=9)
+        allow_null = _allow_null_owner()
+        db = SessionLocal()
+        moved = []
+        try:
+            q = db.query(Note).filter(Note.archived == False)  # noqa: E712
+            if owner:
+                q = owner_filter(q, Note, owner, include_shared=allow_null)
+            for n in q.all():
+                if not n.due_date:
+                    continue
+                due = _parse_due_dt(n.due_date)
+                if due is None or due >= start:
+                    continue  # only strictly-overdue reminders
+                n.due_date = target.isoformat(timespec="minutes")
+                moved.append(n.title or "(untitled)")
+            if moved:
+                db.commit()
+        finally:
+            db.close()
+        if not moved:
+            return "No overdue reminders to carry forward.", True
+        body = "\n".join(f"  · {t}" for t in moved[:20])
+        more = f"\n  …and {len(moved) - 20} more" if len(moved) > 20 else ""
+        return f"Carried {len(moved)} overdue reminder(s) forward to today 09:00:\n{body}{more}", True
+    except Exception as e:
+        logger.error(f"carry_forward action failed: {e}")
+        return str(e), False
+
+
+async def action_morning_routine(owner: str, **kwargs) -> Tuple[str, bool]:
+    """Start-of-day kickoff: ensure today's daily note exists, carry overdue
+    reminders forward, and return the morning digest. Combines daily_brief with
+    the Obsidian daily-note + carry-forward so one trigger gets the day going."""
+    try:
+        brief, _ok = await action_daily_brief(owner)
+
+        note_line = ""
+        try:
+            from src import iris_vault
+            res = iris_vault.ensure_daily_note(owner)
+            note_line = (
+                f"📓 Created today's daily note ({res['path']})."
+                if res.get("created") else
+                f"📓 Daily note ready ({res.get('path', '')})."
+            )
+        except Exception as ne:
+            logger.debug(f"morning_routine: daily note ensure failed: {ne}")
+
+        cf, _ = await action_carry_forward(owner)
+
+        parts = [brief, ""]
+        if note_line:
+            parts.append(note_line)
+        parts.append(cf)
+        return "\n".join(parts), True
+    except Exception as e:
+        logger.error(f"morning_routine action failed: {e}")
+        return str(e), False
+
+
 BUILTIN_ACTIONS = {
     "tidy_sessions": action_tidy_sessions,
     "tidy_pings": action_tidy_pings,
@@ -2388,8 +2474,10 @@ BUILTIN_ACTIONS = {
     # ping_events removed from the user-facing registry. Calendar reminders
     # are represented as Notes, so note pings are the single dispatch path.
     "daily_brief": action_daily_brief,
+    "morning_routine": action_morning_routine,
     "evening_wrapup": action_evening_wrapup,
     "weekly_review": action_weekly_review,
+    "carry_forward": action_carry_forward,
     "learn_sender_signatures": action_learn_sender_signatures,
     "ssh_command": action_ssh_command,
     "run_script": action_run_script,
@@ -2413,8 +2501,10 @@ BUILTIN_ACTION_INFO = {
     "extract_email_events": "Scan emails for booking/meeting confirmations and auto-add to calendar",
     "classify_events": "Tag upcoming events with importance (low/normal/high/critical) and type (work/health/travel/etc.); colors them too",
     "daily_brief": "Build a morning digest: today's calendar, unread email count + top senders, active todos",
+    "morning_routine": "Kick off the day: ensure today's daily note exists, carry overdue reminders forward to 9am, and return the morning digest",
     "evening_wrapup": "End-of-day summary: today's events, open todos, habit status, and a preview of tomorrow's schedule",
     "weekly_review": "ISO-week roll-up: events, notes created, open todos, habit completion (x/7 + streaks), and weight change",
+    "carry_forward": "Reschedule overdue note reminders to today 9am so they resurface instead of rotting in the past",
     "learn_sender_signatures": "LLM learns each sender's signature from 3+ of their recent emails; cached per address so future renders fold sigs reliably without heuristics",
     "ssh_command": "Run a shell command on a local or remote host",
     "run_script": "Run a script locally or on ODYSSEUS_SCRIPT_HOST",
