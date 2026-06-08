@@ -32020,6 +32020,22 @@ body.notes-mobile-mode.notes-drag-mode .note-card-pin.active {
   font: 12px/1.5 var(--mono-font, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
   background: color-mix(in srgb, var(--fg) 3%, transparent);
 }
+/* Inline image preview in the vault reader (served via /api/iris-vault/raw). */
+.notes-vault-image-wrap {
+  display: flex;
+  justify-content: center;
+  padding: 12px;
+  max-height: calc(100vh - 230px);
+  overflow: auto;
+  background: color-mix(in srgb, var(--fg) 3%, transparent);
+  border-radius: 8px;
+}
+.notes-vault-image {
+  max-width: 100%;
+  height: auto;
+  border-radius: 6px;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.25);
+}
 .notes-book-upload-progress {
   display: grid;
   gap: 5px;

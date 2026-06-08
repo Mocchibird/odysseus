@@ -24,7 +24,7 @@ import censorModule from './js/censor.js';
 import galleryModule from './js/gallery.js';
 import tasksModule from './js/tasks.js';
 import calendarModule from './js/calendar.js';
-import notesModule from './js/notes.js?v=348';
+import notesModule from './js/notes.js?v=349';
 import healthModule from './js/health.js';
 import pingsModule from './js/pings.js';
 import adminModule from './js/admin.js';
@@ -910,14 +910,15 @@ function initializeEventListeners() {
     });
   }
 
-  // Health tool button
+  // Health tool button (body metrics) + Habits as its own entry point. Both
+  // open the same panel; openHealth(tab) switches/toggles to the right tab.
   const toolHealthBtn = el('tool-health-btn');
   if (toolHealthBtn) {
-    toolHealthBtn.addEventListener('click', () => {
-      if (healthModule) {
-        healthModule.isHealthOpen() ? healthModule.closeHealth() : healthModule.openHealth();
-      }
-    });
+    toolHealthBtn.addEventListener('click', () => healthModule && healthModule.openHealth('calories'));
+  }
+  const toolHabitsBtn = el('tool-habits-btn');
+  if (toolHabitsBtn) {
+    toolHabitsBtn.addEventListener('click', () => healthModule && healthModule.openHealth('habits'));
   }
 
   // Pings & Reminders tool button
@@ -3540,6 +3541,7 @@ function startOdysseusApp() {
     'rail-gallery':   'tool-gallery-btn',
     'rail-tasks':     'tool-tasks-btn',
     'rail-health':    'tool-health-btn',
+    'rail-habits':    'tool-habits-btn',
     'rail-pings':     'tool-pings-btn',
     'rail-calendar':  'tool-calendar-btn',
     'rail-notes':     'tool-notes-btn',

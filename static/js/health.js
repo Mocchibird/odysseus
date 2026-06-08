@@ -330,8 +330,15 @@ function _switchTab(tab) {
   _TABS[tab]();
 }
 
-export function openHealth() {
-  if (_open) return;
+export function openHealth(tab) {
+  const want = _TABS[tab] ? tab : null;
+  if (_open) {
+    // Already open: same view again → toggle closed; otherwise switch tabs.
+    if (want && _tab === want) { closeHealth(); return; }
+    if (want) _switchTab(want);
+    return;
+  }
+  if (want) _tab = want;
   _open = true;
   const modal = document.createElement('div');
   modal.className = 'modal';

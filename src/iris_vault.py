@@ -225,17 +225,19 @@ def owner_root(owner: str | None) -> Path:
 
 
 def _safe_rel_path(rel_path: str, *, default_name: str = "note.md") -> str:
+    # Preserve the real filename (unicode, spaces, punctuation like Café.md or
+    # "Notes & Ideas.md") so a listed file can be read back exactly. Traversal is
+    # blocked by dropping "."/".." segments here AND the relative_to() guard in
+    # resolve_owner_file; we only strip control characters.
     rel = (rel_path or "").strip().replace("\\", "/")
     if not rel:
         rel = default_name
     parts = []
     for part in rel.split("/"):
-        part = part.strip()
+        part = re.sub(r"[\x00-\x1f\x7f]", "", part.strip())
         if not part or part in {".", ".."}:
             continue
-        part = re.sub(r"[^A-Za-z0-9_.@() -]+", "_", part).strip()
-        if part:
-            parts.append(part[:160])
+        parts.append(part[:200])
     if not parts:
         parts = [default_name]
     return "/".join(parts)
@@ -783,6 +785,45 @@ def search(owner: str | None, query: str = "", limit: int = 20) -> list[dict]:
         return results
     finally:
         db.close()
+
+
+def list_files_fs(owner: str | None, *, limit: int = 5000) -> list[dict]:
+    """List EVERY file under the owner's vault folder straight from the
+    filesystem (not the search index, which is lazy + capped). This is what the
+    Vault file browser uses so the full folder tree shows, regardless of what's
+    been indexed. Hidden files/dirs (dotfiles, .obsidian, .ai_memory_cache) are
+    skipped. Returns lightweight metadata; content is loaded on open."""
+    base = owner_root(owner)
+    out: list[dict] = []
+    if not base.exists():
+        return out
+    for path in sorted(base.rglob("*"), key=lambda p: str(p).lower()):
+        if not path.is_file():
+            continue
+        try:
+            rel_parts = path.relative_to(base).parts
+        except ValueError:
+            continue
+        if any(part.startswith(".") for part in rel_parts):
+            continue  # skip dotfiles + hidden dirs (.obsidian, caches, trash)
+        try:
+            st = path.stat()
+        except OSError:
+            continue
+        out.append({
+            "path": "/".join(rel_parts),
+            "name": path.name,
+            "title": path.stem,
+            "mime": mimetypes.guess_type(path.name)[0] or "",
+            "size": st.st_size,
+            "mtime": datetime.utcfromtimestamp(st.st_mtime).isoformat(),
+            "updated_at": datetime.utcfromtimestamp(st.st_mtime).isoformat(),
+            "excerpt": "",
+        })
+        if len(out) >= limit:
+            logger.warning("list_files_fs hit the %d-file cap for owner %r", limit, owner_folder_name(owner))
+            break
+    return out
 
 
 def row_to_dict(row: IrisVaultFile, *, include_content: bool = False, content_override: str | None = None) -> dict:

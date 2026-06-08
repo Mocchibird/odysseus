@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import os
 
+import mimetypes
+
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from src.auth_helpers import require_user
@@ -82,14 +85,26 @@ def setup_iris_vault_routes() -> APIRouter:
     async def list_files(request: Request, q: str = "", limit: int = 100):
         owner = _owner(request)
         _maybe_sort_inbox(owner)
-        return {
-            "ok": True,
-            "files": iris_vault.search(owner, q, limit),
-        }
+        # Empty query = browse: list the FULL filesystem tree (every folder/file),
+        # not the lazy, 100-capped search index. Non-empty query = search the index.
+        if (q or "").strip():
+            return {"ok": True, "files": iris_vault.search(owner, q, limit)}
+        return {"ok": True, "files": iris_vault.list_files_fs(owner)}
 
     @router.get("/file")
     async def read_file(request: Request, path: str):
         return {"ok": True, "file": iris_vault.read_file(_owner(request), path)}
+
+    @router.get("/raw")
+    async def raw_file(request: Request, path: str):
+        """Serve raw file bytes (images, etc.) so the vault reader can show them
+        inline. Owner-scoped + path-confined via resolve_owner_file."""
+        owner = _owner(request)
+        file_path = iris_vault.resolve_owner_file(owner, path)
+        if not file_path.is_file():
+            raise HTTPException(404, "Vault file not found")
+        mime = mimetypes.guess_type(file_path.name)[0] or "application/octet-stream"
+        return FileResponse(file_path, media_type=mime)
 
     @router.post("/file")
     async def write_file(body: VaultWriteRequest, request: Request):

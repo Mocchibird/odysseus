@@ -2802,9 +2802,16 @@ function _renderVaultFiles() {
   }
   if (_vaultOpenFile) {
     const f = _vaultOpenFile;
-    const content = typeof f.content === 'string' && f.content.length
-      ? `<pre class="notes-vault-reader-content">${_esc(f.content)}</pre>`
-      : `<div class="notes-empty-msg">This file is stored and indexed by metadata, but it is not text-previewable here.</div>`;
+    const rawUrl = `${API_BASE}/api/iris-vault/raw?path=${encodeURIComponent(f.path || '')}`;
+    const isImg = /^image\//i.test(f.mime || '') || /\.(png|jpe?g|gif|webp|svg|bmp|avif)$/i.test(f.path || '');
+    let content;
+    if (isImg) {
+      content = `<div class="notes-vault-image-wrap"><img class="notes-vault-image" src="${_attrEsc(rawUrl)}" alt="${_attrEsc(f.title || f.path || 'image')}" loading="lazy" /></div>`;
+    } else if (typeof f.content === 'string' && f.content.length) {
+      content = `<pre class="notes-vault-reader-content">${_esc(f.content)}</pre>`;
+    } else {
+      content = `<div class="notes-empty-msg">This file isn’t text-previewable. <a href="${_attrEsc(rawUrl)}" target="_blank" rel="noopener" style="color:var(--accent, var(--red));font-weight:600;">Open / download ↗</a></div>`;
+    }
     html += `<div class="notes-vault-reader">
       <div class="notes-vault-reader-head">
         <button type="button" class="notes-vault-back" title="Back to vault files">
@@ -2911,6 +2918,9 @@ function _renderBookReader(body, baseHtml) {
             <strong>${_esc(book?.title || book?.path || 'PDF')}</strong>
             <span>${_esc(book?.author || book?.path || '')}</span>
           </div>
+          <a class="notes-book-title-edit notes-book-pdf-open" href="${_attrEsc(fileUrl)}" target="_blank" rel="noopener" title="Open the PDF in a new tab" aria-label="Open the PDF in a new tab">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+          </a>
           <button type="button" class="notes-book-title-edit notes-book-reader-edit" data-path="${_attrEsc(book?.path || '')}" data-title="${_attrEsc(book?.title || '')}" title="Rename book" aria-label="Rename book">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
           </button>
@@ -2920,7 +2930,6 @@ function _renderBookReader(body, baseHtml) {
           <button type="button" class="notes-select-trigger notes-book-prev" ${idx <= 0 ? 'disabled' : ''}>Prev</button>
           <select class="notes-select-trigger notes-book-select" aria-label="Jump to page">${options}</select>
           <button type="button" class="notes-select-trigger notes-book-next" ${idx >= chapters.length - 1 ? 'disabled' : ''}>Next</button>
-          <a class="notes-select-trigger notes-book-pdf-open" href="${_attrEsc(fileUrl)}" target="_blank" rel="noopener" title="Open the PDF in a new tab">Open ↗</a>
         </div>
       </div>
       <div class="notes-book-pdf-viewer">
