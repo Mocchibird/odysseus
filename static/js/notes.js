@@ -10,7 +10,7 @@ import { attachColorPicker } from './colorPicker.js';
 import { makeWindowDraggable } from './windowDrag.js';
 import { snapModalToZone } from './tileManager.js';
 import { applyEdgeDock, clearDockSide } from './modalSnap.js';
-import bookToolsModule from './bookTools.js?v=365';
+import bookToolsModule from './bookTools.js?v=366';
 
 const API_BASE = window.location.origin;
 let _open = false;
@@ -47,7 +47,10 @@ let _bookChapterLoading = false;
 let _bookAutoAdvancing = false;
 let _bookKeyHandler = null;
 let _bookReadMode = (typeof localStorage !== 'undefined' && localStorage.getItem('odysseus-books-read-mode')) || 'scroll'; // 'scroll' | 'page'
-let _bookPdfViewMode = (typeof localStorage !== 'undefined' && localStorage.getItem('odysseus-books-pdf-view-mode')) || 'pdf'; // 'pdf' | 'text'
+// PDFs always render as the native PDF (the text extraction still exists on the
+// backend for chat/search — there's just no in-reader Text toggle anymore).
+const _bookPdfViewMode = 'pdf';
+let _bookNavOpen = false; // chapter/page nav row is collapsed by default
 const BOOK_CONTINUOUS_MAX_RENDERED_CHAPTERS = 5;
 // Live PDF.js reader controller for the actual-PDF view (see pdfReader.js).
 // Held at module scope so re-renders / closing the book can tear it down.
@@ -944,20 +947,6 @@ function _setBookReadMode(mode) {
   _saveBookProgressNow();
   _bookReadMode = next;
   try { localStorage.setItem('odysseus-books-read-mode', next); } catch {}
-  _renderNotes();
-}
-
-async function _setBookPdfViewMode(mode) {
-  const next = mode === 'text' ? 'text' : 'pdf';
-  if (_bookPdfViewMode === next) return;
-  if (_bookOpenBook?.kind === 'pdf' && _bookPdfViewMode === 'text') {
-    _saveBookProgressNow();
-  }
-  _bookPdfViewMode = next;
-  try { localStorage.setItem('odysseus-books-pdf-view-mode', next); } catch {}
-  if (next === 'text') {
-    await _loadBookChapter(_bookChapterIndex);
-  }
   _renderNotes();
 }
 
@@ -3138,128 +3127,68 @@ function _renderBookReader(body, baseHtml) {
   const pageHtml = continuousScroll
     ? (_bookChapterLoading && !chapter?.html ? loadingHtml : _renderBookChapterSection(chapter, idx, label))
     : `<h2>${_esc(chapter?.title || `${label} ${idx + 1}`)}</h2><div class="notes-book-html">${contentHtml}</div>`;
-  const pdfToggleHtml = isPdf ? `<div class="notes-book-mode-toggle notes-book-pdf-toggle" role="group" aria-label="PDF view mode">
-          <button type="button" class="notes-book-mode-btn${_bookPdfViewMode === 'pdf' ? ' active' : ''}" data-pdf-mode="pdf">PDF</button>
-          <button type="button" class="notes-book-mode-btn${_bookPdfViewMode === 'text' ? ' active' : ''}" data-pdf-mode="text">Text</button>
-        </div>` : '';
-  const readerModeToggleHtml = `<div class="notes-book-mode-toggle" role="group" aria-label="Reading mode">
+  const navOpen = _bookNavOpen;
+  const hasNav = chapters.length > 1;
+  // A list icon that toggles the collapsible chapter/page nav row.
+  const navToggleHtml = hasNav ? `<button type="button" class="notes-book-tool notes-book-nav-toggle${navOpen ? ' active' : ''}" title="${label}s" aria-label="${label} navigation" aria-expanded="${navOpen}">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+        </button>` : '';
+  const modeToggleHtml = isPdf ? '' : `<div class="notes-book-mode-toggle" role="group" aria-label="Reading mode">
           <button type="button" class="notes-book-mode-btn${_bookReadMode === 'scroll' ? ' active' : ''}" data-mode="scroll">Scroll</button>
           <button type="button" class="notes-book-mode-btn${_bookReadMode === 'page' ? ' active' : ''}" data-mode="page">Pages</button>
         </div>`;
-  if (isPdf && _bookPdfViewMode !== 'text') {
-    // Show the PDF as-is in the browser's built-in viewer. Simple + reliable;
-    // the #page anchor jumps to the current page. "Open ↗" is a fallback for
-    // browsers that won't render a PDF inline in an iframe (e.g. iOS Safari).
+  const navRowHtml = hasNav ? `<div class="notes-book-nav-row">
+        <button type="button" class="notes-select-trigger notes-book-prev" ${idx <= 0 ? 'disabled' : ''}>Prev</button>
+        <select class="notes-select-trigger notes-book-select" aria-label="Jump to ${label.toLowerCase()}">${options}</select>
+        <button type="button" class="notes-select-trigger notes-book-next" ${idx >= chapters.length - 1 ? 'disabled' : ''}>Next</button>
+        ${modeToggleHtml}
+      </div>` : '';
+  const openLinkHtml = isPdf ? `<a class="notes-book-tool notes-book-pdf-open" href="${_attrEsc(`${API_BASE}/api/books/file?path=${encodeURIComponent(book?.path || '')}`)}" target="_blank" rel="noopener" title="Open the PDF in a new tab" aria-label="Open in a new tab">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+        </a>` : '';
+  // One compact header line: back + title + (nav toggle) + reader tools + open/rename.
+  // The chapter/page nav lives in a collapsible row beneath it (navRowHtml).
+  const headHtml = `
+    <div class="notes-vault-reader-head notes-book-head">
+      <button type="button" class="notes-vault-back" title="Back to books">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+      </button>
+      <div class="notes-vault-reader-title">
+        <strong>${_esc(book?.title || book?.path || (isPdf ? 'PDF' : 'Book'))}</strong>
+        ${book?.author ? `<span>${_esc(book.author)}</span>` : ''}
+      </div>
+      <div class="notes-book-head-tools">
+        ${navToggleHtml}
+        ${bookToolsModule.toolbarHtml()}
+        ${openLinkHtml}
+        <button type="button" class="notes-book-tool notes-book-reader-edit" data-path="${_attrEsc(book?.path || '')}" data-title="${_attrEsc(book?.title || '')}" title="Rename book" aria-label="Rename book">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
+        </button>
+      </div>
+    </div>
+    ${navRowHtml}`;
+  if (isPdf) {
+    // The PDF shows as-is in the browser's native viewer; you scroll it directly.
     const fileUrl = `${API_BASE}/api/books/file?path=${encodeURIComponent(book?.path || '')}`;
     const pdfUrl = `${fileUrl}#view=FitH&page=${Math.max(1, idx + 1)}`;
-    body.innerHTML = baseHtml + `<div class="notes-book-reader notes-book-reader-pdf">
-      <div class="notes-vault-reader-head notes-book-head">
-        <div class="notes-book-title-row">
-          <button type="button" class="notes-vault-back" title="Back to books">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
-          </button>
-          <div class="notes-vault-reader-title">
-            <strong>${_esc(book?.title || book?.path || 'PDF')}</strong>
-            <span>${_esc(book?.author || book?.path || '')}</span>
-          </div>
-          <a class="notes-book-title-edit notes-book-pdf-open" href="${_attrEsc(fileUrl)}" target="_blank" rel="noopener" title="Open the PDF in a new tab" aria-label="Open the PDF in a new tab">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
-          </a>
-          <button type="button" class="notes-book-title-edit notes-book-reader-edit" data-path="${_attrEsc(book?.path || '')}" data-title="${_attrEsc(book?.title || '')}" title="Rename book" aria-label="Rename book">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
-          </button>
-        </div>
-        <div class="notes-book-controls-row notes-book-controls-row-pdf">
-          ${pdfToggleHtml}
-          ${bookToolsModule.toolbarHtml()}
-        </div>
-      </div>
+    body.innerHTML = baseHtml + `<div class="notes-book-reader notes-book-reader-pdf${navOpen ? ' notes-book-nav-open' : ''}">
+      ${headHtml}
       <div class="notes-book-pdf-viewer">
         <iframe class="notes-book-pdf-frame" src="${_attrEsc(pdfUrl)}" title="${_attrEsc(book?.title || 'PDF')}"></iframe>
       </div>
     </div>`;
-    body.querySelector('.notes-vault-back')?.addEventListener('click', () => {
-      _saveBookProgressNow(0);
-      if (_bookKeyHandler) {
-        document.removeEventListener('keydown', _bookKeyHandler);
-        _bookKeyHandler = null;
-      }
-      bookToolsModule.cleanup();
-      _bookOpenBook = null;
-      _renderNotes();
-    });
-    body.querySelector('.notes-book-reader-edit')?.addEventListener('click', async (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      try {
-        await _renameBook(e.currentTarget.dataset.path || book?.path || '', e.currentTarget.dataset.title || book?.title || '');
-      } catch (err) {
-        uiModule.showError?.(err?.message || 'Failed to rename book');
-      }
-    });
-    body.querySelectorAll('.notes-book-pdf-toggle .notes-book-mode-btn').forEach(btn => {
-      btn.addEventListener('click', () => _setBookPdfViewMode(btn.dataset.pdfMode || 'pdf'));
-    });
-    // No Prev/Next/page-select in native PDF view — you scroll the PDF directly;
-    // page-jump isn't supported by native viewers anyway, and dropping it gives
-    // the page more room.
+    _wireBookReaderHead(body);
     _wireBookTools(body, { supportsSelection: false });
     return;
   }
-  body.innerHTML = baseHtml + `<div class="notes-book-reader notes-book-reader-${_attrEsc(_bookReadMode)}">
-    <div class="notes-vault-reader-head notes-book-head">
-      <div class="notes-book-title-row">
-        <button type="button" class="notes-vault-back" title="Back to books">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
-        </button>
-        <div class="notes-vault-reader-title">
-          <strong>${_esc(book?.title || book?.path || 'Book')}</strong>
-          <span>${_esc(book?.author || book?.path || '')}</span>
-        </div>
-        <button type="button" class="notes-book-title-edit notes-book-reader-edit" data-path="${_attrEsc(book?.path || '')}" data-title="${_attrEsc(book?.title || '')}" title="Rename book" aria-label="Rename book">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
-        </button>
-      </div>
-      <div class="notes-book-controls-row${isPdf ? ' notes-book-controls-row-with-pdf' : ''}">
-        ${pdfToggleHtml}
-        <button type="button" class="notes-select-trigger notes-book-prev" ${idx <= 0 ? 'disabled' : ''}>Prev</button>
-        <select class="notes-select-trigger notes-book-select">${options}</select>
-        <button type="button" class="notes-select-trigger notes-book-next" ${idx >= chapters.length - 1 ? 'disabled' : ''}>Next</button>
-        ${readerModeToggleHtml}
-        ${bookToolsModule.toolbarHtml()}
-      </div>
-    </div>
+  body.innerHTML = baseHtml + `<div class="notes-book-reader notes-book-reader-${_attrEsc(_bookReadMode)}${navOpen ? ' notes-book-nav-open' : ''}">
+    ${headHtml}
     <article class="notes-book-content notes-book-content-${_attrEsc(_bookReadMode)}${continuousScroll ? ' notes-book-content-continuous' : ''}">
       <div class="notes-epub-progress-line"><span style="width:${Math.max(0, Math.min(progressPct, 100))}%"></span></div>
       <div class="notes-book-page${continuousScroll ? ' notes-book-stream' : ''}" tabindex="0" ${continuousScroll ? `data-stream-start="${idx}" data-stream-end="${idx}"` : ''}>${pageHtml}</div>
     </article>
   </div>`;
-  body.querySelector('.notes-vault-back')?.addEventListener('click', () => {
-    _saveBookProgressNow();
-    if (_bookKeyHandler) {
-      document.removeEventListener('keydown', _bookKeyHandler);
-      _bookKeyHandler = null;
-    }
-    bookToolsModule.cleanup();
-    _bookOpenBook = null;
-    _renderNotes();
-  });
-  body.querySelector('.notes-book-reader-edit')?.addEventListener('click', async (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    try {
-      await _renameBook(e.currentTarget.dataset.path || book?.path || '', e.currentTarget.dataset.title || book?.title || '');
-    } catch (err) {
-      uiModule.showError?.(err?.message || 'Failed to rename book');
-    }
-  });
-  body.querySelector('.notes-book-prev')?.addEventListener('click', () => _setBookChapter(idx - 1));
-  body.querySelector('.notes-book-next')?.addEventListener('click', () => _setBookChapter(idx + 1));
-  body.querySelector('.notes-book-select')?.addEventListener('change', (e) => _setBookChapter(e.target.value));
-  body.querySelectorAll('.notes-book-mode-btn').forEach(btn => {
-    if (btn.dataset.pdfMode) btn.addEventListener('click', () => _setBookPdfViewMode(btn.dataset.pdfMode || 'pdf'));
-    else btn.addEventListener('click', () => _setBookReadMode(btn.dataset.mode || 'scroll'));
-  });
+  _wireBookReaderHead(body);
   if (body._notesBookScrollHandler) body.removeEventListener('scroll', body._notesBookScrollHandler);
   const page = body.querySelector('.notes-book-page');
   body._notesBookScrollHandler = () => {
@@ -3313,6 +3242,41 @@ function _renderBookReader(body, baseHtml) {
     }, { passive: true });
   }
   _wireBookTools(body, { supportsSelection: true });
+}
+
+// Shared wiring for the reader header (both PDF + EPUB): back, rename, the
+// collapsible chapter/page nav toggle, and the Prev/select/Next + Scroll/Pages
+// controls inside the collapsible row.
+function _wireBookReaderHead(body) {
+  const book = _bookOpenBook;
+  const reader = body.querySelector('.notes-book-reader');
+  body.querySelector('.notes-vault-back')?.addEventListener('click', () => {
+    _saveBookProgressNow(book?.kind === 'pdf' ? 0 : undefined);
+    if (_bookKeyHandler) { document.removeEventListener('keydown', _bookKeyHandler); _bookKeyHandler = null; }
+    bookToolsModule.cleanup();
+    _bookOpenBook = null;
+    _renderNotes();
+  });
+  body.querySelector('.notes-book-reader-edit')?.addEventListener('click', async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    try {
+      await _renameBook(e.currentTarget.dataset.path || book?.path || '', e.currentTarget.dataset.title || book?.title || '');
+    } catch (err) {
+      uiModule.showError?.(err?.message || 'Failed to rename book');
+    }
+  });
+  // Expand/collapse the nav row in place (no full re-render); persist the state.
+  body.querySelector('.notes-book-nav-toggle')?.addEventListener('click', (e) => {
+    _bookNavOpen = !_bookNavOpen;
+    reader?.classList.toggle('notes-book-nav-open', _bookNavOpen);
+    e.currentTarget.classList.toggle('active', _bookNavOpen);
+    e.currentTarget.setAttribute('aria-expanded', String(_bookNavOpen));
+  });
+  body.querySelector('.notes-book-prev')?.addEventListener('click', () => _setBookChapter((_bookChapterIndex || 0) - 1));
+  body.querySelector('.notes-book-next')?.addEventListener('click', () => _setBookChapter((_bookChapterIndex || 0) + 1));
+  body.querySelector('.notes-book-select')?.addEventListener('change', (e) => _setBookChapter(e.target.value));
+  body.querySelectorAll('.notes-book-mode-btn[data-mode]').forEach((btn) => btn.addEventListener('click', () => _setBookReadMode(btn.dataset.mode || 'scroll')));
 }
 
 function _renderBooksFiles() {

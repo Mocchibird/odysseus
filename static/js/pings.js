@@ -5,7 +5,7 @@
  * Consolidates the old scattered notifications into one place.
  */
 import uiModule from './ui.js';
-import { makeToolModalDraggable } from './modalFullscreen.js?v=365';
+import { makeToolModalDraggable } from './modalFullscreen.js?v=366';
 import { selectSession } from './sessions.js';
 import * as Modals from './modalManager.js';
 

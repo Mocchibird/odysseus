@@ -32192,10 +32192,50 @@ body.notes-mobile-mode.notes-drag-mode .note-card-pin.active {
   100% { transform: translateX(310%); }
 }
 .notes-book-head {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
+  display: flex;
+  align-items: center;
   gap: 8px;
-  align-items: stretch;
+}
+.notes-book-head .notes-vault-reader-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+}
+.notes-book-head .notes-vault-reader-title strong,
+.notes-book-head .notes-vault-reader-title span {
+  display: block;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.notes-book-head-tools {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+/* Collapsible chapter/page nav row — hidden until the list toggle is on. */
+.notes-book-nav-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-height: 0;
+  opacity: 0;
+  overflow: hidden;
+  padding: 0 9px;
+  border-bottom: 1px solid var(--border);
+  transition: max-height 0.2s ease, opacity 0.18s ease, padding 0.2s ease;
+}
+.notes-book-nav-open .notes-book-nav-row {
+  max-height: 60px;
+  opacity: 1;
+  padding: 8px 9px;
+}
+.notes-book-nav-row .notes-book-select { flex: 1 1 auto; min-width: 0; }
+.notes-book-nav-toggle.active {
+  color: var(--fg);
+  background: color-mix(in srgb, var(--accent-primary, var(--red)) 18%, transparent);
+  border-color: color-mix(in srgb, var(--accent-primary, var(--red)) 45%, var(--border));
 }
 .notes-book-reader {
   width: 100%;
