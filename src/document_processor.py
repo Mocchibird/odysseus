@@ -259,11 +259,30 @@ def _resolve_vl_model(configured: str, owner: str | None = None) -> tuple:
 
     Uses admin-configured model if set, otherwise tries auto-detection
     of known vision-capable models across configured endpoints.
+
+    The vision model is an ADMIN-GLOBAL setting (Settings → Vision), so it must
+    resolve for EVERY user — including non-admins whose OWN endpoints don't
+    include the admin's vision endpoint (vision stores no per-user endpoint id;
+    it finds the endpoint by model name, which is owner-scoped). We try the
+    caller's owner scope first (honors a user's own endpoint if they have one),
+    then fall back to the full endpoint pool so non-admins still use the
+    admin-configured vision model — the same way the other model roles inherit
+    the admin default for non-admins.
     """
     from src.ai_interaction import _resolve_model
 
+    def _resolve_admin_global(spec):
+        try:
+            return _resolve_model(spec, owner=owner)
+        except (ValueError, Exception):
+            if owner:
+                # Retry without owner scope: the vision model is admin-global,
+                # so resolving it against all enabled endpoints is correct.
+                return _resolve_model(spec, owner=None)
+            raise
+
     if configured:
-        return _resolve_model(configured, owner=owner)
+        return _resolve_admin_global(configured)
 
     # Auto-detect: try known vision-capable models in priority order
     candidates = [
@@ -274,7 +293,7 @@ def _resolve_vl_model(configured: str, owner: str | None = None) -> tuple:
     ]
     for candidate in candidates:
         try:
-            return _resolve_model(candidate, owner=owner)
+            return _resolve_admin_global(candidate)
         except (ValueError, Exception):
             continue
 
