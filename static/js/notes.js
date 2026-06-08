@@ -2799,7 +2799,7 @@ function _renderVaultFileRow(f, depth = 0) {
   const displayTitle = _vaultDisplayTitle(f);
   const displayExcerpt = _vaultDisplayExcerpt(f, kind);
   const indent = Math.max(0, Number(depth) || 0) * 18;
-  return `<button type="button" class="notes-vault-file notes-vault-kind-${_attrEsc(kind)}" data-path="${_attrEsc(f.path || '')}" title="${_attrEsc(f.path || '')}" style="--vault-depth:${Number(depth) || 0};--vault-indent:${indent}px">
+  return `<div role="button" tabindex="0" class="notes-vault-file notes-vault-kind-${_attrEsc(kind)}" data-path="${_attrEsc(f.path || '')}" title="${_attrEsc(f.path || '')}" style="--vault-depth:${Number(depth) || 0};--vault-indent:${indent}px">
     <span class="notes-vault-file-icon">${_vaultIconSvg(kind)}</span>
     <span class="notes-vault-file-main">
       <span class="notes-vault-file-title">${_esc(displayTitle)}</span>
@@ -2807,7 +2807,8 @@ function _renderVaultFileRow(f, depth = 0) {
       ${displayExcerpt ? `<span class="notes-vault-file-excerpt">${_esc(displayExcerpt)}</span>` : ''}
     </span>
     <span class="notes-vault-file-meta">${_esc(_formatVaultSize(f.size))}</span>
-  </button>`;
+    <button type="button" class="notes-vault-file-actions" data-actions="${_attrEsc(f.path || '')}" title="File actions" aria-label="File actions">⋯</button>
+  </div>`;
 }
 
 function _renderVaultTreeNode(node, depth = 0) {
@@ -2997,7 +2998,7 @@ function _renderVaultFiles() {
     });
   });
   body.querySelectorAll('.notes-vault-file').forEach(btn => {
-    btn.addEventListener('click', async () => {
+    const open = async () => {
       const path = btn.dataset.path || '';
       try {
         btn.classList.add('loading');
@@ -3019,8 +3020,87 @@ function _renderVaultFiles() {
       } finally {
         btn.classList.remove('loading');
       }
+    };
+    btn.addEventListener('click', (e) => {
+      if (e.target.closest('.notes-vault-file-actions')) return;  // the ⋯ menu handles itself
+      open();
+    });
+    btn.addEventListener('keydown', (e) => {
+      if ((e.key === 'Enter' || e.key === ' ') && !e.target.closest('.notes-vault-file-actions')) { e.preventDefault(); open(); }
     });
   });
+  body.querySelectorAll('.notes-vault-file-actions').forEach(b => {
+    b.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); _vaultFileMenu(b.dataset.actions || '', b); });
+  });
+}
+
+function _vaultDirname(p) { const i = (p || '').lastIndexOf('/'); return i >= 0 ? p.slice(0, i) : ''; }
+
+async function _vaultMoveTo(source, target) {
+  const res = await fetch(`${API_BASE}/api/iris-vault/move`, {
+    method: 'POST', credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ source, target }),
+  });
+  if (!res.ok) { let m = `HTTP ${res.status}`; try { m = (await res.json()).detail || m; } catch (_) {} throw new Error(m); }
+  await _fetchVaultFiles({ clearOpen: false });
+  _renderNotes();
+}
+
+async function _vaultRenameFile(path) {
+  const cur = _vaultBasename(path);
+  const name = prompt('Rename file to:', cur);
+  if (!name || name.trim() === cur) return;
+  const dir = _vaultDirname(path);
+  const target = dir ? `${dir}/${name.trim()}` : name.trim();
+  try { await _vaultMoveTo(path, target); uiModule.showToast?.('Renamed'); }
+  catch (e) { uiModule.showError?.(e.message); }
+}
+
+async function _vaultMoveFile(path) {
+  const dir = _vaultDirname(path);
+  const dest = prompt('Move to folder (relative path, blank = vault root):', dir);
+  if (dest == null) return;
+  const target = dest.trim() ? `${dest.trim().replace(/\/+$/, '')}/${_vaultBasename(path)}` : _vaultBasename(path);
+  if (target === path) return;
+  try { await _vaultMoveTo(path, target); uiModule.showToast?.('Moved'); }
+  catch (e) { uiModule.showError?.(e.message); }
+}
+
+async function _vaultDeleteFile(path) {
+  if (!confirm(`Delete "${_vaultBasename(path)}" from the vault? This cannot be undone.`)) return;
+  try {
+    const res = await fetch(`${API_BASE}/api/iris-vault/file`, {
+      method: 'DELETE', credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path }),
+    });
+    if (!res.ok) { let m = `HTTP ${res.status}`; try { m = (await res.json()).detail || m; } catch (_) {} throw new Error(m); }
+    await _fetchVaultFiles({ clearOpen: false });
+    _renderNotes();
+    uiModule.showToast?.('Deleted');
+  } catch (e) { uiModule.showError?.(e.message); }
+}
+
+function _vaultFileMenu(path, anchor) {
+  document.querySelectorAll('.notes-vault-file-menu').forEach((m) => m.remove());
+  const menu = document.createElement('div');
+  menu.className = 'notes-vault-file-menu';
+  menu.innerHTML = `
+    <button type="button" data-act="rename">Rename…</button>
+    <button type="button" data-act="move">Move…</button>
+    <button type="button" data-act="delete" class="danger">Delete</button>`;
+  document.body.appendChild(menu);
+  const r = anchor.getBoundingClientRect();
+  menu.style.top = `${r.bottom + 4 + window.scrollY}px`;
+  menu.style.left = `${Math.min(r.left, window.innerWidth - 170) + window.scrollX}px`;
+  const close = () => { menu.remove(); document.removeEventListener('mousedown', onDoc, true); document.removeEventListener('keydown', onEsc, true); };
+  const onDoc = (e) => { if (!menu.contains(e.target)) close(); };
+  const onEsc = (e) => { if (e.key === 'Escape') close(); };
+  setTimeout(() => { document.addEventListener('mousedown', onDoc, true); document.addEventListener('keydown', onEsc, true); }, 0);
+  menu.querySelector('[data-act="rename"]').addEventListener('click', () => { close(); _vaultRenameFile(path); });
+  menu.querySelector('[data-act="move"]').addEventListener('click', () => { close(); _vaultMoveFile(path); });
+  menu.querySelector('[data-act="delete"]').addEventListener('click', () => { close(); _vaultDeleteFile(path); });
 }
 
 function _wireBookTools(body, { supportsSelection } = {}) {

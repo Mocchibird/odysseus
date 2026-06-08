@@ -31794,7 +31794,7 @@ body.notes-mobile-mode.notes-drag-mode .note-card-pin.active {
   max-height: 76px;
   box-sizing: border-box;
   display: grid;
-  grid-template-columns: 34px minmax(0, 1fr) auto;
+  grid-template-columns: 34px minmax(0, 1fr) auto auto;
   align-items: center;
   gap: 10px;
   text-align: left;
@@ -31813,6 +31813,50 @@ body.notes-mobile-mode.notes-drag-mode .note-card-pin.active {
   border-color: color-mix(in srgb, var(--accent-primary, var(--red)) 45%, var(--border));
   background: color-mix(in srgb, var(--accent-primary, var(--red)) 5%, var(--panel));
 }
+.notes-vault-file-actions {
+  flex: 0 0 auto;
+  width: 26px;
+  height: 26px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: color-mix(in srgb, var(--fg) 55%, transparent);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.12s, background 0.12s, color 0.12s;
+}
+.notes-vault-file:hover .notes-vault-file-actions,
+.notes-vault-file:focus-within .notes-vault-file-actions { opacity: 1; }
+.notes-vault-file-actions:hover { background: color-mix(in srgb, var(--fg) 12%, transparent); color: var(--fg); }
+@media (hover: none) { .notes-vault-file-actions { opacity: 1; } }  /* always visible on touch */
+.notes-vault-file-menu {
+  position: absolute;
+  z-index: 10070;
+  min-width: 150px;
+  background: var(--bg, #111);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+}
+.notes-vault-file-menu button {
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  padding: 8px 10px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--fg);
+  cursor: pointer;
+}
+.notes-vault-file-menu button:hover { background: color-mix(in srgb, var(--fg) 9%, transparent); }
+.notes-vault-file-menu button.danger { color: var(--red, #ff5555); }
+.notes-vault-file-menu button.danger:hover { background: color-mix(in srgb, var(--red, #ff5555) 14%, transparent); }
 .notes-vault-file.loading {
   opacity: 0.65;
   pointer-events: none;
