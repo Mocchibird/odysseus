@@ -17989,26 +17989,40 @@ body.gallery-selecting .gallery-dl-btn,
   min-height: 0;
   scrollbar-width: thin;
 }
+/* Scroll the WHOLE modal (the base-modal pattern + what the mobile rule above
+   already does). The Serve/Download/Settings tabs are a deep flex:1 chain
+   (cookbook-body > cookbook-group > .admin-card > .hwfit-serve-panel) that was
+   built to own an inner scroller — but every level fills its parent instead of
+   growing, so the bottom (e.g. the Serve Launch button) got clipped and nothing
+   scrolled. Letting .modal-content scroll + sizing .cookbook-body to its content
+   makes that chain flow into the modal scroll, exactly like on mobile. */
 #cookbook-modal .modal-content {
   display: flex;
   flex-direction: column;
-  overflow: hidden;
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 #cookbook-modal .modal-header {
   flex: 0 0 auto;
 }
 #cookbook-modal .cookbook-body {
+  flex: 0 0 auto;
+  height: auto;
   min-height: 0;
-  overflow-y: auto;
-  overflow-x: hidden;
+  overflow: visible;
 }
 #cookbook-modal .cookbook-group {
+  flex: 0 0 auto;
   min-height: 0;
 }
 #cookbook-modal .cookbook-group > .admin-card {
+  flex: 0 0 auto !important;
   min-height: 0;
-  overflow-y: auto !important;
+  overflow-y: visible !important;
   overflow-x: hidden !important;
+}
+#cookbook-modal .hwfit-serve-panel {
+  flex: 0 0 auto !important;
 }
 #cookbook-modal .cookbook-section-body {
   min-height: 0;
