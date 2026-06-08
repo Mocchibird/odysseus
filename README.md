@@ -286,6 +286,9 @@ form checks `/api/email/proton-bridge/status?mode=docker` or `mode=host` when
 you pick a Proton preset so you can see whether IMAP and SMTP are reachable
 before saving the account.
 
+**Adding more Proton accounts** (e.g. another user on a multi-user instance):
+see [docs/proton-multiple-accounts.md](docs/proton-multiple-accounts.md).
+
 **Useful checks.**
 
 ```bash
