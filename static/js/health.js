@@ -112,6 +112,23 @@ function _barChartSVG(points, { target = null, height = 150 } = {}) {
   return `<svg viewBox="0 0 ${W} ${H}" class="health-chart" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Calories per day">${yTicks}${targetLine}${bars}</svg>`;
 }
 
+// A macro ring (donut) — consumed grams vs target, SVG only.
+function _ringSVG(value, target, label, varName) {
+  const r = 26, circ = 2 * Math.PI * r;
+  const pct = target ? Math.max(0, Math.min(1, value / target)) : 0;
+  const off = circ * (1 - pct);
+  const over = target && value > target;
+  return `<div class="health-ring">
+    <svg viewBox="0 0 64 64" width="62" height="62" role="img" aria-label="${esc(label)} ${Math.round(value)}g">
+      <circle cx="32" cy="32" r="${r}" class="health-ring-bg"/>
+      <circle cx="32" cy="32" r="${r}" class="health-ring-fg${over ? ' over' : ''}" style="stroke:var(${varName});stroke-dasharray:${circ.toFixed(1)};stroke-dashoffset:${off.toFixed(1)}"/>
+      <text x="32" y="31" class="health-ring-val">${Math.round(value)}</text>
+      <text x="32" y="43" class="health-ring-unit">g</text>
+    </svg>
+    <div class="health-ring-label">${esc(label)}${target ? `<span> / ${target}g</span>` : ''}</div>
+  </div>`;
+}
+
 // ── Tab renderers ─────────────────────────────────────────────────────────────
 
 function _body() { return document.querySelector('#health-modal .modal-body'); }
@@ -140,6 +157,13 @@ async function _renderHabits() {
         ${_heatmapSVG(hm.days)}
       </div>`;
   }));
+  const weekDone = habits.reduce((s, h) => s + (h.done_7d || 0), 0);
+  const weekPossible = habits.length * 7;
+  const weeklyCard = habits.length ? `
+    <div class="health-card health-week-card">
+      <div class="health-card-head"><strong>This week</strong><span class="health-big">${weekDone}<span class="health-unit">/${weekPossible}</span></span></div>
+      <div class="health-week-rows">${habits.map((h) => `<div class="health-week-row"><span class="health-week-name">${h.icon ? esc(h.icon) + ' ' : ''}${esc(h.name)}</span><span class="health-week-dots">${[...Array(7)].map((_, i) => `<i class="${i < (h.done_7d || 0) ? 'on' : ''}"></i>`).join('')}</span><span class="health-week-num">${h.done_7d || 0}/7</span></div>`).join('')}</div>
+    </div>` : '';
   b.innerHTML = `
     <div class="health-toolbar">
       <form class="health-add-habit" id="health-add-habit">
@@ -148,6 +172,7 @@ async function _renderHabits() {
         <button class="health-btn" type="submit">Add</button>
       </form>
     </div>
+    ${weeklyCard}
     ${cards.length ? cards.join('') : '<div class="health-empty">No habits yet — add one above to start your streak.</div>'}`;
   b.querySelector('#health-add-habit')?.addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -180,6 +205,20 @@ async function _renderWeight() {
   const target = profile.profile?.target_kg ?? null;
   const last = trend.last_kg;
   const delta = trend.delta_kg;
+  let projHtml = '';
+  if (typeof trend.slope_kg_per_week === 'number') {
+    const slope = trend.slope_kg_per_week;
+    const slopeStr = `${slope > 0 ? '+' : ''}${slope} kg/wk`;
+    const proj = trend.projection;
+    if (proj && proj.eta_date) {
+      const eta = new Date(proj.eta_date).toLocaleDateString();
+      projHtml = `<div class="health-proj">On track — ~${proj.days} days to ${proj.target_kg} kg (≈ ${eta}) · ${slopeStr}</div>`;
+    } else if (proj && proj.off_track) {
+      projHtml = `<div class="health-proj off">Trending away from your ${proj.target_kg} kg goal · ${slopeStr}</div>`;
+    } else {
+      projHtml = `<div class="health-proj">Trend: ${slopeStr}${target ? ` · goal ${target} kg` : ''}</div>`;
+    }
+  }
   b.innerHTML = `
     <div class="health-card">
       <div class="health-card-head"><strong>Weight</strong>
@@ -187,6 +226,7 @@ async function _renderWeight() {
         ${delta != null ? `<span class="health-delta ${delta <= 0 ? 'down' : 'up'}">${delta > 0 ? '+' : ''}${delta} kg</span>` : ''}
       </div>
       ${_lineChartSVG(trend.series || [], { target, unit: 'kg' })}
+      ${projHtml}
       <form class="health-inline-form" id="health-log-weight">
         <input name="kg" type="number" step="0.1" class="health-input" placeholder="Weight (kg)" required>
         <button class="health-btn" type="submit">Log weight</button>
@@ -224,9 +264,13 @@ async function _renderCalories() {
         ${target ? `<span class="health-chip">${day.remaining_kcal >= 0 ? day.remaining_kcal + ' left' : Math.abs(day.remaining_kcal) + ' over'} · target ${target}</span>` : '<span class="health-chip">set a goal in Profile for a target</span>'}
       </div>
       ${target ? `<div class="health-progress"><span style="width:${pct}%" class="${day.total_kcal > target ? 'over' : ''}"></span></div>` : ''}
-      <div class="health-macros">
-        <span>P ${day.protein_g || 0}g</span><span>C ${day.carbs_g || 0}g</span><span>F ${day.fat_g || 0}g</span>
-      </div>
+      ${day.macro_targets
+        ? `<div class="health-rings">
+             ${_ringSVG(day.protein_g || 0, day.macro_targets.protein_g, 'Protein', '--green, #50fa7b')}
+             ${_ringSVG(day.carbs_g || 0, day.macro_targets.carbs_g, 'Carbs', '--color-accent, #00aaff')}
+             ${_ringSVG(day.fat_g || 0, day.macro_targets.fat_g, 'Fat', '--warn, #f0ad4e')}
+           </div>`
+        : `<div class="health-macros"><span>P ${day.protein_g || 0}g</span><span>C ${day.carbs_g || 0}g</span><span>F ${day.fat_g || 0}g</span></div>`}
       <form class="health-inline-form health-meal-form" id="health-log-meal">
         <input name="description" class="health-input" placeholder="Meal" required>
         <input name="kcal" type="number" class="health-input health-input-sm" placeholder="kcal" required>
@@ -237,6 +281,14 @@ async function _renderCalories() {
     <div class="health-card">
       <div class="health-card-head"><strong>Last 14 days</strong></div>
       ${_barChartSVG(series.series || [], { target })}
+    </div>
+    <div class="health-card">
+      <div class="health-card-head"><strong>Data (CSV)</strong> <span class="health-muted">export / import meals, weights, training</span></div>
+      <div class="health-inline-form">
+        <select id="health-csv-kind" class="health-input"><option value="meals">Meals</option><option value="weights">Weights</option><option value="training">Training</option></select>
+        <button class="health-btn" id="health-csv-export" type="button">Export ⤓</button>
+        <label class="health-btn-sub" style="cursor:pointer;padding:6px 12px;">Import ⤒<input id="health-csv-import" type="file" accept=".csv,text/csv" style="display:none"></label>
+      </div>
     </div>
     <details class="health-card health-profile">
       <summary><strong>Profile &amp; goals</strong> <span class="health-muted">drives your calorie target (TDEE)</span></summary>
@@ -266,6 +318,30 @@ async function _renderCalories() {
     try { await _api(`/meals/${btn.dataset.delMeal}`, { method: 'DELETE' }); _renderCalories(); }
     catch (err) { uiModule.showError?.(err.message); }
   }));
+  // CSV export/import
+  const csvKind = () => (document.getElementById('health-csv-kind')?.value || 'meals');
+  b.querySelector('#health-csv-export')?.addEventListener('click', () => {
+    const a = document.createElement('a');
+    a.href = `${API_BASE}/api/health/export?kind=${encodeURIComponent(csvKind())}`;
+    a.download = `health-${csvKind()}.csv`;
+    document.body.appendChild(a); a.click(); a.remove();
+  });
+  b.querySelector('#health-csv-import')?.addEventListener('change', async (e) => {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const res = await fetch(`${API_BASE}/api/health/import?kind=${encodeURIComponent(csvKind())}`, {
+        method: 'POST', credentials: 'same-origin',
+        headers: { 'Content-Type': 'text/csv' }, body: text,
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || 'Import failed');
+      uiModule.showToast?.(`Imported ${data.imported} row(s)`);
+      _renderCalories();
+    } catch (err) { uiModule.showError?.(err.message); }
+    finally { e.target.value = ''; }
+  });
   b.querySelector('#health-profile-form')?.addEventListener('submit', async (e) => {
     e.preventDefault();
     const fd = new FormData(e.target);

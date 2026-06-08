@@ -5,6 +5,7 @@ agent MCP server (mcp_servers/health_server.py), so the UI and the assistant
 share one set of rows.
 """
 from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import PlainTextResponse
 
 from src.auth_helpers import require_user
 from src import health_store as hs
@@ -155,6 +156,30 @@ def setup_health_routes():
         if not hs.delete_training(_owner(request), session_id):
             raise HTTPException(404, "Training session not found")
         return {"ok": True}
+
+    # ── CSV export / import ──────────────────────────────────────────────────
+    @router.get("/export")
+    def export_csv(request: Request, kind: str = "meals"):
+        owner = _owner(request)
+        try:
+            text = hs.export_csv(owner, kind)
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+        return PlainTextResponse(
+            text, media_type="text/csv",
+            headers={"Content-Disposition": f'attachment; filename="health-{kind}.csv"'},
+        )
+
+    @router.post("/import")
+    async def import_csv(request: Request, kind: str = "meals"):
+        owner = _owner(request)
+        raw = await request.body()
+        text = raw.decode("utf-8", "replace") if raw else ""
+        try:
+            n = hs.import_csv(owner, kind, text)
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+        return {"ok": True, "imported": n}
 
     # ── Combined dashboard snapshot ──────────────────────────────────────────
     @router.get("/summary")

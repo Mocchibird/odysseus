@@ -11,6 +11,8 @@ of server timezone.
 """
 from __future__ import annotations
 
+import csv
+import io
 from contextlib import contextmanager
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
@@ -102,6 +104,9 @@ def list_habits(owner: str, include_archived: bool = False) -> List[Dict[str, An
             d["streak"] = _streak_from_days(done_days, today)
             d["done_30d"] = sum(
                 1 for ds in done_days if ds >= (date.today() - timedelta(days=30)).isoformat()
+            )
+            d["done_7d"] = sum(
+                1 for ds in done_days if ds >= (date.today() - timedelta(days=6)).isoformat()
             )
             out.append(d)
         return out
@@ -319,6 +324,18 @@ def delete_meal(owner: str, meal_id: int) -> bool:
         return True
 
 
+def macro_targets(target_kcal: Optional[int]) -> Optional[Dict[str, int]]:
+    """Default macro split from a calorie target: 30% protein / 40% carbs /
+    30% fat by energy, converted to grams (4/4/9 kcal per gram)."""
+    if not target_kcal:
+        return None
+    return {
+        "protein_g": round(target_kcal * 0.30 / 4),
+        "carbs_g": round(target_kcal * 0.40 / 4),
+        "fat_g": round(target_kcal * 0.30 / 9),
+    }
+
+
 def daily_calories(owner: str, day: Optional[str] = None) -> Dict[str, Any]:
     owner = _owner(owner)
     day = _today(day)
@@ -335,6 +352,7 @@ def daily_calories(owner: str, day: Optional[str] = None) -> Dict[str, Any]:
         "fat_g": macro("fat_g"),
         "target_kcal": target,
         "remaining_kcal": (target - total) if target else None,
+        "macro_targets": macro_targets(target),
         "meals": meals,
     }
 
@@ -407,20 +425,64 @@ def delete_weight(owner: str, entry_id: int) -> bool:
         return True
 
 
+def _linfit_slope(xs: List[float], ys: List[float]) -> Optional[float]:
+    """Least-squares slope of y over x (no numpy). None if undetermined."""
+    n = len(xs)
+    if n < 2:
+        return None
+    sx, sy = sum(xs), sum(ys)
+    sxx = sum(x * x for x in xs)
+    sxy = sum(x * y for x, y in zip(xs, ys))
+    denom = n * sxx - sx * sx
+    if denom == 0:
+        return None
+    return (n * sxy - sx * sy) / denom
+
+
 def weight_trend(owner: str, days: int = 90) -> Dict[str, Any]:
     series = list_weights(owner, days=days)
     if not series:
         return {"count": 0, "series": []}
     first, last = series[0], series[-1]
     profile = get_profile(owner)
-    return {
+    pts = [{"day": (w["measured_at"] or "")[:10], "kg": w["kg"]} for w in series]
+    out = {
         "count": len(series),
         "first_kg": first["kg"],
         "last_kg": last["kg"],
         "delta_kg": round(last["kg"] - first["kg"], 2),
         "target_kg": profile.get("target_kg"),
-        "series": [{"day": (w["measured_at"] or "")[:10], "kg": w["kg"]} for w in series],
+        "series": pts,
     }
+
+    # Linear projection: fit kg over elapsed days, project ETA to the target.
+    xs: List[float] = []
+    ys: List[float] = []
+    d0: Optional[date] = None
+    for p in pts:
+        try:
+            d = date.fromisoformat(p["day"])
+        except (ValueError, TypeError):
+            continue
+        if d0 is None:
+            d0 = d
+        xs.append((d - d0).days)
+        ys.append(p["kg"])
+    slope = _linfit_slope(xs, ys)  # kg/day
+    if slope is not None:
+        out["slope_kg_per_week"] = round(slope * 7, 3)
+        target_kg = profile.get("target_kg")
+        if target_kg and abs(slope) > 1e-6:
+            remaining = float(target_kg) - last["kg"]
+            moving_toward = (remaining < 0 and slope < 0) or (remaining > 0 and slope > 0)
+            if moving_toward:
+                days_to = remaining / slope
+                if 0 < days_to <= 3650:
+                    eta = (date.today() + timedelta(days=round(days_to))).isoformat()
+                    out["projection"] = {"target_kg": float(target_kg), "eta_date": eta, "days": round(days_to)}
+            elif abs(remaining) > 0.05:
+                out["projection"] = {"target_kg": float(target_kg), "eta_date": None, "days": None, "off_track": True}
+    return out
 
 
 # ── Profile / TDEE ───────────────────────────────────────────────────────────
@@ -569,3 +631,81 @@ def delete_training(owner: str, session_id: int) -> bool:
             return False
         db.delete(t)
         return True
+
+
+# ── CSV export / import ───────────────────────────────────────────────────────
+
+_CSV_FIELDS = {
+    "meals": ["eaten_at", "description", "kcal", "protein_g", "carbs_g", "fat_g", "notes"],
+    "weights": ["measured_at", "kg", "notes"],
+    "training": ["session_at", "kind", "duration_min", "rpe", "summary"],
+}
+
+
+def _f(v):
+    try:
+        return float(v) if v not in (None, "") else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _i(v):
+    f = _f(v)
+    return int(f) if f is not None else None
+
+
+def export_csv(owner: str, kind: str) -> str:
+    kind = (kind or "").strip().lower()
+    fields = _CSV_FIELDS.get(kind)
+    if not fields:
+        raise ValueError(f"unknown export kind: {kind}")
+    if kind == "meals":
+        rows = list_meals(owner, days=3650)
+    elif kind == "weights":
+        rows = list_weights(owner, days=3650)
+    else:
+        rows = list_training(owner, days=3650)
+    buf = io.StringIO()
+    w = csv.DictWriter(buf, fieldnames=fields, extrasaction="ignore")
+    w.writeheader()
+    for r in rows:
+        w.writerow({k: (r.get(k) if r.get(k) is not None else "") for k in fields})
+    return buf.getvalue()
+
+
+def import_csv(owner: str, kind: str, text: str) -> int:
+    """Append rows from a CSV (matching export_csv columns). Returns count imported."""
+    kind = (kind or "").strip().lower()
+    if kind not in _CSV_FIELDS:
+        raise ValueError(f"unknown import kind: {kind}")
+    reader = csv.DictReader(io.StringIO(text or ""))
+    n = 0
+    for row in reader:
+        try:
+            if kind == "meals":
+                desc = (row.get("description") or "").strip()
+                if not desc and not row.get("kcal"):
+                    continue
+                log_meal(
+                    owner, desc, _i(row.get("kcal")) or 0,
+                    eaten_at=(row.get("eaten_at") or "").strip() or None,
+                    protein_g=_f(row.get("protein_g")), carbs_g=_f(row.get("carbs_g")),
+                    fat_g=_f(row.get("fat_g")), notes=(row.get("notes") or "").strip(), source="csv",
+                )
+            elif kind == "weights":
+                kg = _f(row.get("kg"))
+                if kg is None:
+                    continue
+                log_weight(owner, kg, measured_at=(row.get("measured_at") or "").strip() or None,
+                           notes=(row.get("notes") or "").strip())
+            else:
+                kind_v = (row.get("kind") or "").strip()
+                if not kind_v:
+                    continue
+                log_training(owner, kind_v, session_at=(row.get("session_at") or "").strip() or None,
+                             duration_min=_i(row.get("duration_min")), rpe=_i(row.get("rpe")),
+                             summary=(row.get("summary") or "").strip())
+            n += 1
+        except Exception:
+            continue
+    return n

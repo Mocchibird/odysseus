@@ -93,3 +93,38 @@ def test_training_log():
     sessions = hs.list_training(owner)
     assert len(sessions) == 1
     assert sessions[0]["kind"] == "Strength"
+
+
+def test_macro_targets_and_daily():
+    owner = "alice-macro"
+    hs.set_profile(owner, daily_kcal_target=2000)
+    cal = hs.daily_calories(owner)
+    assert cal["macro_targets"] == {"protein_g": 150, "carbs_g": 200, "fat_g": 67}
+
+
+def test_weight_projection():
+    owner = "alice-proj"
+    hs.set_profile(owner, target_kg=78.0)
+    hs.log_weight(owner, 82.0, measured_at=(date.today() - timedelta(days=20)).isoformat() + "T08:00:00")
+    hs.log_weight(owner, 80.0, measured_at=date.today().isoformat() + "T08:00:00")
+    tr = hs.weight_trend(owner, days=60)
+    assert tr["slope_kg_per_week"] < 0
+    assert tr.get("projection") and tr["projection"]["eta_date"]
+
+
+def test_done_7d():
+    owner = "alice-7d"
+    h = hs.create_habit(owner, "Read")
+    hs.set_habit_day(owner, h["id"], day=date.today().isoformat(), done=True)
+    hs.set_habit_day(owner, h["id"], day=(date.today() - timedelta(days=2)).isoformat(), done=True)
+    assert hs.list_habits(owner)[0]["done_7d"] == 2
+
+
+def test_csv_export_import():
+    owner = "alice-csv"
+    hs.log_meal(owner, "Eggs", 200, protein_g=14)
+    text = hs.export_csv(owner, "meals")
+    assert "Eggs" in text and "kcal" in text
+    n = hs.import_csv(owner, "weights", "measured_at,kg,notes\n2026-01-01T08:00:00,79.5,morning\n")
+    assert n == 1
+    assert any(w["kg"] == 79.5 for w in hs.list_weights(owner, days=4000))
