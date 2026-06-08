@@ -121,6 +121,15 @@ DEFAULT_SETTINGS = {
     "default_endpoint_id": "",
     "default_model": "",
     "default_persona": "Iris",
+    # Admin-set GLOBAL allowlist of model ids that NON-ADMIN users may use for
+    # chat & agent. Empty = no restriction (every enabled endpoint's models show
+    # in their picker, current behavior). When non-empty: non-admins' model
+    # picker shows ONLY these, and the server rejects any other model at
+    # send-time. Lets the admin enable extra endpoints for backend roles
+    # (image / research / email-summary) WITHOUT exposing those models in users'
+    # chat picker. Admins are never restricted. Per-user `allowed_models`
+    # privileges still override this for individually-restricted accounts.
+    "chat_allowed_models": [],
     # Ordered fallback chain for the default chat model. Each entry is
     # {"endpoint_id": "...", "model": "..."}. If the primary model fails
     # before producing output (endpoint offline / errors), the chat

@@ -22531,6 +22531,37 @@ input.settings-select::placeholder { color: color-mix(in srgb, var(--fg) 35%, tr
   cursor: pointer;
   transition: border-color 0.12s, color 0.12s;
 }
+/* Chat/agent model allowlist (admin) — endpoint-grouped checkbox list */
+.settings-allowlist {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 280px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+.settings-allowlist-group { display: flex; flex-direction: column; gap: 3px; }
+.settings-allowlist-ep {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  opacity: 0.5;
+  margin-bottom: 1px;
+}
+.settings-allowlist-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  padding: 3px 4px;
+  border-radius: 5px;
+  cursor: pointer;
+}
+.settings-allowlist-item:hover { background: color-mix(in srgb, var(--fg) 6%, transparent); }
+.settings-allowlist-item input { cursor: pointer; flex: 0 0 auto; }
 .settings-fallback-add:hover {
   border-color: var(--red);
   color: var(--red);

@@ -370,6 +370,74 @@ function _bindFallbackWidget(opts) {
 }
 
 /* ── Default Chat Model ── */
+// Admin-only: choose which models non-admin users may use for chat & agent
+// (the global `chat_allowed_models` allowlist). Empty = no restriction.
+async function initChatAllowlist() {
+  var container = el('set-chatAllowedModels');
+  var saveBtn = el('set-chatAllowedSave');
+  var msg = el('set-chatAllowedMsg');
+  if (!container) return;
+  var endpoints = [];
+  var allowed = [];
+  try {
+    endpoints = await _fetchModelEndpoints();
+    var sres = await fetch('/api/auth/settings', { credentials: 'same-origin' });
+    var settings = await sres.json();
+    allowed = Array.isArray(settings.chat_allowed_models) ? settings.chat_allowed_models : [];
+  } catch (e) { console.warn('Failed to load chat allowlist', e); }
+  var allowSet = new Set(allowed);
+  container.innerHTML = '';
+  var enabled = endpoints.filter(function(e) { return e.is_enabled; });
+  if (!enabled.length) {
+    container.innerHTML = '<div style="font-size:12px;opacity:0.55;">No enabled endpoints yet — add some under “Add Models”.</div>';
+  }
+  enabled.forEach(function(ep) {
+    var models = Array.isArray(ep.models) ? ep.models : [];
+    if (!models.length) return;
+    var group = document.createElement('div');
+    group.className = 'settings-allowlist-group';
+    var head = document.createElement('div');
+    head.className = 'settings-allowlist-ep';
+    head.textContent = ep.name + (ep.online ? '' : ' (offline)');
+    group.appendChild(head);
+    models.forEach(function(mid) {
+      var lbl = document.createElement('label');
+      lbl.className = 'settings-allowlist-item';
+      var cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.value = mid;
+      cb.checked = allowSet.has(mid);
+      var span = document.createElement('span');
+      span.textContent = mid.split('/').pop();
+      lbl.appendChild(cb);
+      lbl.appendChild(span);
+      group.appendChild(lbl);
+    });
+    container.appendChild(group);
+  });
+  if (saveBtn) {
+    saveBtn.onclick = async function() {
+      var checked = Array.prototype.slice
+        .call(container.querySelectorAll('input[type=checkbox]:checked'))
+        .map(function(c) { return c.value; });
+      try {
+        await fetch('/api/auth/settings', {
+          method: 'POST', credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ chat_allowed_models: checked }),
+        });
+        if (msg) {
+          msg.textContent = checked.length
+            ? ('Saved — users can use ' + checked.length + ' model(s) for chat & agent.')
+            : 'Saved — no restriction (all enabled models allowed).';
+        }
+      } catch (e) {
+        if (msg) msg.textContent = 'Save failed: ' + (e && e.message ? e.message : e);
+      }
+    };
+  }
+}
+
 async function initDefaultChat() {
   var epSel = el('set-defaultEpSelect');
   var modelSel = el('set-defaultModelSelect');
@@ -2264,6 +2332,7 @@ function initAll() {
   initOpacityToggle();
   initialized = true;
   initDefaultChat();
+  initChatAllowlist();
   initTeacherModel();
   initUtilityModel();
   initImageSettings();

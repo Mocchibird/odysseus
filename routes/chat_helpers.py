@@ -91,6 +91,24 @@ def _enforce_chat_privileges(request, sess) -> None:
     allowed_raw = privs.get("allowed_models")
     allowed = allowed_raw if isinstance(allowed_raw, list) else []
     restricted = bool(privs.get("allowed_models_restricted")) or bool(allowed)
+    # Global chat/agent allowlist (admin-set) applies to non-admins who don't
+    # already have a per-user allowed_models list. Enforced here at send-time so
+    # it can't be bypassed by PATCHing the session model or hitting the API
+    # directly — the picker filter is only cosmetic. Admins are never limited.
+    if not restricted:
+        try:
+            _is_adm = bool(auth_manager.is_admin(user))
+        except Exception:
+            _is_adm = False
+        if not _is_adm:
+            try:
+                from src.settings import get_setting
+                _g_allow = get_setting("chat_allowed_models", []) or []
+            except Exception:
+                _g_allow = []
+            if isinstance(_g_allow, list) and _g_allow:
+                allowed = _g_allow
+                restricted = True
     if restricted and sess.model and sess.model not in allowed:
         raise HTTPException(403, f"Your account is not allowed to use model '{sess.model}'.")
 

@@ -1211,6 +1211,30 @@ def setup_model_routes(model_discovery):
                     "offline": True,
                 })
 
+        # Global chat/agent allowlist: non-admins only see the admin-selected
+        # subset in their picker. Admins are never filtered (they manage roles).
+        # Empty allowlist = no restriction (everyone sees their endpoints' models).
+        if owner and not is_admin:
+            try:
+                from src.settings import get_setting
+                _allow = get_setting("chat_allowed_models", []) or []
+            except Exception:
+                _allow = []
+            if isinstance(_allow, list) and _allow:
+                _allowset = set(_allow)
+                _filtered = []
+                for it in items:
+                    it = dict(it)
+                    it["models"] = [m for m in it.get("models", []) if m in _allowset]
+                    it["models_extra"] = [m for m in it.get("models_extra", []) if m in _allowset]
+                    it["models_display"] = [m.split("/")[-1] for m in it["models"]]
+                    it["models_extra_display"] = [m.split("/")[-1] for m in it["models_extra"]]
+                    # Drop endpoints that have no allowed models left (don't show
+                    # an empty/offline row for an endpoint the user can't use).
+                    if it["models"] or it["models_extra"]:
+                        _filtered.append(it)
+                items = _filtered
+
         return {"hosts": [], "items": items}
 
     @router.get("/models")
@@ -1965,6 +1989,18 @@ def setup_model_routes(model_discovery):
             ep_id = (_user_prefs.get("default_endpoint_id") or "").strip()
             model = (_user_prefs.get("default_model") or "").strip()
             _fallbacks = _user_prefs.get("default_model_fallbacks") or []
+            # If the user hasn't picked their own default yet, fall back to the
+            # admin-set GLOBAL default so new accounts start on the admin's
+            # chosen chat model (e.g. gemma-4-31b) instead of an arbitrary first
+            # endpoint. This is the EXPLICIT global default the admin configures
+            # (Settings → "Default chat model for users"), not a leak of the
+            # admin's personal pick. A user who later picks their own overrides it.
+            if not model:
+                model = (settings.get("default_model") or "").strip()
+                if not ep_id:
+                    ep_id = settings.get("default_endpoint_id", "")
+                if not _fallbacks:
+                    _fallbacks = settings.get("default_model_fallbacks") or []
         else:
             ep_id = settings.get("default_endpoint_id", "")
             model = settings.get("default_model", "")
