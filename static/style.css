@@ -32224,7 +32224,12 @@ body.notes-mobile-mode.notes-drag-mode .note-card-pin.active {
   grid-template-columns: auto auto minmax(150px, 1fr) auto auto;
 }
 .notes-book-controls-row-pdf {
-  grid-template-columns: auto auto minmax(150px, 1fr) auto;
+  /* Native PDF view has no page nav — just the PDF/Text toggle + reader tools.
+     Flex them to opposite ends instead of the multi-column grid. */
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
 }
 .notes-book-controls-row .notes-select-trigger {
   height: 30px;

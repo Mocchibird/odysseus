@@ -3171,9 +3171,6 @@ function _renderBookReader(body, baseHtml) {
         </div>
         <div class="notes-book-controls-row notes-book-controls-row-pdf">
           ${pdfToggleHtml}
-          <button type="button" class="notes-select-trigger notes-book-prev" ${idx <= 0 ? 'disabled' : ''}>Prev</button>
-          <select class="notes-select-trigger notes-book-select" aria-label="Jump to page">${options}</select>
-          <button type="button" class="notes-select-trigger notes-book-next" ${idx >= chapters.length - 1 ? 'disabled' : ''}>Next</button>
           ${bookToolsModule.toolbarHtml()}
         </div>
       </div>
@@ -3203,9 +3200,9 @@ function _renderBookReader(body, baseHtml) {
     body.querySelectorAll('.notes-book-pdf-toggle .notes-book-mode-btn').forEach(btn => {
       btn.addEventListener('click', () => _setBookPdfViewMode(btn.dataset.pdfMode || 'pdf'));
     });
-    body.querySelector('.notes-book-prev')?.addEventListener('click', () => _setBookChapter(idx - 1));
-    body.querySelector('.notes-book-next')?.addEventListener('click', () => _setBookChapter(idx + 1));
-    body.querySelector('.notes-book-select')?.addEventListener('change', (e) => _setBookChapter(e.target.value));
+    // No Prev/Next/page-select in native PDF view — you scroll the PDF directly;
+    // page-jump isn't supported by native viewers anyway, and dropping it gives
+    // the page more room.
     _wireBookTools(body, { supportsSelection: false });
     return;
   }
