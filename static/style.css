@@ -32514,14 +32514,15 @@ body.notes-mobile-mode.notes-drag-mode .note-card-pin.active {
   opacity: 0.58;
 }
 .notes-book-reader-pdf {
-  min-height: min(720px, calc(100vh - 190px));
+  min-height: min(940px, calc(100vh - 150px));
 }
-/* Native PDF viewer (browser's built-in) — shows the PDF as-is in an iframe. */
+/* Native PDF viewer (browser's built-in) — shows the PDF as-is in an iframe.
+   Give it most of the window height for a larger reading view (#8). */
 .notes-book-pdf-viewer {
   width: 100%;
   min-width: 0;
   flex: 1 1 auto;
-  min-height: min(680px, calc(100vh - 245px));
+  min-height: min(900px, calc(100vh - 200px));
   border: 1px solid var(--border);
   border-radius: 8px;
   overflow: hidden;
@@ -32615,6 +32616,10 @@ body.notes-mobile-mode.notes-drag-mode .note-card-pin.active {
     position: sticky;
     top: 0;
     z-index: 3;
+    /* Opaque so scrolling text doesn't bleed through the sticky header (#3). */
+    background: var(--panel, var(--bg));
+    box-shadow: 0 3px 8px color-mix(in srgb, var(--fg) 14%, transparent);
+    padding: 6px 8px;
   }
   .notes-book-controls-row {
     grid-template-columns: 1fr 1fr;
@@ -32640,14 +32645,19 @@ body.notes-mobile-mode.notes-drag-mode .note-card-pin.active {
     line-height: 1.68;
   }
   .notes-book-content-page .notes-book-page {
-    max-height: calc(100vh - 310px);
+    max-height: calc(100dvh - 250px);
     padding: 2px 8px 22px;
   }
+  /* Bigger reader area on mobile — less chrome, more page (#8). dvh tracks the
+     browser's collapsing toolbars better than svh/vh. */
   .notes-book-reader-pdf {
-    min-height: calc(100svh - 210px);
+    min-height: calc(100dvh - 170px);
   }
   .notes-book-pdf-viewer {
-    min-height: calc(100svh - 300px);
+    min-height: calc(100dvh - 230px);
+  }
+  .notes-book-content {
+    padding: 10px 2px 28px;
   }
 }
 .notes-epub-reader {
