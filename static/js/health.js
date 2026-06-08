@@ -9,7 +9,8 @@ import * as Modals from './modalManager.js';
 
 const API_BASE = window.location.origin;
 let _open = false;
-let _tab = 'habits';
+let _habitsOpen = false;
+let _tab = 'calories';
 
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => (
   { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
@@ -133,11 +134,13 @@ function _ringSVG(value, target, label, varName) {
 // ── Tab renderers ─────────────────────────────────────────────────────────────
 
 function _body() { return document.querySelector('#health-modal .modal-body'); }
+function _habitsBody() { return document.querySelector('#habits-modal .modal-body'); }
 
 function _setBusy(html) { const b = _body(); if (b) b.innerHTML = `<div class="health-loading">${html}</div>`; }
 
+// Habits live in their own window (#habits-modal) — render into that body.
 async function _renderHabits() {
-  const b = _body(); if (!b) return;
+  const b = _habitsBody(); if (!b) return;
   let data;
   try { data = await _api('/habits'); } catch (e) { b.innerHTML = `<div class="health-error">${esc(e.message)}</div>`; return; }
   const habits = data.habits || [];
@@ -440,7 +443,7 @@ async function _renderTraining() {
   }));
 }
 
-const _TABS = { habits: _renderHabits, weight: _renderWeight, calories: _renderCalories, training: _renderTraining };
+const _TABS = { weight: _renderWeight, calories: _renderCalories, training: _renderTraining };
 
 function _switchTab(tab) {
   if (!_TABS[tab]) return;
@@ -481,9 +484,8 @@ export function openHealth(tab) {
         <button class="close-btn" id="health-close">✖</button>
       </div>
       <div class="memory-tabs health-tabs" role="tablist">
-        <button class="memory-tab health-tab active" data-tab="habits" role="tab" aria-selected="true">Habits</button>
+        <button class="memory-tab health-tab active" data-tab="calories" role="tab" aria-selected="true">Calories</button>
         <button class="memory-tab health-tab" data-tab="weight" role="tab" aria-selected="false">Weight</button>
-        <button class="memory-tab health-tab" data-tab="calories" role="tab" aria-selected="false">Calories</button>
         <button class="memory-tab health-tab" data-tab="training" role="tab" aria-selected="false">Training</button>
       </div>
       <div class="modal-body"></div>
@@ -542,5 +544,75 @@ export function isHealthOpen() {
   return _open;
 }
 
-const healthModule = { openHealth, closeHealth, isHealthOpen };
+// ── Habits: its own window (separate from Health) ────────────────────────────
+let _habitsEsc = null;
+
+export function openHabits() {
+  if (Modals.isRegistered('habits-modal') && Modals.isMinimized('habits-modal')) {
+    Modals.restore('habits-modal');
+    return;
+  }
+  if (_habitsOpen) { closeHabits(); return; }  // toggle from the rail
+  _habitsOpen = true;
+  const modal = document.createElement('div');
+  modal.className = 'modal';
+  modal.id = 'habits-modal';
+  modal.innerHTML = `
+    <div class="modal-content health-modal-content">
+      <div class="modal-header">
+        <h4><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:6px"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>Habits</h4>
+        <span style="flex:1"></span>
+        <button class="close-btn" id="habits-close">✖</button>
+      </div>
+      <div class="modal-body"><div class="health-loading">Loading…</div></div>
+    </div>`;
+  document.body.appendChild(modal);
+
+  const content = modal.querySelector('.modal-content');
+  const header = modal.querySelector('.modal-header');
+  if (content && header) makeWindowDraggable(modal, { content, header });
+  Modals.register('habits-modal', {
+    railBtnId: 'rail-habits',
+    sidebarBtnId: 'tool-habits-btn',
+    closeFn: () => _doCloseHabits(),
+    restoreFn: () => {},
+  });
+  try { Modals.injectMinimizeButton(modal, 'habits-modal'); } catch (_) {}
+  document.getElementById('habits-close').addEventListener('click', closeHabits);
+  modal.addEventListener('click', (e) => {
+    if (uiModule.isTouchInsideModal?.()) return;
+    if (e.target === modal) closeHabits();
+  });
+  _habitsEsc = (e) => { if (e.key === 'Escape' && _habitsOpen) closeHabits(); };
+  document.addEventListener('keydown', _habitsEsc);
+
+  _renderHabits();
+}
+
+function _doCloseHabits() {
+  _habitsOpen = false;
+  const modal = document.getElementById('habits-modal');
+  if (modal) {
+    const content = modal.querySelector('.modal-content');
+    if (content) {
+      content.classList.add('modal-closing');
+      content.addEventListener('animationend', () => modal.remove(), { once: true });
+      setTimeout(() => { if (modal.parentElement) modal.remove(); }, 250);
+    } else { modal.remove(); }
+  }
+  if (_habitsEsc) { document.removeEventListener('keydown', _habitsEsc); _habitsEsc = null; }
+}
+
+export function closeHabits() {
+  if (!_habitsOpen && !Modals.isMinimized('habits-modal')) return;
+  if (Modals.isRegistered('habits-modal')) Modals.close('habits-modal');
+  else _doCloseHabits();
+}
+
+export function isHabitsOpen() {
+  if (Modals.isMinimized('habits-modal')) return false;
+  return _habitsOpen;
+}
+
+const healthModule = { openHealth, closeHealth, isHealthOpen, openHabits, closeHabits, isHabitsOpen };
 export default healthModule;

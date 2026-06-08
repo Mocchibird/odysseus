@@ -24,7 +24,7 @@ import censorModule from './js/censor.js';
 import galleryModule from './js/gallery.js';
 import tasksModule from './js/tasks.js';
 import calendarModule from './js/calendar.js';
-import notesModule from './js/notes.js?v=358';
+import notesModule from './js/notes.js?v=359';
 import healthModule from './js/health.js';
 import pingsModule from './js/pings.js';
 import todayModule from './js/today.js';
@@ -911,15 +911,15 @@ function initializeEventListeners() {
     });
   }
 
-  // Health tool button (body metrics) + Habits as its own entry point. Both
-  // open the same panel; openHealth(tab) switches/toggles to the right tab.
+  // Health and Habits are separate windows now. Health = calories/weight/training
+  // (openHealth); Habits is its own panel (openHabits).
   const toolHealthBtn = el('tool-health-btn');
   if (toolHealthBtn) {
     toolHealthBtn.addEventListener('click', () => healthModule && healthModule.openHealth('calories'));
   }
   const toolHabitsBtn = el('tool-habits-btn');
   if (toolHabitsBtn) {
-    toolHabitsBtn.addEventListener('click', () => healthModule && healthModule.openHealth('habits'));
+    toolHabitsBtn.addEventListener('click', () => healthModule && healthModule.openHabits());
   }
 
   // "Today" dashboard tool button (toggles open/closed)
