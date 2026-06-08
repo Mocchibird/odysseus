@@ -4,7 +4,7 @@
  * agent's manage_health tool shares, so chat-logged data shows up here too.
  */
 import uiModule from './ui.js';
-import { makeWindowDraggable } from './windowDrag.js';
+import { makeToolModalDraggable } from './modalFullscreen.js?v=364';
 import * as Modals from './modalManager.js';
 
 const API_BASE = window.location.origin;
@@ -493,9 +493,7 @@ export function openHealth(tab) {
   document.body.appendChild(modal);
 
   modal.querySelectorAll('.health-tab').forEach((btn) => btn.addEventListener('click', () => _switchTab(btn.dataset.tab)));
-  const content = modal.querySelector('.modal-content');
-  const header = modal.querySelector('.modal-header');
-  if (content && header) makeWindowDraggable(modal, { content, header });
+  makeToolModalDraggable(modal);
   // Register with the Modals manager so Health gets the same minimize→dock,
   // restore and rail/sidebar badge behavior as every other tool window.
   Modals.register('health-modal', {
@@ -570,9 +568,7 @@ export function openHabits() {
     </div>`;
   document.body.appendChild(modal);
 
-  const content = modal.querySelector('.modal-content');
-  const header = modal.querySelector('.modal-header');
-  if (content && header) makeWindowDraggable(modal, { content, header });
+  makeToolModalDraggable(modal);
   Modals.register('habits-modal', {
     railBtnId: 'rail-habits',
     sidebarBtnId: 'tool-habits-btn',

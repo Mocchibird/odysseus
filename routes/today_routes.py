@@ -42,13 +42,18 @@ def _parse_due(value: str):
     s = s.replace("Z", "+00:00")
     try:
         dt = datetime.fromisoformat(s)
-        return dt.replace(tzinfo=None) if dt.tzinfo else dt
     except ValueError:
         # Fall back to a plain date (YYYY-MM-DD)
         try:
-            return datetime.strptime(s[:10], "%Y-%m-%d")
+            dt = datetime.strptime(s[:10], "%Y-%m-%d")
         except ValueError:
             return None
+    # A tz-aware due date (e.g. stored UTC) must be CONVERTED to local, not just
+    # stripped — otherwise reminders showed UTC times (e.g. 15:20 instead of 17:20).
+    if dt.tzinfo is not None:
+        local_tz = datetime.now().astimezone().tzinfo
+        return dt.astimezone(local_tz).replace(tzinfo=None)
+    return dt
 
 
 def setup_today_routes() -> APIRouter:

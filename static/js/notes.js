@@ -10,7 +10,7 @@ import { attachColorPicker } from './colorPicker.js';
 import { makeWindowDraggable } from './windowDrag.js';
 import { snapModalToZone } from './tileManager.js';
 import { applyEdgeDock, clearDockSide } from './modalSnap.js';
-import bookToolsModule from './bookTools.js?v=363';
+import bookToolsModule from './bookTools.js?v=364';
 
 const API_BASE = window.location.origin;
 let _open = false;

@@ -5,7 +5,7 @@
  * Consolidates the old scattered notifications into one place.
  */
 import uiModule from './ui.js';
-import { makeWindowDraggable } from './windowDrag.js';
+import { makeToolModalDraggable } from './modalFullscreen.js?v=364';
 import { selectSession } from './sessions.js';
 import * as Modals from './modalManager.js';
 
@@ -195,9 +195,7 @@ export function openPings() {
     </div>`;
   document.body.appendChild(modal);
 
-  const content = modal.querySelector('.modal-content');
-  const header = modal.querySelector('.modal-header');
-  if (content && header) makeWindowDraggable(modal, { content, header });
+  makeToolModalDraggable(modal);
   Modals.register('pings-modal', {
     railBtnId: 'rail-pings',
     sidebarBtnId: 'tool-pings-btn',

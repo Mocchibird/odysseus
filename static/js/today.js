@@ -5,7 +5,7 @@
  * Aggregates GET /api/today (events + reminders + habits, owner-scoped).
  */
 import uiModule from './ui.js';
-import { makeWindowDraggable } from './windowDrag.js';
+import { makeToolModalDraggable } from './modalFullscreen.js?v=364';
 import * as Modals from './modalManager.js';
 
 const API_BASE = window.location.origin;
@@ -154,9 +154,7 @@ export function openToday() {
     </div>`;
   document.body.appendChild(modal);
 
-  const content = modal.querySelector('.modal-content');
-  const header = modal.querySelector('.modal-header');
-  if (content && header) makeWindowDraggable(modal, { content, header });
+  makeToolModalDraggable(modal);
   Modals.register('today-modal', {
     railBtnId: 'rail-today',
     sidebarBtnId: 'tool-today-btn',
