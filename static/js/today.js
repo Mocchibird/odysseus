@@ -162,6 +162,8 @@ export function openToday() {
     sidebarBtnId: 'tool-today-btn',
     closeFn: () => _doCloseToday(),
     restoreFn: () => {},
+    label: 'Today',
+    icon: 'M12 2v2M4.93 4.93l1.41 1.41M20 12h2M17.66 6.34l1.41-1.41M22 18H2M16 18a4 4 0 0 0-8 0M2 12h2',
   });
   try { Modals.injectMinimizeButton(modal, 'today-modal'); } catch (_) {}
   document.getElementById('today-close').addEventListener('click', closeToday);

@@ -24,10 +24,10 @@ import censorModule from './js/censor.js';
 import galleryModule from './js/gallery.js';
 import tasksModule from './js/tasks.js';
 import calendarModule from './js/calendar.js';
-import notesModule from './js/notes.js?v=362';
-import healthModule from './js/health.js';
-import pingsModule from './js/pings.js';
-import todayModule from './js/today.js';
+import notesModule from './js/notes.js?v=363';
+import healthModule from './js/health.js?v=363';
+import pingsModule from './js/pings.js?v=363';
+import todayModule from './js/today.js?v=363';
 import adminModule from './js/admin.js';
 import settingsModule from './js/settings.js';
 // Eagerly bind unified minimize/restore behavior across all tool modals.

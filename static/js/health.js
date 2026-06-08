@@ -503,6 +503,8 @@ export function openHealth(tab) {
     sidebarBtnId: 'tool-health-btn',
     closeFn: () => _doCloseHealth(),
     restoreFn: () => {},
+    label: 'Health',
+    icon: 'M22 12h-4l-3 9L9 3l-3 9H2',
   });
   try { Modals.injectMinimizeButton(modal, 'health-modal'); } catch (_) {}
   document.getElementById('health-close').addEventListener('click', closeHealth);
@@ -576,6 +578,8 @@ export function openHabits() {
     sidebarBtnId: 'tool-habits-btn',
     closeFn: () => _doCloseHabits(),
     restoreFn: () => {},
+    label: 'Habits',
+    icon: 'M9 11l3 3L22 4M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11',
   });
   try { Modals.injectMinimizeButton(modal, 'habits-modal'); } catch (_) {}
   document.getElementById('habits-close').addEventListener('click', closeHabits);
