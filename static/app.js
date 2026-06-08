@@ -28,8 +28,8 @@ import notesModule from './js/notes.js?v=370';
 import healthModule from './js/health.js?v=372';
 import pingsModule from './js/pings.js?v=370';
 import todayModule from './js/today.js?v=370';
-import adminModule from './js/admin.js';
-import settingsModule from './js/settings.js';
+import adminModule from './js/admin.js?v=378';
+import settingsModule from './js/settings.js?v=378';
 // Eagerly bind unified minimize/restore behavior across all tool modals.
 import './js/modalManager.js';
 // Desktop window tiling — drag a modal near an edge/corner to snap.
