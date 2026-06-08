@@ -108,6 +108,14 @@ def _obsidian_mcp_config_from_env() -> dict | None:
     """
     script = os.environ.get("ODYSSEUS_OBSIDIAN_MCP_SCRIPT", "").strip()
     if not script:
+        # Default to the vendored copy bundled in this repo (vendor/iris-mcp) so
+        # Odysseus is self-contained — no sibling obsidian-iris-mcp checkout or
+        # bind-mount needed. An explicit env override still wins (e.g. to point
+        # at a live local checkout for development).
+        vendored = Path(__file__).resolve().parents[1] / "vendor" / "iris-mcp" / "obsidian_memory_mcp.py"
+        if vendored.exists():
+            script = str(vendored)
+    if not script:
         return None
     script_path = Path(script).expanduser().resolve(strict=False)
     if not script_path.exists():

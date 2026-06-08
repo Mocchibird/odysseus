@@ -24,10 +24,12 @@ services:
       # Odysseus stores per-user files under /vault/<username>/ and indexes
       # them in data/app.db.
       - ${ODYSSEUS_OBSIDIAN_VAULT_DIR:?Set ODYSSEUS_OBSIDIAN_VAULT_DIR to your AI_Memory vault path}:/vault
-      # Iris MCP checkout. Default works when this repo sits next to
-      # obsidian-iris-mcp; Dockge/TrueNAS deployments should set an absolute
-      # host path in the stack .env.
-      - ${ODYSSEUS_IRIS_MCP_REPO_DIR:-../obsidian-iris-mcp}:/opt/obsidian-iris-mcp:ro
+      # Iris MCP is VENDORED into this repo at vendor/iris-mcp and baked into the
+      # image — no sibling obsidian-iris-mcp checkout or bind mount is needed.
+      # To develop against a live local checkout instead, set
+      # ODYSSEUS_OBSIDIAN_MCP_SCRIPT=/opt/obsidian-iris-mcp/obsidian_memory_mcp.py
+      # and uncomment the mount below.
+      # - ${ODYSSEUS_IRIS_MCP_REPO_DIR:-../obsidian-iris-mcp}:/opt/obsidian-iris-mcp:ro
     extra_hosts:
       # Lets the container reach local services on the Docker host, including
       # Ollama at http://host.docker.internal:11434 and Proton Mail Bridge
@@ -61,7 +63,7 @@ services:
       - ODYSSEUS_INPROCESS_TASKS=${ODYSSEUS_INPROCESS_TASKS:-1}
       - ODYSSEUS_SCRIPT_HOST=${ODYSSEUS_SCRIPT_HOST:-localhost}
       - TZ=${TZ:-Europe/Zurich}
-      - ODYSSEUS_OBSIDIAN_MCP_SCRIPT=${ODYSSEUS_OBSIDIAN_MCP_SCRIPT:-/opt/obsidian-iris-mcp/obsidian_memory_mcp.py}
+      - ODYSSEUS_OBSIDIAN_MCP_SCRIPT=${ODYSSEUS_OBSIDIAN_MCP_SCRIPT:-/app/vendor/iris-mcp/obsidian_memory_mcp.py}
       - ODYSSEUS_OBSIDIAN_VAULT_ROOT=${ODYSSEUS_OBSIDIAN_VAULT_ROOT:-/vault}
       - IRIS_VAULT_ROOT=${IRIS_VAULT_ROOT:-/vault}
       - ODYSSEUS_OBSIDIAN_MCP_TOOL_GROUPS=${ODYSSEUS_OBSIDIAN_MCP_TOOL_GROUPS:-vault,anime,warranties}

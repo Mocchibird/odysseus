@@ -16,7 +16,9 @@ services:
     - ./data/local:/app/.local:z
     - ${ODYSSEUS_OBSIDIAN_VAULT_DIR:?Set ODYSSEUS_OBSIDIAN_VAULT_DIR to your AI_Memory
       vault path}:/vault
-    - ${ODYSSEUS_IRIS_MCP_REPO_DIR:-../obsidian-iris-mcp}:/opt/obsidian-iris-mcp:ro
+    # Iris MCP is vendored at vendor/iris-mcp (baked into the image). For a live
+    # checkout, set ODYSSEUS_OBSIDIAN_MCP_SCRIPT and uncomment the mount below.
+    # - ${ODYSSEUS_IRIS_MCP_REPO_DIR:-../obsidian-iris-mcp}:/opt/obsidian-iris-mcp:ro
     extra_hosts:
     - host.docker.internal:host-gateway
     environment:
@@ -47,7 +49,7 @@ services:
     - ODYSSEUS_INPROCESS_TASKS=${ODYSSEUS_INPROCESS_TASKS:-1}
     - ODYSSEUS_SCRIPT_HOST=${ODYSSEUS_SCRIPT_HOST:-localhost}
     - TZ=${TZ:-Europe/Zurich}
-    - ODYSSEUS_OBSIDIAN_MCP_SCRIPT=${ODYSSEUS_OBSIDIAN_MCP_SCRIPT:-/opt/obsidian-iris-mcp/obsidian_memory_mcp.py}
+    - ODYSSEUS_OBSIDIAN_MCP_SCRIPT=${ODYSSEUS_OBSIDIAN_MCP_SCRIPT:-/app/vendor/iris-mcp/obsidian_memory_mcp.py}
     - ODYSSEUS_OBSIDIAN_VAULT_ROOT=${ODYSSEUS_OBSIDIAN_VAULT_ROOT:-/vault}
     - IRIS_VAULT_ROOT=${IRIS_VAULT_ROOT:-/vault}
     - ODYSSEUS_OBSIDIAN_MCP_TOOL_GROUPS=${ODYSSEUS_OBSIDIAN_MCP_TOOL_GROUPS:-vault,anime,warranties}
