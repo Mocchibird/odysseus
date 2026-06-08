@@ -585,9 +585,6 @@ body.bg-pattern-sparkles {
     #tools-section {
       margin-top: 1px;
     }
-    #tools-section .list-item {
-      padding: 8px 8px;
-    }
     .sidebar.right-side .sidebar-header {
       justify-content: flex-start;
       padding-left: 10px;
