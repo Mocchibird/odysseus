@@ -887,6 +887,32 @@ def build_link_graph(owner: str | None, *, limit_nodes: int = 800) -> dict:
     return {"nodes": node_list, "links": edges, "truncated": truncated}
 
 
+def organize_data(owner: str | None, *, limit: int = 25) -> dict:
+    """Gather inbox notes (title + short excerpt) and the vault's destination
+    folders, for the Vault Organizer's LLM triage. Pure filesystem read."""
+    base = owner_root(owner)
+    inbox = (os.getenv("ODYSSEUS_IRIS_INBOX_DIR", "90_Inbox") or "90_Inbox").strip().strip("/")
+    inbox_path = base / inbox
+    files: list[dict] = []
+    if inbox_path.is_dir():
+        for p in sorted(inbox_path.rglob("*"), key=lambda x: str(x).lower()):
+            if not p.is_file() or any(part.startswith(".") for part in p.relative_to(base).parts):
+                continue
+            rel = p.relative_to(base).as_posix()
+            try:
+                txt = _read_indexable_text(p, max_chars=400)
+            except Exception:
+                txt = ""
+            files.append({"path": rel, "title": p.stem, "excerpt": (txt or "").strip()[:300]})
+            if len(files) >= limit:
+                break
+    folders = sorted(
+        p.name for p in base.iterdir()
+        if p.is_dir() and not p.name.startswith(".") and p.name != inbox
+    )
+    return {"inbox": inbox, "files": files, "folders": folders}
+
+
 def daily_note_rel_path() -> str:
     folder = (os.getenv("ODYSSEUS_IRIS_DAILY_NOTES_DIR", "30_Episodic") or "30_Episodic").strip().strip("/")
     return f"{folder}/{datetime.now().strftime('%Y-%m-%d')}.md"

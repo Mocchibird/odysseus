@@ -31,6 +31,7 @@ let _vaultError = '';
 let _vaultOpenFile = null;
 let _vaultGraphOpen = false;
 let _vaultGraphCtl = null;
+let _vaultOrganizeOpen = false;
 function _destroyVaultGraph() {
   if (_vaultGraphCtl) { try { _vaultGraphCtl.destroy(); } catch (_) {} _vaultGraphCtl = null; }
 }
@@ -94,7 +95,7 @@ function _forceCloseNotesPanel() {
   _open = false;
   _editingId = null;
   _destroyBookPdfReader();
-  _destroyVaultGraph(); _vaultGraphOpen = false;
+  _destroyVaultGraph(); _vaultGraphOpen = false; _vaultOrganizeOpen = false;
   try { _commitOpenInPlaceEditor(); } catch {}
   try { _closeMobileFullscreenEdit({ save: true }); } catch {}
   try { _clearViewedReminderGlows(); } catch {}
@@ -1879,6 +1880,7 @@ export function openPanel() {
       <input type="text" id="notes-search" class="memory-search-input" placeholder="Search notes…" autocomplete="off" />
       <button id="notes-vault-upload" class="notes-select-trigger notes-vault-only" type="button" title="Upload into the vault">Upload</button>
       <button id="notes-vault-daily" class="notes-select-trigger notes-vault-only" type="button" title="Quick-capture to today's daily note">+ Daily</button>
+      <button id="notes-vault-organize" class="notes-select-trigger notes-vault-only" type="button" title="Let Iris triage your inbox into folders">Organize</button>
       <button id="notes-vault-graph" class="notes-select-trigger notes-vault-only" type="button" title="Backlink graph">Graph</button>
       <button id="notes-vault-reindex" class="notes-select-trigger notes-vault-only" type="button" title="Reindex your vault folder">Reindex</button>
       <button id="notes-books-upload" class="notes-select-trigger notes-books-only" type="button" title="Upload EPUB or PDF">Upload EPUB/PDF</button>
@@ -1959,7 +1961,7 @@ export function openPanel() {
       if (_notesMode === 'notes') return;
       _notesMode = 'notes';
       _destroyBookPdfReader();
-      _destroyVaultGraph(); _vaultGraphOpen = false;
+      _destroyVaultGraph(); _vaultGraphOpen = false; _vaultOrganizeOpen = false;
       _bookOpenBook = null;
       _vaultOpenFile = null;
       _epubOpenBook = null;
@@ -1989,7 +1991,7 @@ export function openPanel() {
     booksBtn.addEventListener('click', async () => {
       if (_notesMode === 'books') return;
       _notesMode = 'books';
-      _destroyVaultGraph(); _vaultGraphOpen = false;
+      _destroyVaultGraph(); _vaultGraphOpen = false; _vaultOrganizeOpen = false;
       _vaultOpenFile = null;
       _epubOpenBook = null;
       _syncNotesModeChrome();
@@ -2027,8 +2029,19 @@ export function openPanel() {
   if (vaultGraphBtn) {
     vaultGraphBtn.addEventListener('click', () => {
       _vaultGraphOpen = !_vaultGraphOpen;
+      _vaultOrganizeOpen = false;
       _vaultOpenFile = null;
       if (!_vaultGraphOpen) _destroyVaultGraph();
+      _renderNotes();
+    });
+  }
+
+  const vaultOrganizeBtn = document.getElementById('notes-vault-organize');
+  if (vaultOrganizeBtn) {
+    vaultOrganizeBtn.addEventListener('click', () => {
+      _vaultOrganizeOpen = !_vaultOrganizeOpen;
+      _vaultGraphOpen = false; _destroyVaultGraph();
+      _vaultOpenFile = null;
       _renderNotes();
     });
   }
@@ -2870,6 +2883,59 @@ function _renderVaultFiles() {
         });
       } catch (e) {
         if (host) host.innerHTML = `<div class="notes-empty-msg">Couldn't build the graph: ${_esc(e.message || 'error')}</div>`;
+      }
+    })();
+    return;
+  }
+  if (_vaultOrganizeOpen) {
+    body.innerHTML = html + `<div class="notes-vault-graph-wrap">
+      <div class="notes-vault-reader-head">
+        <button type="button" class="notes-vault-back" title="Back to files">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+        </button>
+        <div class="notes-vault-reader-title"><strong>Organize inbox</strong><span id="notes-vault-org-meta"></span></div>
+      </div>
+      <div id="notes-vault-org" class="notes-vault-org"><div class="notes-empty-msg">Asking Iris to triage your inbox…</div></div>
+    </div>`;
+    body.querySelector('.notes-vault-back')?.addEventListener('click', () => { _vaultOrganizeOpen = false; _renderNotes(); });
+    (async () => {
+      const hostEl = document.getElementById('notes-vault-org');
+      try {
+        const res = await fetch(`${API_BASE}/api/iris-vault/organize`, { method: 'POST', credentials: 'same-origin' });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'Organize failed');
+        if (!_vaultOrganizeOpen || !hostEl) return;
+        const folders = data.folders || [];
+        const sugg = data.suggestions || [];
+        const meta = document.getElementById('notes-vault-org-meta');
+        if (meta) meta.textContent = data.message || `${sugg.length} suggestion(s)`;
+        if (!sugg.length) { hostEl.innerHTML = `<div class="notes-empty-msg">${_esc(data.message || 'Nothing to organize.')}</div>`; return; }
+        hostEl.innerHTML = sugg.map((s) => {
+          const base = (s.path || '').split('/').pop();
+          return `<div class="vault-org-row" data-path="${_attrEsc(s.path)}" data-base="${_attrEsc(base)}">
+            <div class="vault-org-note"><strong>${_esc(base)}</strong>${s.reason ? `<span>${_esc(s.reason)}</span>` : ''}</div>
+            <select class="vault-org-folder">${folders.map((f) => `<option value="${_attrEsc(f)}"${f === s.folder ? ' selected' : ''}>${_esc(f)}</option>`).join('')}</select>
+            <button class="notes-select-trigger vault-org-move" type="button">Move</button>
+          </div>`;
+        }).join('');
+        hostEl.querySelectorAll('.vault-org-move').forEach((btn) => btn.addEventListener('click', async () => {
+          const row = btn.closest('.vault-org-row'); if (!row) return;
+          const folder = row.querySelector('.vault-org-folder')?.value || '';
+          if (!folder) return;
+          btn.disabled = true;
+          try {
+            const r = await fetch(`${API_BASE}/api/iris-vault/move`, {
+              method: 'POST', credentials: 'same-origin',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ source: row.dataset.path, target: `${folder}/${row.dataset.base}` }),
+            });
+            const d = await r.json(); if (!r.ok) throw new Error(d.detail || 'Move failed');
+            row.remove(); uiModule.showToast?.(`Moved to ${folder}`);
+            await _fetchVaultFiles();
+          } catch (e) { btn.disabled = false; uiModule.showError?.(e.message); }
+        }));
+      } catch (e) {
+        if (hostEl) hostEl.innerHTML = `<div class="notes-empty-msg">Couldn’t organize: ${_esc(e.message || 'error')}</div>`;
       }
     })();
     return;

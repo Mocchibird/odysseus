@@ -32,6 +32,37 @@ class VaultDeleteRequest(BaseModel):
     path: str
 
 
+class VaultMoveRequest(BaseModel):
+    source: str
+    target: str
+
+
+def _parse_org_suggestions(raw: str, valid_folders: set, valid_paths: set) -> list:
+    """Pull the organizer's JSON array out of the model reply and keep only
+    suggestions referencing a real inbox note + a real destination folder."""
+    import json
+    import re
+    m = re.search(r"\[.*\]", raw or "", re.DOTALL)
+    if not m:
+        return []
+    try:
+        arr = json.loads(m.group(0))
+    except Exception:
+        return []
+    out = []
+    for item in arr if isinstance(arr, list) else []:
+        if not isinstance(item, dict):
+            continue
+        path = str(item.get("path") or "").strip()
+        folder = str(item.get("folder") or "").strip()
+        if path not in valid_paths:
+            continue
+        if folder.lower() == "keep" or folder not in valid_folders:
+            continue
+        out.append({"path": path, "folder": folder, "reason": str(item.get("reason") or "")[:200]})
+    return out
+
+
 class VaultSortInboxRequest(BaseModel):
     limit: int = 200
 
@@ -181,6 +212,53 @@ def setup_iris_vault_routes() -> APIRouter:
     async def daily_note(body: VaultWriteRequest, request: Request):
         # Reuses VaultWriteRequest; `content` carries the quick-capture text.
         return iris_vault.append_daily_note(_owner(request), body.content or body.path)
+
+    @router.post("/move")
+    async def move_file(body: VaultMoveRequest, request: Request):
+        return {"ok": True, **iris_vault.move_file(_owner(request), body.source, body.target)}
+
+    @router.post("/organize")
+    async def organize(request: Request):
+        """Vault Organizer: ask the LLM to triage the inbox into existing folders.
+        Returns suggestions for the user to apply (does not move anything)."""
+        owner = _owner(request)
+        data = iris_vault.organize_data(owner)
+        if not data["files"]:
+            return {"ok": True, "suggestions": [], "message": f"Inbox ({data['inbox']}) is empty — nothing to triage."}
+        if not data["folders"]:
+            return {"ok": True, "suggestions": [], "message": "No destination folders found in your vault."}
+        from src.endpoint_resolver import resolve_endpoint
+        from src.llm_core import llm_call_async
+        url, model, headers = resolve_endpoint("utility", owner=owner)
+        if not (url and model):
+            url, model, headers = resolve_endpoint("default", owner=owner)
+        if not (url and model):
+            raise HTTPException(503, "No utility/default model is configured to organize with.")
+        listing = "\n".join(
+            f"- {f['path']} | {f['title']} | {f['excerpt']}" for f in data["files"]
+        )
+        prompt = (
+            f"Vault destination folders: {', '.join(data['folders'])}.\n\n"
+            f"Inbox notes (path | title | excerpt):\n{listing}\n\n"
+            "For each note pick the single best destination folder from the list above, "
+            'or "keep" if none fits. Reply with ONLY a JSON array: '
+            '[{"path": "<exact note path>", "folder": "<folder or keep>", "reason": "<short>"}].'
+        )
+        try:
+            raw = await llm_call_async(
+                url=url, model=model,
+                messages=[
+                    {"role": "system", "content": "You tidy an Obsidian vault by filing inbox notes. Output only JSON."},
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=0.2, max_tokens=1500, headers=headers, timeout=90,
+            )
+        except Exception as e:
+            raise HTTPException(502, f"Organizer model call failed: {e}")
+        suggestions = _parse_org_suggestions(
+            raw, set(data["folders"]), {f["path"] for f in data["files"]}
+        )
+        return {"ok": True, "suggestions": suggestions, "inbox": data["inbox"], "folders": data["folders"]}
 
     @router.post("/reindex")
     async def reindex(request: Request):
