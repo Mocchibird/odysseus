@@ -84,39 +84,51 @@ def setup_today_routes() -> APIRouter:
                 ev_q = owner_filter(ev_q, CalendarCal, owner, include_shared=allow_null)
             raw_events = ev_q.order_by(CalendarEvent.dtstart).all()
             for e in raw_events:
-                # All-day events are date-anchored — don't tz-shift them.
+                # Filter to "today" using local-naive bounds (approximate when the
+                # server tz != the user's; the day boundary is the only fuzzy case).
                 ls = e.dtstart if e.all_day else _to_local_naive(e.dtstart, e.is_utc)
                 le = e.dtend if e.all_day else _to_local_naive(e.dtend, e.is_utc)
                 if ls is None:
                     continue
                 if not (ls < tomorrow and (le or ls) > start):
                     continue
+                # Send a raw ISO INSTANT and let the BROWSER format it in the user's
+                # timezone — the server may run in UTC, so formatting server-side
+                # showed UTC times. UTC-stored events carry an explicit +00:00 offset;
+                # naive-local events are sent bare so the browser shows wall-clock.
+                if not e.dtstart:
+                    iso = ""
+                elif e.is_utc and e.dtstart.tzinfo is None:
+                    iso = e.dtstart.replace(tzinfo=timezone.utc).isoformat()
+                else:
+                    iso = e.dtstart.isoformat()
                 events.append({
                     "summary": e.summary or "(untitled)",
-                    "time": "all day" if e.all_day else ls.strftime("%H:%M"),
+                    "start": iso,
                     "all_day": bool(e.all_day),
                     "location": e.location or "",
                 })
-            events.sort(key=lambda x: (x["all_day"] is False, x["time"]))
 
             n_q = db.query(Note).filter(Note.archived == False)  # noqa: E712
             if owner:
                 n_q = owner_filter(n_q, Note, owner, include_shared=allow_null)
+            rem_rows = []
             for n in n_q.all():
                 if not n.due_date:
                     continue
-                due = _parse_due(n.due_date)
+                due = _parse_due(n.due_date)  # local-naive, for sort + overdue only
                 if due is None or due >= tomorrow:
                     continue  # only due-today or overdue
-                reminders.append({
+                rem_rows.append((due, {
                     "id": n.id,
                     "title": n.title or "(untitled)",
-                    "due": due.strftime("%Y-%m-%d %H:%M"),
+                    "due": n.due_date,  # RAW ISO — the browser formats it in local tz
                     "overdue": due < start,
-                })
+                }))
+            rem_rows.sort(key=lambda x: x[0])
+            reminders = [d for _, d in rem_rows]
         finally:
             db.close()
-        reminders.sort(key=lambda r: r["due"])
 
         habits_due = []
         try:

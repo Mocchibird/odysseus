@@ -5,7 +5,7 @@
  * Aggregates GET /api/today (events + reminders + habits, owner-scoped).
  */
 import uiModule from './ui.js';
-import { makeToolModalDraggable } from './modalFullscreen.js?v=364';
+import { makeToolModalDraggable } from './modalFullscreen.js?v=365';
 import * as Modals from './modalManager.js';
 
 const API_BASE = window.location.origin;
@@ -31,10 +31,19 @@ async function _api(path, opts = {}) {
   return res.json();
 }
 
-function _dueLabel(due) {
-  // due is "YYYY-MM-DD HH:MM"
-  const t = (due || '').slice(11, 16);
-  return t || (due || '').slice(0, 10);
+// Format a raw ISO instant in the BROWSER's timezone (the user's actual tz),
+// 24-hour. The server sends raw ISO precisely so this works regardless of the
+// server's own timezone.
+function _fmtTime(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return '';
+  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+}
+
+function _hasTime(iso) {
+  // "YYYY-MM-DD" (date only) has no clock component.
+  return typeof iso === 'string' && /\d{2}:\d{2}/.test(iso);
 }
 
 function _render() {
@@ -48,7 +57,7 @@ function _render() {
 
   const eventsHtml = events.length ? events.map((e) => `
     <div class="today-item today-event">
-      <span class="today-time">${esc(e.time || '')}</span>
+      <span class="today-time">${esc(e.all_day ? 'all day' : _fmtTime(e.start))}</span>
       <span class="today-item-main">${esc(e.summary)}${e.location ? `<span class="today-loc"> · ${esc(e.location)}</span>` : ''}</span>
     </div>`).join('') : '<div class="today-section-empty">Nothing scheduled.</div>';
 
@@ -56,7 +65,7 @@ function _render() {
     <div class="today-item today-reminder${r.overdue ? ' overdue' : ''}">
       <span class="today-dot"></span>
       <span class="today-item-main">${esc(r.title)}</span>
-      <span class="today-due">${r.overdue ? 'overdue · ' : ''}${esc(_dueLabel(r.due))}</span>
+      <span class="today-due">${r.overdue ? 'overdue · ' : ''}${esc(_hasTime(r.due) ? _fmtTime(r.due) : (r.due || '').slice(0, 10))}</span>
     </div>`).join('') : '<div class="today-section-empty">No reminders due.</div>';
 
   const habitsHtml = habits.length ? habits.map((h) => `

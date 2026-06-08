@@ -26,7 +26,7 @@ function _formatReminderBody(note) {
     if (!isNaN(start.getTime())) {
       const now = new Date();
       const mins = Math.round((start - now) / 60000);
-      const when = start.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+      const when = start.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
       let when2 = '';
       const sameDay = start.toDateString() === now.toDateString();
       if (!sameDay) when2 = ' ' + start.toLocaleDateString([], { month: 'short', day: 'numeric' });

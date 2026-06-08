@@ -10,7 +10,7 @@ import { attachColorPicker } from './colorPicker.js';
 import { makeWindowDraggable } from './windowDrag.js';
 import { snapModalToZone } from './tileManager.js';
 import { applyEdgeDock, clearDockSide } from './modalSnap.js';
-import bookToolsModule from './bookTools.js?v=364';
+import bookToolsModule from './bookTools.js?v=365';
 
 const API_BASE = window.location.origin;
 let _open = false;
@@ -1213,7 +1213,7 @@ function _formatDueDate(dateStr) {
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const due = new Date(d.getFullYear(), d.getMonth(), d.getDate());
   const diffDays = Math.round((due - today) / 86400000);
-  const timeStr = hasTime ? d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : '';
+  const timeStr = hasTime ? d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false }) : '';
   if (hasTime && d < now) return 'overdue';
   if (!hasTime && diffDays < 0) return 'overdue';
   if (diffDays === 0) return hasTime ? timeStr : 'today';
@@ -1304,7 +1304,7 @@ function _formatReminderTag(dateStr) {
   const sameDay = d.toDateString() === now.toDateString();
   const tomorrow = new Date(now); tomorrow.setDate(tomorrow.getDate() + 1);
   const isTomorrow = d.toDateString() === tomorrow.toDateString();
-  const time = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  const time = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
   if (sameDay) return `Today, ${time}`;
   if (isTomorrow) return `Tomorrow, ${time}`;
   const dateLabel = d.toLocaleDateString([], { month: 'short', day: 'numeric' });
@@ -4840,9 +4840,9 @@ function _buildForm(note = null) {
     document.body.appendChild(menu);
 
     const presetItems = [
-      { label: 'Later today', sub: _laterTodayDate().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }), action: () => _setReminder(_toLocalDatetimeStr(_laterTodayDate())) },
-      { label: 'Tomorrow', sub: _tomorrowDate().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }), action: () => _setReminder(_toLocalDatetimeStr(_tomorrowDate())) },
-      { label: 'Next week', sub: _nextWeekDate().toLocaleDateString([], { weekday: 'short' }) + ' ' + _nextWeekDate().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }), action: () => _setReminder(_toLocalDatetimeStr(_nextWeekDate())) },
+      { label: 'Later today', sub: _laterTodayDate().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false }), action: () => _setReminder(_toLocalDatetimeStr(_laterTodayDate())) },
+      { label: 'Tomorrow', sub: _tomorrowDate().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false }), action: () => _setReminder(_toLocalDatetimeStr(_tomorrowDate())) },
+      { label: 'Next week', sub: _nextWeekDate().toLocaleDateString([], { weekday: 'short' }) + ' ' + _nextWeekDate().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false }), action: () => _setReminder(_toLocalDatetimeStr(_nextWeekDate())) },
       { label: 'Select date and time', sub: '', action: () => _pickCustomDate() },
     ];
 
