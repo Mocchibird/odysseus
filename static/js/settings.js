@@ -377,46 +377,75 @@ async function initChatAllowlist() {
   var saveBtn = el('set-chatAllowedSave');
   var msg = el('set-chatAllowedMsg');
   if (!container) return;
-  var endpoints = [];
-  var allowed = [];
+
+  // Saved allowlist (used for the first paint; updated on save).
+  var allowSet = new Set();
   try {
-    endpoints = await _fetchModelEndpoints();
     var sres = await fetch('/api/auth/settings', { credentials: 'same-origin' });
     var settings = await sres.json();
-    allowed = Array.isArray(settings.chat_allowed_models) ? settings.chat_allowed_models : [];
+    var allowed = Array.isArray(settings.chat_allowed_models) ? settings.chat_allowed_models : [];
+    allowSet = new Set(allowed);
   } catch (e) { console.warn('Failed to load chat allowlist', e); }
-  var allowSet = new Set(allowed);
-  container.innerHTML = '';
-  var enabled = endpoints.filter(function(e) { return e.is_enabled; });
-  if (!enabled.length) {
-    container.innerHTML = '<div style="font-size:12px;opacity:0.55;">No enabled endpoints yet — add some under “Add Models”.</div>';
+
+  function _domChecked() {
+    return new Set(Array.prototype.slice
+      .call(container.querySelectorAll('input[type=checkbox]:checked'))
+      .map(function(c) { return c.value; }));
   }
-  enabled.forEach(function(ep) {
-    var models = Array.isArray(ep.models) ? ep.models : [];
-    if (!models.length) return;
-    var group = document.createElement('div');
-    group.className = 'settings-allowlist-group';
-    var head = document.createElement('div');
-    head.className = 'settings-allowlist-ep';
-    head.textContent = ep.name + (ep.online ? '' : ' (offline)');
-    group.appendChild(head);
-    models.forEach(function(mid) {
-      var lbl = document.createElement('label');
-      lbl.className = 'settings-allowlist-item';
-      var cb = document.createElement('input');
-      cb.type = 'checkbox';
-      cb.value = mid;
-      cb.checked = allowSet.has(mid);
-      var span = document.createElement('span');
-      span.textContent = mid.split('/').pop();
-      lbl.appendChild(cb);
-      lbl.appendChild(span);
-      group.appendChild(lbl);
+
+  // Render is registered as an endpoint-refresh handler (like the other AI
+  // cards) so it re-paints once the endpoints' cached model lists load — at
+  // init time `.models` can still be empty, which is why the list looked blank.
+  function render(endpoints) {
+    // Preserve in-progress (unsaved) toggles across a re-render; first paint
+    // uses the saved allowlist.
+    var checkedSet = container.querySelector('input[type=checkbox]') ? _domChecked() : allowSet;
+    var enabled = (endpoints || []).filter(function(e) { return e.is_enabled; });
+    container.innerHTML = '';
+    var rendered = 0;
+    enabled.forEach(function(ep) {
+      var models = Array.isArray(ep.models) ? ep.models : [];
+      if (!models.length) return;
+      var group = document.createElement('div');
+      group.className = 'settings-allowlist-group';
+      var head = document.createElement('div');
+      head.className = 'settings-allowlist-ep';
+      head.textContent = ep.name + (ep.online ? '' : ' (offline)');
+      group.appendChild(head);
+      models.forEach(function(mid) {
+        var lbl = document.createElement('label');
+        lbl.className = 'settings-allowlist-item';
+        var cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.value = mid;
+        cb.checked = checkedSet.has(mid);
+        var span = document.createElement('span');
+        span.textContent = mid.split('/').pop();
+        lbl.appendChild(cb);
+        lbl.appendChild(span);
+        group.appendChild(lbl);
+        rendered++;
+      });
+      container.appendChild(group);
     });
-    container.appendChild(group);
-  });
-  if (saveBtn) {
-    saveBtn.onclick = async function() {
+    if (!rendered) {
+      container.innerHTML = '<div style="font-size:12px;opacity:0.55;padding:2px 0;">'
+        + (enabled.length
+            ? 'Models not loaded yet — open the model picker once so they get cached, then reopen this tab.'
+            : 'No enabled endpoints yet — add some under “Add Models”.')
+        + '</div>';
+    }
+  }
+
+  _registerAiEndpointRefresh(render);
+  // Initial paint now (don't wait for a tab switch); the refresher re-paints
+  // with fresh data whenever the AI tab is (re)opened.
+  try { render(await _fetchModelEndpoints()); }
+  catch (e) { console.warn('chat allowlist initial render failed', e); }
+
+  if (saveBtn && !saveBtn._allowlistWired) {
+    saveBtn._allowlistWired = true;
+    saveBtn.addEventListener('click', async function() {
       var checked = Array.prototype.slice
         .call(container.querySelectorAll('input[type=checkbox]:checked'))
         .map(function(c) { return c.value; });
@@ -426,6 +455,7 @@ async function initChatAllowlist() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ chat_allowed_models: checked }),
         });
+        allowSet = new Set(checked);
         if (msg) {
           msg.textContent = checked.length
             ? ('Saved — users can use ' + checked.length + ' model(s) for chat & agent.')
@@ -434,7 +464,7 @@ async function initChatAllowlist() {
       } catch (e) {
         if (msg) msg.textContent = 'Save failed: ' + (e && e.message ? e.message : e);
       }
-    };
+    });
   }
 }
 
