@@ -173,6 +173,15 @@ def setup_iris_vault_routes() -> APIRouter:
         deleted = iris_vault.delete_file(_owner(request), body.path)
         return {"ok": True, "deleted": deleted}
 
+    @router.get("/graph")
+    async def link_graph(request: Request):
+        return {"ok": True, "graph": iris_vault.build_link_graph(_owner(request))}
+
+    @router.post("/daily-note")
+    async def daily_note(body: VaultWriteRequest, request: Request):
+        # Reuses VaultWriteRequest; `content` carries the quick-capture text.
+        return iris_vault.append_daily_note(_owner(request), body.content or body.path)
+
     @router.post("/reindex")
     async def reindex(request: Request):
         owner = _owner(request)

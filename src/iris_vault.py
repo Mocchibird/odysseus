@@ -826,6 +826,96 @@ def list_files_fs(owner: str | None, *, limit: int = 5000) -> list[dict]:
     return out
 
 
+_WIKILINK_RE = re.compile(r"\[\[([^\]|#]+)(?:[#|][^\]]*)?\]\]")
+
+
+def build_link_graph(owner: str | None, *, limit_nodes: int = 800) -> dict:
+    """Parse [[wikilinks]] across the owner's markdown notes into a graph
+    {nodes, links} for the backlink graph view. Links resolve by basename
+    (Obsidian-style) or by relative path. Capped to the highest-degree nodes."""
+    base = owner_root(owner)
+    md_files = [
+        p for p in base.rglob("*.md")
+        if p.is_file() and not any(part.startswith(".") for part in p.relative_to(base).parts)
+    ]
+    by_name: dict[str, str] = {}
+    by_path: dict[str, str] = {}
+    nodes: dict[str, dict] = {}
+    for p in md_files:
+        rel = p.relative_to(base).as_posix()
+        by_name.setdefault(p.stem.lower(), rel)
+        by_path[rel.lower()] = rel
+        nodes[rel] = {"id": rel, "label": p.stem, "path": rel, "deg": 0}
+
+    def _resolve(target: str) -> str | None:
+        t = (target or "").strip()
+        if not t:
+            return None
+        hit = by_name.get(t.lower())
+        if hit:
+            return hit
+        cand = t if t.lower().endswith(".md") else t + ".md"
+        return by_path.get(cand.lower()) or by_name.get(t.split("/")[-1].lower())
+
+    edges: list[dict] = []
+    seen: set[tuple[str, str]] = set()
+    for p in md_files:
+        rel = p.relative_to(base).as_posix()
+        try:
+            text = p.read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            continue
+        for m in _WIKILINK_RE.finditer(text):
+            tgt = _resolve(m.group(1))
+            if not tgt or tgt == rel:
+                continue
+            key = (rel, tgt)
+            if key in seen:
+                continue
+            seen.add(key)
+            edges.append({"source": rel, "target": tgt})
+            nodes[rel]["deg"] += 1
+            nodes[tgt]["deg"] += 1
+
+    node_list = list(nodes.values())
+    truncated = len(node_list) > limit_nodes
+    if truncated:
+        node_list.sort(key=lambda n: n["deg"], reverse=True)
+        node_list = node_list[:limit_nodes]
+        keep = {n["id"] for n in node_list}
+        edges = [e for e in edges if e["source"] in keep and e["target"] in keep]
+    return {"nodes": node_list, "links": edges, "truncated": truncated}
+
+
+def daily_note_rel_path() -> str:
+    folder = (os.getenv("ODYSSEUS_IRIS_DAILY_NOTES_DIR", "30_Episodic") or "30_Episodic").strip().strip("/")
+    return f"{folder}/{datetime.now().strftime('%Y-%m-%d')}.md"
+
+
+def append_daily_note(owner: str | None, text: str) -> dict:
+    """Append a timestamped bullet to today's daily note (quick-capture)."""
+    text = (text or "").strip()
+    if not text:
+        raise HTTPException(400, "Note text is required")
+    owner_key = owner_folder_name(owner)
+    rel = daily_note_rel_path()
+    path = resolve_owner_file(owner_key, rel)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    today = datetime.now().strftime("%Y-%m-%d")
+    line = f"- {datetime.now().strftime('%H:%M')} {text}\n"
+    if path.exists():
+        with path.open("a", encoding="utf-8") as f:
+            f.write(line)
+    else:
+        with path.open("w", encoding="utf-8") as f:
+            f.write(f"# {today}\n\n{line}")
+    try:
+        index_file(owner_key, path)
+    except Exception:
+        pass
+    return {"ok": True, "path": rel, "appended": text}
+
+
 def row_to_dict(row: IrisVaultFile, *, include_content: bool = False, content_override: str | None = None) -> dict:
     data = {
         "id": row.id,

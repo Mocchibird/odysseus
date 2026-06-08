@@ -29,6 +29,11 @@ let _vaultFiles = [];
 let _vaultLoading = false;
 let _vaultError = '';
 let _vaultOpenFile = null;
+let _vaultGraphOpen = false;
+let _vaultGraphCtl = null;
+function _destroyVaultGraph() {
+  if (_vaultGraphCtl) { try { _vaultGraphCtl.destroy(); } catch (_) {} _vaultGraphCtl = null; }
+}
 let _books = [];
 let _booksLoading = false;
 let _booksError = '';
@@ -89,6 +94,7 @@ function _forceCloseNotesPanel() {
   _open = false;
   _editingId = null;
   _destroyBookPdfReader();
+  _destroyVaultGraph(); _vaultGraphOpen = false;
   try { _commitOpenInPlaceEditor(); } catch {}
   try { _closeMobileFullscreenEdit({ save: true }); } catch {}
   try { _clearViewedReminderGlows(); } catch {}
@@ -1872,6 +1878,8 @@ export function openPanel() {
     <div class="notes-search-bar">
       <input type="text" id="notes-search" class="memory-search-input" placeholder="Search notes…" autocomplete="off" />
       <button id="notes-vault-upload" class="notes-select-trigger notes-vault-only" type="button" title="Upload into the vault">Upload</button>
+      <button id="notes-vault-daily" class="notes-select-trigger notes-vault-only" type="button" title="Quick-capture to today's daily note">+ Daily</button>
+      <button id="notes-vault-graph" class="notes-select-trigger notes-vault-only" type="button" title="Backlink graph">Graph</button>
       <button id="notes-vault-reindex" class="notes-select-trigger notes-vault-only" type="button" title="Reindex your vault folder">Reindex</button>
       <button id="notes-books-upload" class="notes-select-trigger notes-books-only" type="button" title="Upload EPUB or PDF">Upload EPUB/PDF</button>
       <button id="notes-select-btn" class="notes-select-trigger" type="button">Select</button>
@@ -1951,6 +1959,7 @@ export function openPanel() {
       if (_notesMode === 'notes') return;
       _notesMode = 'notes';
       _destroyBookPdfReader();
+      _destroyVaultGraph(); _vaultGraphOpen = false;
       _bookOpenBook = null;
       _vaultOpenFile = null;
       _epubOpenBook = null;
@@ -1980,6 +1989,7 @@ export function openPanel() {
     booksBtn.addEventListener('click', async () => {
       if (_notesMode === 'books') return;
       _notesMode = 'books';
+      _destroyVaultGraph(); _vaultGraphOpen = false;
       _vaultOpenFile = null;
       _epubOpenBook = null;
       _syncNotesModeChrome();
@@ -2010,6 +2020,35 @@ export function openPanel() {
         }
       }, { once: true });
       input.click();
+    });
+  }
+
+  const vaultGraphBtn = document.getElementById('notes-vault-graph');
+  if (vaultGraphBtn) {
+    vaultGraphBtn.addEventListener('click', () => {
+      _vaultGraphOpen = !_vaultGraphOpen;
+      _vaultOpenFile = null;
+      if (!_vaultGraphOpen) _destroyVaultGraph();
+      _renderNotes();
+    });
+  }
+
+  const vaultDailyBtn = document.getElementById('notes-vault-daily');
+  if (vaultDailyBtn) {
+    vaultDailyBtn.addEventListener('click', async () => {
+      const text = (window.prompt('Quick-capture to today’s daily note:') || '').trim();
+      if (!text) return;
+      try {
+        const res = await fetch(`${API_BASE}/api/iris-vault/daily-note`, {
+          method: 'POST', credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ path: '', content: text }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'Failed to capture');
+        uiModule.showToast?.(`Added to ${data.path}`);
+        if (_notesMode === 'vault') { await _fetchVaultFiles(); _renderNotes(); }
+      } catch (e) { uiModule.showError?.(e?.message || 'Daily-note capture failed'); }
     });
   }
 
@@ -2794,6 +2833,45 @@ function _renderVaultFiles() {
   }
   if (_vaultError) {
     body.innerHTML = html + `<div class="notes-empty-msg">${_esc(_vaultError)}</div>`;
+    return;
+  }
+  if (_vaultGraphOpen) {
+    _destroyVaultGraph();
+    body.innerHTML = html + `<div class="notes-vault-graph-wrap">
+      <div class="notes-vault-reader-head">
+        <button type="button" class="notes-vault-back" title="Back to files">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+        </button>
+        <div class="notes-vault-reader-title"><strong>Backlink graph</strong><span id="notes-vault-graph-meta"></span></div>
+      </div>
+      <div id="notes-vault-graph" class="notes-vault-graph"></div>
+    </div>`;
+    body.querySelector('.notes-vault-back')?.addEventListener('click', () => { _vaultGraphOpen = false; _destroyVaultGraph(); _renderNotes(); });
+    (async () => {
+      const host = document.getElementById('notes-vault-graph');
+      if (host) host.innerHTML = '<div class="notes-empty-msg">Building graph…</div>';
+      try {
+        const res = await fetch(`${API_BASE}/api/iris-vault/graph`, { credentials: 'same-origin' });
+        const data = await res.json();
+        const g = (data && data.graph) || { nodes: [], links: [] };
+        const meta = document.getElementById('notes-vault-graph-meta');
+        if (meta) meta.textContent = `${g.nodes.length} notes · ${g.links.length} links${g.truncated ? ' · top 800' : ''}`;
+        if (!_vaultGraphOpen || !host) return;
+        if (!g.nodes.length) { host.innerHTML = '<div class="notes-empty-msg">No [[wikilinks]] found in your notes yet — link some notes and rebuild.</div>'; return; }
+        host.innerHTML = '';
+        const { createVaultGraph } = await import('./vaultGraph.js');
+        if (!_vaultGraphOpen) return;
+        _vaultGraphCtl = createVaultGraph(host, {
+          nodes: g.nodes, links: g.links,
+          onOpen: (path) => {
+            _vaultGraphOpen = false; _destroyVaultGraph();
+            _readVaultFile(path).then(() => _renderNotes()).catch((e) => uiModule.showError?.(e.message));
+          },
+        });
+      } catch (e) {
+        if (host) host.innerHTML = `<div class="notes-empty-msg">Couldn't build the graph: ${_esc(e.message || 'error')}</div>`;
+      }
+    })();
     return;
   }
   if (_epubOpenBook) {
