@@ -217,6 +217,73 @@ def parse_epub_toc(owner: str | None, rel_path: str) -> dict:
     }
 
 
+_COVER_CONTENT_TYPES = {
+    ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png",
+    ".gif": "image/gif", ".webp": "image/webp", ".svg": "image/svg+xml",
+}
+
+
+def extract_cover(owner: str | None, rel_path: str) -> tuple[bytes, str] | None:
+    """Return (image_bytes, content_type) for the EPUB's cover image, or None.
+
+    Tries, in order: the OPF ``<meta name="cover">`` pointer, a manifest item
+    with ``properties="cover-image"``, an image whose href mentions "cover", and
+    finally the first image in the manifest."""
+    owner_key = iris_vault.owner_folder_name(owner)
+    try:
+        path, _safe, opf_dir, opf = _epub_package(owner_key, rel_path)
+    except Exception:
+        return None
+
+    manifest: dict[str, dict] = {}
+    for item in opf.findall(".//opf:manifest/opf:item", _NS):
+        iid = item.attrib.get("id", "")
+        href = item.attrib.get("href", "")
+        if iid and href:
+            manifest[iid] = {
+                "href": _join_epub_path(opf_dir, href),
+                "media_type": item.attrib.get("media-type", ""),
+                "properties": item.attrib.get("properties", ""),
+            }
+
+    cover_href = None
+    metadata = opf.find("opf:metadata", _NS)
+    if metadata is not None:
+        for meta in metadata.findall("opf:meta", _NS):
+            if (meta.attrib.get("name") or "").lower() == "cover":
+                cid = meta.attrib.get("content", "")
+                if cid in manifest:
+                    cover_href = manifest[cid]["href"]
+                break
+    if not cover_href:
+        for it in manifest.values():
+            if "cover-image" in (it.get("properties") or "").split():
+                cover_href = it["href"]
+                break
+    if not cover_href:
+        for it in manifest.values():
+            if (it.get("media_type") or "").startswith("image/") and "cover" in it["href"].lower():
+                cover_href = it["href"]
+                break
+    if not cover_href:
+        for it in manifest.values():
+            if (it.get("media_type") or "").startswith("image/"):
+                cover_href = it["href"]
+                break
+    if not cover_href:
+        return None
+
+    try:
+        with zipfile.ZipFile(path) as zf:
+            data = zf.read(cover_href)
+    except Exception:
+        return None
+    if not data:
+        return None
+    content_type = _COVER_CONTENT_TYPES.get(Path(cover_href).suffix.lower(), "image/jpeg")
+    return data, content_type
+
+
 def read_epub_chapter(owner: str | None, rel_path: str, chapter_index: int = 0) -> dict:
     owner_key = iris_vault.owner_folder_name(owner)
     toc = parse_epub_toc(owner_key, rel_path)
