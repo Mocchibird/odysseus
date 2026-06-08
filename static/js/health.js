@@ -11,6 +11,7 @@ const API_BASE = window.location.origin;
 let _open = false;
 let _habitsOpen = false;
 let _tab = 'calories';
+const _editingHabits = new Set();  // habit ids (as strings) currently in inline-edit mode
 
 const esc = uiModule.esc;  // reuse the canonical HTML-escape helper
 const _todayLocal = () => new Date().toLocaleDateString('en-CA'); // YYYY-MM-DD, local tz
@@ -145,17 +146,28 @@ async function _renderHabits() {
   const cards = await Promise.all(habits.map(async (h) => {
     let hm = { days: [], total: 0, streak: h.streak };
     try { hm = await _api(`/habits/${h.id}/heatmap?days=371`); } catch (_) {}
-    return `
-      <div class="health-card health-habit" data-id="${h.id}">
+    const editing = _editingHabits.has(String(h.id));
+    const head = editing ? `
+        <form class="health-inline-form health-habit-edit" data-edit-form="${h.id}">
+          <input name="name" class="health-input" value="${esc(h.name)}" placeholder="Habit name" required aria-label="Habit name">
+          <input name="icon" class="health-input health-input-icon" value="${esc(h.icon || '')}" placeholder="🧘" maxlength="2" aria-label="Emoji">
+          <input name="category" class="health-input health-input-sm" value="${esc(h.category || '')}" placeholder="Category" aria-label="Category">
+          <button type="submit" class="health-btn">Save</button>
+          <button type="button" class="health-btn-sub" data-cancel-edit="${h.id}" style="cursor:pointer;padding:6px 12px;">Cancel</button>
+        </form>` : `
         <div class="health-habit-head">
           <div class="health-habit-title">${h.icon ? `<span class="health-habit-icon">${esc(h.icon)}</span>` : ''}<strong>${esc(h.name)}</strong>${h.category ? `<span class="health-chip">${esc(h.category)}</span>` : ''}</div>
           <div class="health-habit-stats">
             <span class="health-streak" title="Current streak">🔥 ${h.streak}</span>
             <span class="health-30d" title="Last 30 days">${h.done_30d}/30</span>
             <button class="health-check-btn${h.done_today ? ' done' : ''}" data-check="${h.id}" title="Toggle today">${h.done_today ? '✓ Done today' : 'Mark today'}</button>
+            <button class="health-icon-btn" data-edit-habit="${h.id}" title="Edit habit (rename, emoji, category)" aria-label="Edit habit">✎</button>
             <button class="health-icon-btn" data-del-habit="${h.id}" title="Delete habit" aria-label="Delete habit">✕</button>
           </div>
-        </div>
+        </div>`;
+    return `
+      <div class="health-card health-habit" data-id="${h.id}">
+        ${head}
         ${_heatmapSVG(hm.days)}
       </div>`;
   }));
@@ -196,6 +208,31 @@ async function _renderHabits() {
     if (!await uiModule.styledConfirm('Delete this habit and its history?', { confirmText: 'Delete', danger: true })) return;
     try { await _api(`/habits/${btn.dataset.delHabit}`, { method: 'DELETE' }); _renderHabits(); }
     catch (err) { uiModule.showError?.(err.message); }
+  }));
+  // Inline edit (rename / emoji / category) — mirrors the add-habit form.
+  b.querySelectorAll('[data-edit-habit]').forEach((btn) => btn.addEventListener('click', () => {
+    _editingHabits.add(String(btn.dataset.editHabit));
+    _renderHabits();
+  }));
+  b.querySelectorAll('[data-cancel-edit]').forEach((btn) => btn.addEventListener('click', () => {
+    _editingHabits.delete(String(btn.dataset.cancelEdit));
+    _renderHabits();
+  }));
+  b.querySelectorAll('[data-edit-form]').forEach((form) => form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const id = form.dataset.editForm;
+    const fd = new FormData(form);
+    const name = (fd.get('name') || '').toString().trim();
+    if (!name) return;
+    try {
+      await _api(`/habits/${id}`, { method: 'PUT', body: JSON.stringify({
+        name,
+        icon: (fd.get('icon') || '').toString().trim(),
+        category: (fd.get('category') || '').toString().trim(),
+      }) });
+      _editingHabits.delete(String(id));
+      _renderHabits();
+    } catch (err) { uiModule.showError?.(err.message); }
   }));
 }
 

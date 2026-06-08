@@ -67,6 +67,11 @@ ALWAYS_AVAILABLE = frozenset({
     # Reading state is also durable vault context; keep it reachable for
     # "what was I reading?" and book/PDF follow-ups.
     "manage_books",
+    # The native habit/health tracker is a first-class, frequently-used feature
+    # (its own panel + DB). Keep it always reachable so "add a habit", "rename
+    # my habit / give it an emoji", "log my lunch", "did I work out" never miss
+    # the tool and wrongly fall back to a checklist note or a vault search.
+    "manage_health",
     # Ask the user a multiple-choice question for a decision/clarification.
     # Always reachable so the agent can pause and ask at any point.
     "ask_user",
@@ -149,9 +154,9 @@ BUILTIN_TOOL_DESCRIPTIONS: Dict[str, str] = {
     "bulk_email": "Perform one action on many emails at once. Use for delete all those, archive these, mark all read, move spam to junk. Takes explicit UIDs from list_emails or all_unread=true. Always pass account for Gmail/work/custom mailbox results.",
     "resolve_contact": "Look up a contact's email address by name. Searches CardDAV address book and sent email history. Use when the user says 'message [name]', 'email [name]', or 'send to [name]' without an email address.",
     "manage_contact": "Create, update, delete, or list CardDAV contacts. Use to save a new contact, change an existing one's email/phone, or remove one. Action=list returns uids needed for update/delete. Use when the user says 'save this contact', 'add [name] to contacts', 'update [name]'s email', 'delete [name] from contacts'. Do not use for user identity facts like 'my name is <name>'; those are memory.",
-    "manage_notes": "Create and manage notes and checklists (Google Keep-style). ALWAYS use this for note/todo/checklist/reminder creation — NEVER hit /api/notes via app_api. Accepts natural-language `due_date` like 'tomorrow at 9am' or '11pm today' (parsed in the USER'S timezone). The due_date IS the reminder — it fires a notification at that time, so do NOT also create a calendar event for the same reminder. Set colors, labels, pin, archive. Do NOT use manage_memory for note content.",
+    "manage_notes": "Create and manage notes and checklists (Google Keep-style). ALWAYS use this for note/todo/checklist/reminder creation — NEVER hit /api/notes via app_api. BUT a recurring HABIT (one with streaks/a heatmap, e.g. 'add a habit', 'track meditation daily', 'rename my habit') is NOT a checklist — use manage_health for the habit tracker, not a note. Accepts natural-language `due_date` like 'tomorrow at 9am' or '11pm today' (parsed in the USER'S timezone). The due_date IS the reminder — it fires a notification at that time, so do NOT also create a calendar event for the same reminder. Set colors, labels, pin, archive. Do NOT use manage_memory for note content.",
     "manage_calendar": "Calendar event management: list, create, update, delete. Each event can carry a tag/category (event_type — work/personal/health/travel/meal/social/admin/other) and importance (low/normal/high/critical). For relative dates like today/tomorrow, prefer passing natural language directly, e.g. dtstart='today 9:00'; the tool resolves it in the user's timezone. ISO datetimes are accepted only when they match the Current date/time context and are in the user's local wall time. Supports all-day events. For event reminders/alarms, pass reminder_minutes; this creates the Notes reminder, so do not also call manage_notes for the same reminder.",
-    "manage_health": "Create, log and query the user's health, habits, and training (same data the Health panel shows). Use for 'start a meditation habit' (create_habit), 'mark meditation done' (check_habit), 'log my lunch ~600 kcal' (log_meal), 'I weigh 72kg' (log_weight), 'set my height/calorie goal' (set_profile), 'calories today', 'weight progress'. Actions: create_habit, check_habit, list_habits, habit_heatmap, log_meal, log_weight, log_training, calories, weight_trend, set_profile, summary.",
+    "manage_health": "The user's HABIT TRACKER and health/training log (same data the Health panel shows; backed by the app database — NOT a checklist note and NOT a vault/Obsidian file). Use for the habit tracker and anything health: 'start/add a habit' (create_habit), 'rename a habit / give a habit an emoji or icon / change its category or color' (update_habit), 'delete a habit' (delete_habit), 'mark a habit done' (check_habit), 'list my habits / streaks' (list_habits), habit_heatmap, 'log my lunch ~600 kcal' (log_meal), 'I weigh 72kg' (log_weight), 'log a workout' (log_training), 'set my height/calorie goal' (set_profile), 'calories today', 'weight progress'. Actions: create_habit, update_habit, delete_habit, check_habit, list_habits, habit_heatmap, log_meal, log_weight, log_training, calories, weight_trend, set_profile, summary.",
     "download_model": "Download a HuggingFace model to a local or remote server. Specify repo_id (e.g. 'Qwen/Qwen3-8B'), optional server host, and optional include filter for specific files.",
     "serve_model": "Start serving a model with vLLM, SGLang, llama.cpp, Ollama, or Diffusers. cmd MUST start with the binary directly — e.g. `vllm serve /mnt/HADES/models/Qwen3.5-397B-A17B-AWQ --port 8003 --tensor-parallel-size 8 …`. NEVER prefix with `cd …`, `source …`, or chain with `&&`/`||` — those get rejected by the validator. The venv activation (env_prefix) and CUDA env are added automatically from the target host's saved settings. For image/inpainting/diffusion use python3 scripts/diffusion_server.py --model <repo> --port 8100. After launch, call list_served_models for readiness/errors and retry suggestions. If serve_model fails with 'Invalid characters in cmd', simplify to the bare binary + args.",
     "list_served_models": "List currently running model servers in the Cookbook — shows status (loading, ready, idle, error), model name, port, throughput, and serve failure diagnosis/retry suggestions. Use when the user asks 'what's running', 'show my cookbook', 'which models are up', 'what's serving'.",
@@ -380,6 +385,16 @@ class ToolIndex:
             {"manage_calendar"},
         frozenset({"note", "todo", "reminder", "remind", "checklist", "remember to"}):
             {"manage_notes"},
+        # Habit tracker + health/nutrition/training. Without this, "add a habit",
+        # "rename my habit", "give it an emoji", "log my lunch" missed
+        # manage_health (RAG ranked manage_notes higher) and the agent made a
+        # checklist note or searched the vault instead (#habit-tracker).
+        frozenset({"habit", "habits", "habit tracker", "streak", "streaks",
+                   "heatmap", "track a habit", "daily habit", "build a habit",
+                   "health", "weight", "weigh", "calorie", "calories", "kcal",
+                   "meal", "nutrition", "macros", "protein", "workout",
+                   "training", "exercise", "tdee", "bmr"}):
+            {"manage_health"},
         frozenset({"book", "books", "ebook", "ebooks", "epub", "pdf", "reader",
                    "e-reader", "ereader", "chapter", "page", "reading progress",
                    "what i read", "where i stopped"}):

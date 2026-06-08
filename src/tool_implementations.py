@@ -1886,8 +1886,10 @@ async def do_manage_health(content: str, owner: Optional[str] = None) -> Dict:
 
     Backed by src/health_store.py (the same store the Health panel UI uses), so
     anything logged here shows up in the UI for the same user and vice versa.
-    Actions: create_habit, check_habit, list_habits, habit_heatmap, log_meal,
-    log_weight, log_training, calories, weight_trend, set_profile, summary.
+    Actions: create_habit, update_habit (rename / set emoji-icon / category /
+    color / cadence on an existing habit), delete_habit, check_habit,
+    list_habits, habit_heatmap, log_meal, log_weight, log_training, calories,
+    weight_trend, set_profile, summary.
     """
     from src import health_store as hs
 
@@ -1903,6 +1905,9 @@ async def do_manage_health(content: str, owner: Optional[str] = None) -> Dict:
         "training": "log_training", "workout": "log_training", "log_workout": "log_training",
         "habit": "check_habit", "mark_habit": "check_habit", "complete_habit": "check_habit",
         "add_habit": "create_habit", "new_habit": "create_habit", "make_habit": "create_habit",
+        "rename_habit": "update_habit", "edit_habit": "update_habit", "change_habit": "update_habit",
+        "set_habit": "update_habit", "set_emoji": "update_habit", "set_icon": "update_habit",
+        "delete_habit": "delete_habit", "remove_habit": "delete_habit", "archive_habit": "delete_habit",
         "habits": "list_habits",
         "daily_calories": "calories", "kcal": "calories",
         "weight_progress": "weight_trend",
@@ -1974,6 +1979,42 @@ async def do_manage_health(content: str, owner: Optional[str] = None) -> Dict:
                 return {"error": str(e), "exit_code": 1}
             return {"output": f"Created habit “{habit['name']}”.", "habit": habit, "exit_code": 0}
 
+        if action == "update_habit":
+            # Rename and/or restyle an EXISTING habit (emoji, category, color,
+            # cadence). Target: prefer an explicit habit/habit_id; if only
+            # 'name' is given it identifies the target — unless a new_name was
+            # also passed, in which case 'name' is treated as the new name.
+            target_ref = args.get("habit") if args.get("habit") is not None else args.get("habit_id")
+            rename_to = args.get("new_name") or args.get("rename_to") or args.get("rename")
+            if target_ref is None:
+                target_ref = args.get("name")
+            else:
+                rename_to = rename_to or args.get("name")
+            hid = _resolve_habit_id(target_ref)
+            if hid is None:
+                return {"error": "Unknown habit. Pass the existing habit name or id, plus new_name and/or icon/category/color/cadence to change.", "exit_code": 1}
+            fields: Dict[str, Any] = {}
+            if rename_to:
+                fields["name"] = str(rename_to).strip()
+            for k in ("icon", "category", "cadence", "color", "target_time", "description"):
+                v = args.get(k)
+                if v is not None:
+                    fields[k] = v.strip() if isinstance(v, str) else v
+            if not fields:
+                return {"error": "Nothing to change. Pass new_name and/or icon (emoji), category, color, cadence.", "exit_code": 1}
+            habit = hs.update_habit(ow, hid, **fields)
+            if habit is None:
+                return {"error": "Habit not found", "exit_code": 1}
+            changed = ", ".join(f"{k}→{v!r}" for k, v in fields.items())
+            return {"output": f"Updated habit “{habit['name']}” ({changed}).", "habit": habit, "exit_code": 0}
+
+        if action == "delete_habit":
+            hid = _resolve_habit_id(args.get("habit") or args.get("habit_id") or args.get("name"))
+            if hid is None:
+                return {"error": "Unknown habit. Pass an existing habit name or id to delete.", "exit_code": 1}
+            ok = hs.delete_habit(ow, hid)
+            return {"output": "Habit deleted." if ok else "Habit not found.", "deleted": ok, "exit_code": 0 if ok else 1}
+
         if action == "check_habit":
             hid = _resolve_habit_id(args.get("habit") or args.get("habit_id") or args.get("name"))
             if hid is None:
@@ -2028,7 +2069,7 @@ async def do_manage_health(content: str, owner: Optional[str] = None) -> Dict:
                 "exit_code": 0,
             }
 
-        return {"error": f"Unknown action '{action}'. Use create_habit, check_habit, list_habits, habit_heatmap, log_meal, log_weight, log_training, calories, weight_trend, set_profile, or summary.", "exit_code": 1}
+        return {"error": f"Unknown action '{action}'. Use create_habit, update_habit, delete_habit, check_habit, list_habits, habit_heatmap, log_meal, log_weight, log_training, calories, weight_trend, set_profile, or summary.", "exit_code": 1}
     except ValueError as e:
         return {"error": str(e), "exit_code": 1}
     except Exception as e:

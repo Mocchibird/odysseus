@@ -2000,7 +2000,14 @@ export function addMessage(role, content, modelName, metadata) {
           roleEl.className = 'role';
           const pair = replyModelPair(modelName, metadata);
           const contModel = pair.actualModel || pair.requestedModel;
-          roleEl.textContent = modelRouteLabel(pair.requestedModel, contModel);
+          // Match the standard single-bubble path: prefer the persona/character
+          // name (e.g. "Iris") or the group model, falling back to the model
+          // route label. Without this, agent/tool-using replies showed the raw
+          // model id ("gemma… -> gemma…") while plain replies showed "Iris".
+          let _agentRole = modelRouteLabel(pair.requestedModel, contModel);
+          if (metadata?.group_model) _agentRole = metadata.group_model;
+          else if (metadata?.character_name) _agentRole = metadata.character_name;
+          roleEl.textContent = _agentRole;
           if (pair.requestedModel && contModel && !sameModelName(pair.requestedModel, contModel)) {
             roleEl.title = pair.requestedModel + ' -> ' + contModel;
           }
