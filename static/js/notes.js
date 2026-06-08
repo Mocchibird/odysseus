@@ -10,6 +10,7 @@ import { attachColorPicker } from './colorPicker.js';
 import { makeWindowDraggable } from './windowDrag.js';
 import { snapModalToZone } from './tileManager.js';
 import { applyEdgeDock, clearDockSide } from './modalSnap.js';
+import bookToolsModule from './bookTools.js';
 
 const API_BASE = window.location.origin;
 let _open = false;
@@ -3019,10 +3020,26 @@ function _renderVaultFiles() {
   });
 }
 
+function _wireBookTools(body, { supportsSelection } = {}) {
+  const root = body.querySelector('.notes-book-reader');
+  if (!root) return;
+  bookToolsModule.wire({
+    root,
+    contentEl: supportsSelection ? root.querySelector('.notes-book-content') : null,
+    book: _bookOpenBook,
+    supportsSelection: !!supportsSelection,
+    getChapterIndex: () => _bookChapterIndex || 0,
+    getChapterTitle: () => _currentBookChapter()?.title || '',
+    getScrollPercent: () => { try { return _bookChapterScrollPercent(); } catch (_) { return 0; } },
+    gotoChapter: (i) => _setBookChapter(i),
+  });
+}
+
 function _renderBookReader(body, baseHtml) {
   // Tear down any live PDF.js reader before we rebuild the DOM (mode toggle,
   // chapter jump, re-render). The PDF branch below recreates it when needed.
   _destroyBookPdfReader();
+  bookToolsModule.cleanup();
   const book = _bookOpenBook;
   const chapters = book?.chapters || [];
   const chapter = _currentBookChapter();
@@ -3074,6 +3091,7 @@ function _renderBookReader(body, baseHtml) {
           <button type="button" class="notes-select-trigger notes-book-prev" ${idx <= 0 ? 'disabled' : ''}>Prev</button>
           <select class="notes-select-trigger notes-book-select" aria-label="Jump to page">${options}</select>
           <button type="button" class="notes-select-trigger notes-book-next" ${idx >= chapters.length - 1 ? 'disabled' : ''}>Next</button>
+          ${bookToolsModule.toolbarHtml()}
         </div>
       </div>
       <div class="notes-book-pdf-viewer">
@@ -3086,6 +3104,7 @@ function _renderBookReader(body, baseHtml) {
         document.removeEventListener('keydown', _bookKeyHandler);
         _bookKeyHandler = null;
       }
+      bookToolsModule.cleanup();
       _bookOpenBook = null;
       _renderNotes();
     });
@@ -3104,6 +3123,7 @@ function _renderBookReader(body, baseHtml) {
     body.querySelector('.notes-book-prev')?.addEventListener('click', () => _setBookChapter(idx - 1));
     body.querySelector('.notes-book-next')?.addEventListener('click', () => _setBookChapter(idx + 1));
     body.querySelector('.notes-book-select')?.addEventListener('change', (e) => _setBookChapter(e.target.value));
+    _wireBookTools(body, { supportsSelection: false });
     return;
   }
   body.innerHTML = baseHtml + `<div class="notes-book-reader notes-book-reader-${_attrEsc(_bookReadMode)}">
@@ -3126,6 +3146,7 @@ function _renderBookReader(body, baseHtml) {
         <select class="notes-select-trigger notes-book-select">${options}</select>
         <button type="button" class="notes-select-trigger notes-book-next" ${idx >= chapters.length - 1 ? 'disabled' : ''}>Next</button>
         ${readerModeToggleHtml}
+        ${bookToolsModule.toolbarHtml()}
       </div>
     </div>
     <article class="notes-book-content notes-book-content-${_attrEsc(_bookReadMode)}${continuousScroll ? ' notes-book-content-continuous' : ''}">
@@ -3139,6 +3160,7 @@ function _renderBookReader(body, baseHtml) {
       document.removeEventListener('keydown', _bookKeyHandler);
       _bookKeyHandler = null;
     }
+    bookToolsModule.cleanup();
     _bookOpenBook = null;
     _renderNotes();
   });
@@ -3210,6 +3232,7 @@ function _renderBookReader(body, baseHtml) {
       _turnBookPage(dx < 0 ? 1 : -1);
     }, { passive: true });
   }
+  _wireBookTools(body, { supportsSelection: true });
 }
 
 function _renderBooksFiles() {
@@ -3251,7 +3274,11 @@ function _renderBooksFiles() {
       ? `${kind === 'pdf' ? 'page' : 'chapter'} ${Number(progress.chapter_index || 0) + 1}`
       : 'not started';
     const title = book.title || _vaultBasename(book.path || 'Book');
+    const coverImg = kind === 'epub'
+      ? `<img class="notes-book-cover-img" alt="" loading="lazy" data-cover="${_attrEsc(book.path || '')}" />`
+      : '';
     html += `<div class="notes-vault-file notes-book-file notes-vault-kind-${_attrEsc(kind)}" data-path="${_attrEsc(book.path || '')}" data-title="${_attrEsc(title)}" title="${_attrEsc(book.path || '')}" role="button" tabindex="0">
+      <span class="notes-book-cover${kind === 'epub' ? '' : ' no-cover'}"><span class="notes-book-cover-fallback">${_esc((book.kind || kind).toUpperCase())}</span>${coverImg}</span>
       <span class="notes-book-row-main">
         <span class="notes-book-row-top">
           <span class="notes-book-kind-pill">${_esc((book.kind || kind).toUpperCase())}</span>
@@ -3267,6 +3294,13 @@ function _renderBooksFiles() {
   }
   html += '</div>';
   body.innerHTML = html;
+  // Lazy-load EPUB covers; on 404/error fall back to the generic cover tile.
+  // src is set in JS (after attaching the error handler) so the fallback is reliable.
+  body.querySelectorAll('.notes-book-cover-img').forEach(img => {
+    img.addEventListener('error', () => img.closest('.notes-book-cover')?.classList.add('no-cover'));
+    img.addEventListener('load', () => img.closest('.notes-book-cover')?.classList.add('has-cover'));
+    img.src = `${API_BASE}/api/books/cover?path=${encodeURIComponent(img.dataset.cover || '')}`;
+  });
   body.querySelectorAll('.notes-book-title-edit').forEach(btn => {
     btn.addEventListener('click', async (e) => {
       e.preventDefault();
