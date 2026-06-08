@@ -38084,6 +38084,9 @@ body.theme-frosted .modal {
 .health-progress span { display: block; height: 100%; background: var(--green, #50fa7b); transition: width 0.25s ease; }
 .health-progress span.over { background: var(--warn, #f0ad4e); }
 .health-macros { display: flex; gap: 14px; font-size: 12px; opacity: 0.75; margin-bottom: 8px; }
+.health-macros-extra { margin: -2px 0 8px; }
+.health-macros-extra summary { cursor: pointer; font-size: 12px; padding: 2px 0; list-style-position: inside; }
+.health-macros-extra summary:hover { color: var(--fg); }
 /* Macro rings */
 .health-rings { display: flex; gap: 18px; justify-content: center; margin: 6px 0 10px; flex-wrap: wrap; }
 .health-ring { display: flex; flex-direction: column; align-items: center; gap: 4px; }

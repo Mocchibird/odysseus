@@ -719,6 +719,44 @@ def _migrate_add_last_message_at_column():
     except Exception as e:
         logging.getLogger(__name__).warning(f"last_message_at migration failed: {e}")
 
+def _migrate_add_meal_sugar_column():
+    """Add `sugar_g` to meals (optional nutrition field). Guarded + idempotent."""
+    import sqlite3
+    db_path = DATABASE_URL.replace("sqlite:///", "")
+    if not os.path.exists(db_path):
+        return
+    try:
+        conn = sqlite3.connect(db_path)
+        cursor = conn.execute("PRAGMA table_info(meals)")
+        columns = [row[1] for row in cursor.fetchall()]
+        if columns and "sugar_g" not in columns:
+            conn.execute("ALTER TABLE meals ADD COLUMN sugar_g FLOAT")
+            conn.commit()
+            logging.getLogger(__name__).info("Migrated: added 'sugar_g' to meals")
+        conn.close()
+    except Exception as e:
+        logging.getLogger(__name__).warning(f"meals.sugar_g migration failed: {e}")
+
+
+def _migrate_add_training_kcal_burned_column():
+    """Add `kcal_burned` to training_sessions. Guarded + idempotent."""
+    import sqlite3
+    db_path = DATABASE_URL.replace("sqlite:///", "")
+    if not os.path.exists(db_path):
+        return
+    try:
+        conn = sqlite3.connect(db_path)
+        cursor = conn.execute("PRAGMA table_info(training_sessions)")
+        columns = [row[1] for row in cursor.fetchall()]
+        if columns and "kcal_burned" not in columns:
+            conn.execute("ALTER TABLE training_sessions ADD COLUMN kcal_burned INTEGER")
+            conn.commit()
+            logging.getLogger(__name__).info("Migrated: added 'kcal_burned' to training_sessions")
+        conn.close()
+    except Exception as e:
+        logging.getLogger(__name__).warning(f"training_sessions.kcal_burned migration failed: {e}")
+
+
 def _migrate_add_document_archived_column():
     """Add `archived` to documents (soft-archive flag). Guarded + idempotent."""
     import sqlite3
@@ -1661,6 +1699,7 @@ class Meal(TimestampMixin, Base):
     protein_g   = Column(Float, nullable=True)
     carbs_g     = Column(Float, nullable=True)
     fat_g       = Column(Float, nullable=True)
+    sugar_g     = Column(Float, nullable=True)
     source      = Column(String, default="manual")
     notes       = Column(Text, default="")
 
@@ -1702,6 +1741,7 @@ class TrainingSession(TimestampMixin, Base):
     kind         = Column(String, default="")
     duration_min = Column(Integer, nullable=True)
     rpe          = Column(Integer, nullable=True)               # 1-10
+    kcal_burned  = Column(Integer, nullable=True)               # estimated calories burned
     summary      = Column(Text, default="")
 
 
@@ -1773,6 +1813,8 @@ def init_db():
     _migrate_add_calendar_is_utc()
     _migrate_add_calendar_origin()
     _migrate_add_calendar_account_id()
+    _migrate_add_meal_sugar_column()
+    _migrate_add_training_kcal_burned_column()
     _migrate_chat_messages_fts()
     _migrate_encrypt_email_passwords()
     _migrate_encrypt_signatures()

@@ -167,7 +167,7 @@ def setup_health_routes():
         body = await request.json()
         meal = hs.log_meal(
             owner, body.get("description", ""), body.get("kcal", 0),
-            **{k: body.get(k) for k in ("eaten_at", "protein_g", "carbs_g", "fat_g", "source", "notes")},
+            **{k: body.get(k) for k in ("eaten_at", "protein_g", "carbs_g", "fat_g", "sugar_g", "source", "notes")},
         )
         return {"ok": True, "meal": meal}
 
@@ -225,7 +225,7 @@ def setup_health_routes():
         owner = _owner(request)
         body = await request.json()
         session = hs.log_training(owner, body.get("kind", ""), **{
-            k: body.get(k) for k in ("session_at", "duration_min", "rpe", "summary")
+            k: body.get(k) for k in ("session_at", "duration_min", "rpe", "kcal_burned", "summary")
         })
         return {"ok": True, "session": session}
 

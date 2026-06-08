@@ -1931,7 +1931,8 @@ async def do_manage_health(content: str, owner: Optional[str] = None) -> Dict:
             meal = hs.log_meal(
                 ow, desc, args.get("kcal") or args.get("calories") or 0,
                 protein_g=args.get("protein_g"), carbs_g=args.get("carbs_g"),
-                fat_g=args.get("fat_g"), notes=args.get("notes") or "", source="agent",
+                fat_g=args.get("fat_g"), sugar_g=args.get("sugar_g"),
+                notes=args.get("notes") or "", source="agent",
             )
             day = hs.daily_calories(ow)
             tgt = f" (today: {day['total_kcal']} kcal{', target ' + str(day['target_kcal']) if day.get('target_kcal') else ''})"
@@ -1951,9 +1952,12 @@ async def do_manage_health(content: str, owner: Optional[str] = None) -> Dict:
             kind = str(args.get("kind") or args.get("type") or "").strip()
             sess = hs.log_training(
                 ow, kind, duration_min=args.get("duration_min"),
-                rpe=args.get("rpe"), summary=args.get("summary") or "",
+                rpe=args.get("rpe"), kcal_burned=args.get("kcal_burned") or args.get("calories_burned"),
+                summary=args.get("summary") or "",
             )
-            return {"output": f"Logged training: {kind or 'session'}.", "session": sess, "exit_code": 0}
+            burned = sess.get("kcal_burned")
+            extra = f" (~{burned} kcal burned)" if burned else ""
+            return {"output": f"Logged training: {kind or 'session'}{extra}.", "session": sess, "exit_code": 0}
 
         if action == "create_habit":
             name = str(args.get("name") or args.get("habit") or "").strip()

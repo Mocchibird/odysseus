@@ -255,16 +255,20 @@ async function _renderCalories() {
     ]);
   } catch (e) { b.innerHTML = `<div class="health-error">${esc(e.message)}</div>`; return; }
   const target = day.target_kcal;
-  const pct = target ? Math.min(100, Math.round((day.total_kcal / target) * 100)) : null;
+  // Exercise earns back part of the burn (TRAINING_BURN_CREDIT, default 50%);
+  // the budget the user eats against is the adjusted target.
+  const adjTarget = day.adjusted_target_kcal || target;
+  const pct = adjTarget ? Math.min(100, Math.round((day.total_kcal / adjTarget) * 100)) : null;
   const meals = day.meals || [];
   const p = profile.profile || {};
   b.innerHTML = `
     <div class="health-card">
       <div class="health-card-head"><strong>Today</strong>
         <span class="health-big">${day.total_kcal} <span class="health-unit">kcal</span></span>
-        ${target ? `<span class="health-chip">${day.remaining_kcal >= 0 ? day.remaining_kcal + ' left' : Math.abs(day.remaining_kcal) + ' over'} · target ${target}</span>` : '<span class="health-chip">set a goal in Profile for a target</span>'}
+        ${adjTarget ? `<span class="health-chip">${day.remaining_kcal >= 0 ? day.remaining_kcal + ' left' : Math.abs(day.remaining_kcal) + ' over'} · target ${adjTarget}${day.burn_credit ? ` (+${day.burn_credit} 🏃)` : ''}</span>` : '<span class="health-chip">set a goal in Profile for a target</span>'}
       </div>
-      ${target ? `<div class="health-progress"><span style="width:${pct}%" class="${day.total_kcal > target ? 'over' : ''}"></span></div>` : ''}
+      ${day.kcal_burned ? `<div class="health-muted" style="margin:-2px 0 6px;font-size:12px">🔥 ${day.kcal_burned} kcal burned in training · ${day.burn_credit} credited back to today's budget</div>` : ''}
+      ${adjTarget ? `<div class="health-progress"><span style="width:${pct}%" class="${day.total_kcal > adjTarget ? 'over' : ''}"></span></div>` : ''}
       ${day.macro_targets
         ? `<div class="health-rings">
              ${_ringSVG(day.protein_g || 0, day.macro_targets.protein_g, 'Protein', '--green, #50fa7b')}
@@ -272,12 +276,22 @@ async function _renderCalories() {
              ${_ringSVG(day.fat_g || 0, day.macro_targets.fat_g, 'Fat', '--warn, #f0ad4e')}
            </div>`
         : `<div class="health-macros"><span>P ${day.protein_g || 0}g</span><span>C ${day.carbs_g || 0}g</span><span>F ${day.fat_g || 0}g</span></div>`}
+      ${day.sugar_g ? `<div class="health-macros"><span>Sugar ${day.sugar_g}g</span></div>` : ''}
       <form class="health-inline-form health-meal-form" id="health-log-meal">
-        <input name="description" class="health-input" placeholder="Meal" required>
+        <input name="description" class="health-input" placeholder="Meal (optional)">
         <input name="kcal" type="number" class="health-input health-input-sm" placeholder="kcal" required>
         <button class="health-btn" type="submit">Add</button>
         <label class="health-btn-sub" style="cursor:pointer;padding:6px 10px;" title="Estimate from a photo">📷<input id="health-meal-photo" type="file" accept="image/*" capture="environment" style="display:none"></label>
       </form>
+      <details class="health-macros-extra">
+        <summary class="health-muted">+ macros (optional)</summary>
+        <div class="health-inline-form" style="margin-top:6px">
+          <input name="protein_g" type="number" step="0.1" min="0" class="health-input health-input-sm" placeholder="protein g" form="health-log-meal">
+          <input name="carbs_g" type="number" step="0.1" min="0" class="health-input health-input-sm" placeholder="carbs g" form="health-log-meal">
+          <input name="fat_g" type="number" step="0.1" min="0" class="health-input health-input-sm" placeholder="fat g" form="health-log-meal">
+          <input name="sugar_g" type="number" step="0.1" min="0" class="health-input health-input-sm" placeholder="sugar g" form="health-log-meal">
+        </div>
+      </details>
       <div id="health-meal-est-note" class="health-muted" style="display:none;margin:-2px 0 8px;"></div>
       <div class="health-list">${meals.length ? meals.map((m) => `<div class="health-row"><span>${esc(m.description)}</span><span>${m.kcal} kcal <button class="health-icon-btn" data-del-meal="${m.id}" aria-label="Delete">✕</button></span></div>`).join('') : '<div class="health-empty">No meals logged today.</div>'}</div>
     </div>
@@ -314,8 +328,12 @@ async function _renderCalories() {
     const fd = new FormData(e.target);
     const description = (fd.get('description') || '').toString().trim();
     const kcal = parseInt(fd.get('kcal'), 10);
-    if (!description || !Number.isFinite(kcal)) return;
-    const payload = { description, kcal };
+    if (!Number.isFinite(kcal)) return;  // description is optional, kcal is the core value
+    const payload = { description: description || 'Meal', kcal };
+    ['protein_g', 'carbs_g', 'fat_g', 'sugar_g'].forEach((k) => {
+      const v = parseFloat(fd.get(k));
+      if (Number.isFinite(v)) payload[k] = v;
+    });
     if (_pendingMacros) Object.assign(payload, _pendingMacros, { source: 'photo' });
     try { await _api('/meals', { method: 'POST', body: JSON.stringify(payload) }); _renderCalories(); }
     catch (err) { uiModule.showError?.(err.message); }
@@ -337,7 +355,7 @@ async function _renderCalories() {
       if (descIn) descIn.value = est.description || '';
       if (kcalIn) kcalIn.value = est.kcal || '';
       _pendingMacros = {};
-      ['protein_g', 'carbs_g', 'fat_g'].forEach((k) => { if (est[k] != null) _pendingMacros[k] = est[k]; });
+      ['protein_g', 'carbs_g', 'fat_g', 'sugar_g'].forEach((k) => { if (est[k] != null) _pendingMacros[k] = est[k]; });
       if (note) note.textContent = `Estimated: ${est.kcal || 0} kcal${est.protein_g != null ? ` · P${Math.round(est.protein_g)} C${Math.round(est.carbs_g || 0)} F${Math.round(est.fat_g || 0)}` : ''} — review and press Add.`;
     } catch (err) {
       if (note) note.textContent = `Couldn’t estimate: ${err.message}`;
@@ -397,12 +415,13 @@ async function _renderTraining() {
         <input name="kind" class="health-input" placeholder="Type (Strength, Run…)" required>
         <input name="duration_min" type="number" class="health-input health-input-sm" placeholder="min">
         <input name="rpe" type="number" min="1" max="10" class="health-input health-input-sm" placeholder="RPE">
+        <input name="kcal_burned" type="number" min="0" class="health-input health-input-sm" placeholder="kcal 🔥">
         <button class="health-btn" type="submit">Log</button>
       </form>
       <input name="summary" id="health-train-summary" class="health-input" placeholder="Notes (optional)" form="health-log-train" style="margin-top:6px">
     </div>
     <div class="health-card"><div class="health-card-head"><strong>Recent sessions</strong></div>
-      <div class="health-list">${sessions.length ? sessions.map((s) => `<div class="health-row"><span>${(s.session_at || '').slice(0, 10)} · ${esc(s.kind || 'Session')}${s.duration_min ? ' · ' + s.duration_min + 'm' : ''}${s.rpe ? ' · RPE ' + s.rpe : ''}${s.summary ? ' — ' + esc(s.summary) : ''}</span><button class="health-icon-btn" data-del-train="${s.id}" aria-label="Delete">✕</button></div>`).join('') : '<div class="health-empty">No sessions logged.</div>'}</div>
+      <div class="health-list">${sessions.length ? sessions.map((s) => `<div class="health-row"><span>${(s.session_at || '').slice(0, 10)} · ${esc(s.kind || 'Session')}${s.duration_min ? ' · ' + s.duration_min + 'm' : ''}${s.rpe ? ' · RPE ' + s.rpe : ''}${s.kcal_burned ? ' · 🔥' + s.kcal_burned : ''}${s.summary ? ' — ' + esc(s.summary) : ''}</span><button class="health-icon-btn" data-del-train="${s.id}" aria-label="Delete">✕</button></div>`).join('') : '<div class="health-empty">No sessions logged.</div>'}</div>
     </div>`;
   b.querySelector('#health-log-train')?.addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -411,7 +430,7 @@ async function _renderTraining() {
     if (!kind) return;
     const num = (k) => { const v = fd.get(k); return v ? Number(v) : null; };
     try {
-      await _api('/training', { method: 'POST', body: JSON.stringify({ kind, duration_min: num('duration_min'), rpe: num('rpe'), summary: (document.getElementById('health-train-summary')?.value || '').trim() }) });
+      await _api('/training', { method: 'POST', body: JSON.stringify({ kind, duration_min: num('duration_min'), rpe: num('rpe'), kcal_burned: num('kcal_burned'), summary: (document.getElementById('health-train-summary')?.value || '').trim() }) });
       _renderTraining();
     } catch (err) { uiModule.showError?.(err.message); }
   });

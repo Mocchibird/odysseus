@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import csv
 import io
+import os
 from contextlib import contextmanager
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
@@ -278,6 +279,7 @@ def _meal_dict(m: Meal) -> Dict[str, Any]:
         "protein_g": m.protein_g,
         "carbs_g": m.carbs_g,
         "fat_g": m.fat_g,
+        "sugar_g": m.sugar_g,
         "source": m.source or "manual",
         "notes": m.notes or "",
     }
@@ -294,6 +296,7 @@ def log_meal(owner: str, description: str, kcal: int, **fields) -> Dict[str, Any
             protein_g=fields.get("protein_g"),
             carbs_g=fields.get("carbs_g"),
             fat_g=fields.get("fat_g"),
+            sugar_g=fields.get("sugar_g"),
             source=fields.get("source") or "manual",
             notes=(fields.get("notes") or "").strip(),
         )
@@ -336,6 +339,27 @@ def macro_targets(target_kcal: Optional[int]) -> Optional[Dict[str, int]]:
     }
 
 
+# Fraction of calories burned in training that's credited back to the day's
+# eating budget. Exercise earns you some extra intake, but not 1:1 (burn
+# estimates run high), so the default is half.
+TRAINING_BURN_CREDIT = float(os.getenv("ODYSSEUS_TRAINING_BURN_CREDIT", "0.5") or 0.5)
+
+
+def _training_burn_for_day(owner: str, day: str) -> int:
+    """Sum estimated calories burned across the day's training sessions."""
+    with _session() as db:
+        rows = (
+            db.query(TrainingSession.kcal_burned)
+            .filter(
+                TrainingSession.owner == owner,
+                TrainingSession.session_at >= day,
+                TrainingSession.session_at < day + "T99",
+            )
+            .all()
+        )
+    return sum(int(r[0] or 0) for r in rows)
+
+
 def daily_calories(owner: str, day: Optional[str] = None) -> Dict[str, Any]:
     owner = _owner(owner)
     day = _today(day)
@@ -343,6 +367,10 @@ def daily_calories(owner: str, day: Optional[str] = None) -> Dict[str, Any]:
     total = sum(int(m["kcal"] or 0) for m in meals)
     macro = lambda k: round(sum(float(m[k] or 0) for m in meals), 1)  # noqa: E731
     target = tdee(owner).get("target_kcal")
+    # Credit part of today's exercise burn back to the eating budget.
+    burned = _training_burn_for_day(owner, day)
+    burn_credit = round(burned * TRAINING_BURN_CREDIT)
+    adjusted_target = (target + burn_credit) if target else None
     return {
         "day": day,
         "total_kcal": total,
@@ -350,8 +378,13 @@ def daily_calories(owner: str, day: Optional[str] = None) -> Dict[str, Any]:
         "protein_g": macro("protein_g"),
         "carbs_g": macro("carbs_g"),
         "fat_g": macro("fat_g"),
+        "sugar_g": macro("sugar_g"),
         "target_kcal": target,
-        "remaining_kcal": (target - total) if target else None,
+        "kcal_burned": burned,
+        "burn_credit": burn_credit,
+        "burn_credit_ratio": TRAINING_BURN_CREDIT,
+        "adjusted_target_kcal": adjusted_target,
+        "remaining_kcal": (adjusted_target - total) if adjusted_target else None,
         "macro_targets": macro_targets(target),
         "meals": meals,
     }
@@ -587,6 +620,7 @@ def _training_dict(t: TrainingSession) -> Dict[str, Any]:
         "kind": t.kind or "",
         "duration_min": t.duration_min,
         "rpe": t.rpe,
+        "kcal_burned": t.kcal_burned,
         "summary": t.summary or "",
     }
 
@@ -600,6 +634,7 @@ def log_training(owner: str, kind: str, **fields) -> Dict[str, Any]:
             kind=(kind or "").strip(),
             duration_min=fields.get("duration_min"),
             rpe=fields.get("rpe"),
+            kcal_burned=fields.get("kcal_burned"),
             summary=(fields.get("summary") or "").strip(),
         )
         db.add(t)
@@ -636,9 +671,9 @@ def delete_training(owner: str, session_id: int) -> bool:
 # ── CSV export / import ───────────────────────────────────────────────────────
 
 _CSV_FIELDS = {
-    "meals": ["eaten_at", "description", "kcal", "protein_g", "carbs_g", "fat_g", "notes"],
+    "meals": ["eaten_at", "description", "kcal", "protein_g", "carbs_g", "fat_g", "sugar_g", "notes"],
     "weights": ["measured_at", "kg", "notes"],
-    "training": ["session_at", "kind", "duration_min", "rpe", "summary"],
+    "training": ["session_at", "kind", "duration_min", "rpe", "kcal_burned", "summary"],
 }
 
 
@@ -690,7 +725,8 @@ def import_csv(owner: str, kind: str, text: str) -> int:
                     owner, desc, _i(row.get("kcal")) or 0,
                     eaten_at=(row.get("eaten_at") or "").strip() or None,
                     protein_g=_f(row.get("protein_g")), carbs_g=_f(row.get("carbs_g")),
-                    fat_g=_f(row.get("fat_g")), notes=(row.get("notes") or "").strip(), source="csv",
+                    fat_g=_f(row.get("fat_g")), sugar_g=_f(row.get("sugar_g")),
+                    notes=(row.get("notes") or "").strip(), source="csv",
                 )
             elif kind == "weights":
                 kg = _f(row.get("kg"))
@@ -704,6 +740,7 @@ def import_csv(owner: str, kind: str, text: str) -> int:
                     continue
                 log_training(owner, kind_v, session_at=(row.get("session_at") or "").strip() or None,
                              duration_min=_i(row.get("duration_min")), rpe=_i(row.get("rpe")),
+                             kcal_burned=_i(row.get("kcal_burned")),
                              summary=(row.get("summary") or "").strip())
             n += 1
         except Exception:
