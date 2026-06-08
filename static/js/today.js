@@ -5,7 +5,7 @@
  * Aggregates GET /api/today (events + reminders + habits, owner-scoped).
  */
 import uiModule from './ui.js';
-import { makeToolModalDraggable } from './modalFullscreen.js?v=367';
+import { makeToolModalDraggable } from './modalFullscreen.js?v=368';
 import * as Modals from './modalManager.js';
 
 const API_BASE = window.location.origin;
@@ -13,9 +13,7 @@ let _open = false;
 let _data = null;
 let _escHandler = null;
 
-const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => (
-  { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
-));
+const esc = uiModule.esc;  // reuse the canonical HTML-escape helper
 
 async function _api(path, opts = {}) {
   const res = await fetch(`${API_BASE}/api/today${path}`, {

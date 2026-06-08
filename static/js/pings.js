@@ -5,7 +5,7 @@
  * Consolidates the old scattered notifications into one place.
  */
 import uiModule from './ui.js';
-import { makeToolModalDraggable } from './modalFullscreen.js?v=367';
+import { makeToolModalDraggable } from './modalFullscreen.js?v=368';
 import { selectSession } from './sessions.js';
 import * as Modals from './modalManager.js';
 
@@ -14,9 +14,7 @@ let _open = false;
 let _unreadOnly = false;
 let _pings = [];
 
-const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => (
-  { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
-));
+const esc = uiModule.esc;  // reuse the canonical HTML-escape helper
 
 function _relTime(iso) {
   if (!iso) return '';

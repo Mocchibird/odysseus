@@ -10,7 +10,7 @@ import { attachColorPicker } from './colorPicker.js';
 import { makeWindowDraggable } from './windowDrag.js';
 import { snapModalToZone } from './tileManager.js';
 import { applyEdgeDock, clearDockSide } from './modalSnap.js';
-import bookToolsModule from './bookTools.js?v=367';
+import bookToolsModule from './bookTools.js?v=368';
 
 const API_BASE = window.location.origin;
 let _open = false;
@@ -2039,7 +2039,7 @@ export function openPanel() {
   const vaultDailyBtn = document.getElementById('notes-vault-daily');
   if (vaultDailyBtn) {
     vaultDailyBtn.addEventListener('click', async () => {
-      const text = (window.prompt('Quick-capture to today’s daily note:') || '').trim();
+      const text = ((await uiModule.styledPrompt('Quick-capture to today’s daily note', { title: 'Daily note', placeholder: 'What\'s on your mind?', confirmText: 'Add', maxLength: 500 })) || '').trim();
       if (!text) return;
       try {
         const res = await fetch(`${API_BASE}/api/iris-vault/daily-note`, {
@@ -3038,7 +3038,7 @@ async function _vaultMoveTo(source, target) {
 
 async function _vaultRenameFile(path) {
   const cur = _vaultBasename(path);
-  const name = prompt('Rename file to:', cur);
+  const name = await uiModule.styledPrompt('Rename file', { title: 'Rename', defaultValue: cur, confirmText: 'Rename', maxLength: 200 });
   if (!name || name.trim() === cur) return;
   const dir = _vaultDirname(path);
   const target = dir ? `${dir}/${name.trim()}` : name.trim();
@@ -3048,8 +3048,8 @@ async function _vaultRenameFile(path) {
 
 async function _vaultMoveFile(path) {
   const dir = _vaultDirname(path);
-  const dest = prompt('Move to folder (relative path, blank = vault root):', dir);
-  if (dest == null) return;
+  const dest = await uiModule.styledPrompt('Move to folder (relative path, blank = vault root)', { title: 'Move', defaultValue: dir, placeholder: 'folder/subfolder', confirmText: 'Move', maxLength: 200 });
+  if (dest === null) return;  // cancelled
   const target = dest.trim() ? `${dest.trim().replace(/\/+$/, '')}/${_vaultBasename(path)}` : _vaultBasename(path);
   if (target === path) return;
   try { await _vaultMoveTo(path, target); uiModule.showToast?.('Moved'); }
@@ -3057,7 +3057,7 @@ async function _vaultMoveFile(path) {
 }
 
 async function _vaultDeleteFile(path) {
-  if (!confirm(`Delete "${_vaultBasename(path)}" from the vault? This cannot be undone.`)) return;
+  if (!await uiModule.styledConfirm(`Delete "${_vaultBasename(path)}" from the vault? This cannot be undone.`, { confirmText: 'Delete', danger: true })) return;
   try {
     const res = await fetch(`${API_BASE}/api/iris-vault/file`, {
       method: 'DELETE', credentials: 'same-origin',
@@ -3071,25 +3071,32 @@ async function _vaultDeleteFile(path) {
   } catch (e) { uiModule.showError?.(e.message); }
 }
 
+// Reuses the app's canonical .dropdown / .dropdown-item-compact menu styling
+// (same as calendar's event menu) rather than a one-off menu.
 function _vaultFileMenu(path, anchor) {
   document.querySelectorAll('.notes-vault-file-menu').forEach((m) => m.remove());
-  const menu = document.createElement('div');
-  menu.className = 'notes-vault-file-menu';
-  menu.innerHTML = `
-    <button type="button" data-act="rename">Rename…</button>
-    <button type="button" data-act="move">Move…</button>
-    <button type="button" data-act="delete" class="danger">Delete</button>`;
-  document.body.appendChild(menu);
   const r = anchor.getBoundingClientRect();
-  menu.style.top = `${r.bottom + 4 + window.scrollY}px`;
-  menu.style.left = `${Math.min(r.left, window.innerWidth - 170) + window.scrollX}px`;
+  const menu = document.createElement('div');
+  menu.className = 'dropdown notes-vault-file-menu';
+  menu.style.cssText = `position:fixed;z-index:10070;min-width:160px;background:var(--panel,var(--bg));border:1px solid var(--border);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,0.3);padding:4px;font-size:12px;top:${r.bottom + 4}px;left:${Math.min(r.left, window.innerWidth - 176)}px;`;
   const close = () => { menu.remove(); document.removeEventListener('mousedown', onDoc, true); document.removeEventListener('keydown', onEsc, true); };
-  const onDoc = (e) => { if (!menu.contains(e.target)) close(); };
+  const onDoc = (e) => { if (!menu.contains(e.target) && e.target !== anchor) close(); };
   const onEsc = (e) => { if (e.key === 'Escape') close(); };
+  const _renameIcon = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>';
+  const _moveIcon = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7v13h18V7"/><path d="M3 7l2-3h6l2 3"/></svg>';
+  const _trashIcon = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>';
+  const _item = (icon, label, onClick, danger) => {
+    const it = document.createElement('div');
+    it.className = 'dropdown-item-compact' + (danger ? ' dropdown-item-danger' : '');
+    it.innerHTML = `<span class="dropdown-icon">${icon}</span><span>${label}</span>`;
+    it.addEventListener('click', (e) => { e.stopPropagation(); close(); onClick(); });
+    return it;
+  };
+  menu.appendChild(_item(_renameIcon, 'Rename', () => _vaultRenameFile(path)));
+  menu.appendChild(_item(_moveIcon, 'Move…', () => _vaultMoveFile(path)));
+  menu.appendChild(_item(_trashIcon, 'Delete', () => _vaultDeleteFile(path), true));
+  document.body.appendChild(menu);
   setTimeout(() => { document.addEventListener('mousedown', onDoc, true); document.addEventListener('keydown', onEsc, true); }, 0);
-  menu.querySelector('[data-act="rename"]').addEventListener('click', () => { close(); _vaultRenameFile(path); });
-  menu.querySelector('[data-act="move"]').addEventListener('click', () => { close(); _vaultMoveFile(path); });
-  menu.querySelector('[data-act="delete"]').addEventListener('click', () => { close(); _vaultDeleteFile(path); });
 }
 
 function _wireBookTools(body, { supportsSelection } = {}) {

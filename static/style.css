@@ -31831,32 +31831,8 @@ body.notes-mobile-mode.notes-drag-mode .note-card-pin.active {
 .notes-vault-file:focus-within .notes-vault-file-actions { opacity: 1; }
 .notes-vault-file-actions:hover { background: color-mix(in srgb, var(--fg) 12%, transparent); color: var(--fg); }
 @media (hover: none) { .notes-vault-file-actions { opacity: 1; } }  /* always visible on touch */
-.notes-vault-file-menu {
-  position: absolute;
-  z-index: 10070;
-  min-width: 150px;
-  background: var(--bg, #111);
-  border: 1px solid var(--border);
-  border-radius: 9px;
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
-  padding: 4px;
-  display: flex;
-  flex-direction: column;
-}
-.notes-vault-file-menu button {
-  text-align: left;
-  background: transparent;
-  border: 0;
-  border-radius: 6px;
-  padding: 8px 10px;
-  font: inherit;
-  font-size: 13px;
-  color: var(--fg);
-  cursor: pointer;
-}
-.notes-vault-file-menu button:hover { background: color-mix(in srgb, var(--fg) 9%, transparent); }
-.notes-vault-file-menu button.danger { color: var(--red, #ff5555); }
-.notes-vault-file-menu button.danger:hover { background: color-mix(in srgb, var(--red, #ff5555) 14%, transparent); }
+/* The vault file ⋯ menu reuses the shared .dropdown / .dropdown-item-compact
+   styling (see calendar's event menu), so no bespoke menu CSS is needed here. */
 .notes-vault-file.loading {
   opacity: 0.65;
   pointer-events: none;

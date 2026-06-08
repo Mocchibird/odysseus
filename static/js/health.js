@@ -4,7 +4,7 @@
  * agent's manage_health tool shares, so chat-logged data shows up here too.
  */
 import uiModule from './ui.js';
-import { makeToolModalDraggable } from './modalFullscreen.js?v=367';
+import { makeToolModalDraggable } from './modalFullscreen.js?v=368';
 import * as Modals from './modalManager.js';
 
 const API_BASE = window.location.origin;
@@ -12,9 +12,7 @@ let _open = false;
 let _habitsOpen = false;
 let _tab = 'calories';
 
-const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => (
-  { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
-));
+const esc = uiModule.esc;  // reuse the canonical HTML-escape helper
 const _todayLocal = () => new Date().toLocaleDateString('en-CA'); // YYYY-MM-DD, local tz
 
 async function _api(path, opts = {}) {
@@ -195,7 +193,7 @@ async function _renderHabits() {
     } catch (err) { uiModule.showError?.(err.message); }
   }));
   b.querySelectorAll('[data-del-habit]').forEach((btn) => btn.addEventListener('click', async () => {
-    if (!confirm('Delete this habit and its history?')) return;
+    if (!await uiModule.styledConfirm('Delete this habit and its history?', { confirmText: 'Delete', danger: true })) return;
     try { await _api(`/habits/${btn.dataset.delHabit}`, { method: 'DELETE' }); _renderHabits(); }
     catch (err) { uiModule.showError?.(err.message); }
   }));

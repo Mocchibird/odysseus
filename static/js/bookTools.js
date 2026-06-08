@@ -15,9 +15,7 @@ let _docHandlers = [];       // [type, fn, opts] document-level listeners to det
 let _cleanupFns = [];        // arbitrary teardown callbacks (e.g. element listeners)
 let _selPopover = null;
 
-const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => (
-  { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
-));
+const esc = uiModule.esc;  // reuse the canonical HTML-escape helper
 
 async function _api(path, opts = {}) {
   const res = await fetch(`${API}/api/books${path}`, {
