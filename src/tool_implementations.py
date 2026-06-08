@@ -1925,9 +1925,9 @@ async def do_manage_health(content: str, owner: Optional[str] = None) -> Dict:
 
     try:
         if action == "log_meal":
-            desc = str(args.get("description") or args.get("food") or args.get("name") or "").strip()
-            if not desc:
-                return {"error": "description is required", "exit_code": 1}
+            # Description is optional — default to a generic label rather than
+            # erroring, so "log 500 kcal" works without a name.
+            desc = str(args.get("description") or args.get("food") or args.get("name") or "").strip() or "Meal"
             meal = hs.log_meal(
                 ow, desc, args.get("kcal") or args.get("calories") or 0,
                 protein_g=args.get("protein_g"), carbs_g=args.get("carbs_g"),

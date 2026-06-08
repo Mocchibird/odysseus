@@ -174,6 +174,15 @@ def index_book(owner: str | None, rel_path: str) -> dict:
 def open_book(owner: str | None, rel_path: str) -> dict:
     safe_path = _safe_book_path(rel_path)
     ext = Path(safe_path).suffix.lower()
+    # Register the book in the vault index on open (lightweight, no content
+    # parse) so a book opened straight from the vault browser also shows up in
+    # the Books list — list_books() reads the index.
+    try:
+        path = iris_vault.resolve_owner_file(owner, safe_path)
+        if path.is_file():
+            iris_vault.index_file(owner, path, index_content=False)
+    except Exception:
+        pass
     if ext == ".epub":
         book = epub_reader.parse_epub_toc(owner, safe_path)
         book["kind"] = "epub"

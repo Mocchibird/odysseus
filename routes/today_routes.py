@@ -4,11 +4,27 @@ front-page view. (Warranties-expiring lives in iris-mcp's vault DB, not here, so
 it's intentionally omitted until there's a bridge.)"""
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Request
 
 from src.auth_helpers import require_user, owner_filter
+
+
+def _to_local_naive(dt, is_utc: bool):
+    """Normalize a stored CalendarEvent datetime to naive *local* time.
+
+    Events imported via CalDAV/ICS are stored as UTC instants (is_utc=True);
+    others are already naive-local. Without this, the Today dashboard showed
+    UTC times (e.g. an 18:00 local event as 16:00)."""
+    if dt is None:
+        return None
+    local_tz = datetime.now().astimezone().tzinfo
+    if dt.tzinfo is not None:
+        return dt.astimezone(local_tz).replace(tzinfo=None)
+    if is_utc:
+        return dt.replace(tzinfo=timezone.utc).astimezone(local_tz).replace(tzinfo=None)
+    return dt
 
 
 def _allow_null_owner() -> bool:
@@ -51,20 +67,32 @@ def setup_today_routes() -> APIRouter:
         events, reminders = [], []
         db = SessionLocal()
         try:
+            # Widen the SQL window by a day on each side so UTC-stored events
+            # near the local-day boundary aren't missed; filter precisely in
+            # Python against local-time bounds below.
             ev_q = db.query(CalendarEvent).join(CalendarCal).filter(
-                CalendarEvent.dtstart < tomorrow,
-                CalendarEvent.dtend > start,
+                CalendarEvent.dtstart < tomorrow + timedelta(days=1),
+                CalendarEvent.dtend > start - timedelta(days=1),
                 CalendarEvent.status != "cancelled",
             )
             if owner:
                 ev_q = owner_filter(ev_q, CalendarCal, owner, include_shared=allow_null)
-            for e in ev_q.order_by(CalendarEvent.dtstart).all():
+            raw_events = ev_q.order_by(CalendarEvent.dtstart).all()
+            for e in raw_events:
+                # All-day events are date-anchored — don't tz-shift them.
+                ls = e.dtstart if e.all_day else _to_local_naive(e.dtstart, e.is_utc)
+                le = e.dtend if e.all_day else _to_local_naive(e.dtend, e.is_utc)
+                if ls is None:
+                    continue
+                if not (ls < tomorrow and (le or ls) > start):
+                    continue
                 events.append({
                     "summary": e.summary or "(untitled)",
-                    "time": "all day" if e.all_day else (e.dtstart.strftime("%H:%M") if e.dtstart else ""),
+                    "time": "all day" if e.all_day else ls.strftime("%H:%M"),
                     "all_day": bool(e.all_day),
                     "location": e.location or "",
                 })
+            events.sort(key=lambda x: (x["all_day"] is False, x["time"]))
 
             n_q = db.query(Note).filter(Note.archived == False)  # noqa: E712
             if owner:
