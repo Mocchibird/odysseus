@@ -32068,9 +32068,11 @@ body.notes-mobile-mode.notes-drag-mode .note-card-pin.active {
 /* Backlink graph (canvas) */
 .notes-vault-graph-wrap { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
 .notes-vault-graph {
+  /* Fill the remaining pane-body height via the flex chain (the pane has a
+     definite height); never force a viewport height, which overflowed the
+     draggable pane and pushed everything off-screen. */
   flex: 1 1 auto;
-  min-height: 340px;
-  height: calc(100vh - 240px);
+  min-height: 260px;
   border: 1px solid var(--border);
   border-radius: 8px;
   background: color-mix(in srgb, var(--fg) 2%, transparent);
@@ -32079,7 +32081,7 @@ body.notes-mobile-mode.notes-drag-mode .note-card-pin.active {
 }
 .vault-graph-canvas { display: block; width: 100%; height: 100%; }
 .notes-vault-reader-title span { font-size: 11px; opacity: 0.6; margin-left: 8px; }
-@media (max-width: 768px) { .notes-vault-graph { height: calc(100svh - 250px); } }
+@media (max-width: 768px) { .notes-vault-graph { min-height: 50svh; } }
 /* Vault Organizer (inbox triage) */
 .notes-vault-org { display: flex; flex-direction: column; gap: 6px; overflow-y: auto; padding: 4px 2px; max-height: calc(100vh - 230px); }
 .vault-org-row {

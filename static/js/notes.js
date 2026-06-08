@@ -2858,11 +2858,14 @@ function _renderVaultFiles() {
         </button>
         <div class="notes-vault-reader-title"><strong>Backlink graph</strong><span id="notes-vault-graph-meta"></span></div>
       </div>
-      <div id="notes-vault-graph" class="notes-vault-graph"></div>
+      <div id="notes-vault-graph-host" class="notes-vault-graph"></div>
     </div>`;
     body.querySelector('.notes-vault-back')?.addEventListener('click', () => { _vaultGraphOpen = false; _destroyVaultGraph(); _renderNotes(); });
     (async () => {
-      const host = document.getElementById('notes-vault-graph');
+      // NB: the toggle button in the toolbar already owns id="notes-vault-graph";
+      // the canvas host must use a DISTINCT id or getElementById returns the
+      // button and the graph mounts into it (the old empty/overflow bug).
+      const host = document.getElementById('notes-vault-graph-host');
       if (host) host.innerHTML = '<div class="notes-empty-msg">Building graph…</div>';
       try {
         const res = await fetch(`${API_BASE}/api/iris-vault/graph`, { credentials: 'same-origin' });
