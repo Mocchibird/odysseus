@@ -32751,6 +32751,12 @@ body.notes-mobile-mode.notes-drag-mode .note-card-pin.active {
   position: relative;
   width: 100%;
   max-width: 900px;
+  /* CRITICAL: pages are flex items in the .pdfjs-reader column — without
+     flex-shrink:0 the column squashes every page to a sliver and overflow:hidden
+     clips it (you'd see only the top of each page, "a sample of all pages").
+     flex-shrink:0 keeps each page at its full aspect-ratio height; the viewer
+     scrolls. */
+  flex-shrink: 0;
   background: #fff;
   border-radius: 4px;
   box-shadow: 0 2px 12px rgba(0, 0, 0, 0.3);

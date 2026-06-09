@@ -4,7 +4,7 @@
 
 async function _notesModule() {
   if (window.notesModule?.openBooksPanel) return window.notesModule;
-  const mod = await import('./notes.js?v=381');
+  const mod = await import('./notes.js?v=382');
   return mod.default || window.notesModule;
 }
 

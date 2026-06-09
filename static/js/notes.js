@@ -51,7 +51,7 @@ let _bookReadMode = 'scroll'; // page-turning removed — books are always conti
 // PDFs always render as the native PDF (the text extraction still exists on the
 // backend for chat/search — there's just no in-reader Text toggle anymore).
 const _bookPdfViewMode = 'pdf';
-let _bookNavOpen = false; // chapter/page nav row is collapsed by default
+let _bookNavOpen = true; // chapter/page nav row (the jump select) is shown by default — it's the only nav control now
 const BOOK_CONTINUOUS_MAX_RENDERED_CHAPTERS = 5;
 // Live PDF.js reader controller for the actual-PDF view (see pdfReader.js).
 // Held at module scope so re-renders / closing the book can tear it down.

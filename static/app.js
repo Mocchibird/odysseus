@@ -23,7 +23,7 @@ import censorModule from './js/censor.js';
 import galleryModule from './js/gallery.js';
 import tasksModule from './js/tasks.js';
 import calendarModule from './js/calendar.js';
-import notesModule from './js/notes.js?v=381';
+import notesModule from './js/notes.js?v=382';
 import healthModule from './js/health.js?v=379';
 import pingsModule from './js/pings.js?v=370';
 import todayModule from './js/today.js?v=370';
