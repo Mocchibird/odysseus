@@ -102,6 +102,7 @@ def list_habits(owner: str, include_archived: bool = False) -> List[Dict[str, An
                 .all()
             }
             d["done_today"] = today in done_days
+            d["done_yesterday"] = (date.fromisoformat(today) - timedelta(days=1)).isoformat() in done_days
             d["streak"] = _streak_from_days(done_days, today)
             d["done_30d"] = sum(
                 1 for ds in done_days if ds >= (date.today() - timedelta(days=30)).isoformat()
@@ -325,6 +326,29 @@ def delete_meal(owner: str, meal_id: int) -> bool:
             return False
         db.delete(m)
         return True
+
+
+def update_meal(owner: str, meal_id: int, **fields) -> Optional[Dict[str, Any]]:
+    """Edit a logged meal (owner-scoped). Only the provided, non-None fields
+    change. Returns the updated meal dict, or None if the meal isn't found."""
+    owner = _owner(owner)
+    with _session() as db:
+        m = db.query(Meal).filter(Meal.owner == owner, Meal.id == meal_id).first()
+        if not m:
+            return None
+        if fields.get("description") is not None:
+            m.description = str(fields["description"]).strip()
+        if fields.get("kcal") is not None:
+            m.kcal = int(fields["kcal"] or 0)
+        for k in ("protein_g", "carbs_g", "fat_g", "sugar_g"):
+            if k in fields:  # explicit None clears it (the edit form sends all macros)
+                setattr(m, k, fields[k])
+        if fields.get("eaten_at"):
+            m.eaten_at = fields["eaten_at"]
+        if fields.get("notes") is not None:
+            m.notes = str(fields["notes"]).strip()
+        db.flush()
+        return _meal_dict(m)
 
 
 def macro_targets(target_kcal: Optional[int]) -> Optional[Dict[str, int]]:

@@ -15,6 +15,45 @@ const _editingHabits = new Set();  // habit ids (as strings) currently in inline
 
 const esc = uiModule.esc;  // reuse the canonical HTML-escape helper
 const _todayLocal = () => new Date().toLocaleDateString('en-CA'); // YYYY-MM-DD, local tz
+const _yesterdayLocal = () => { const d = new Date(); d.setDate(d.getDate() - 1); return d.toLocaleDateString('en-CA'); };
+
+// A logged meal's macros line (skips macros that weren't recorded).
+function _macroLine(m) {
+  const fmt = (v) => (v == null || v === '' ? null : Math.round(Number(v) * 10) / 10);
+  const parts = [];
+  const p = fmt(m.protein_g); if (p != null) parts.push(`P ${p}g`);
+  const c = fmt(m.carbs_g);   if (c != null) parts.push(`C ${c}g`);
+  const f = fmt(m.fat_g);     if (f != null) parts.push(`F ${f}g`);
+  const s = fmt(m.sugar_g);   if (s != null) parts.push(`Sugar ${s}g`);
+  return parts.length ? parts.join(' · ') : 'No macros recorded for this entry.';
+}
+
+// A meal row: click to expand its macros; ✎ to edit; ✕ to delete.
+function _mealRowHtml(m) {
+  const v = (x) => (x == null ? '' : x);
+  return `<div class="health-meal" data-meal-id="${m.id}">
+    <div class="health-row health-meal-head" role="button" tabindex="0" data-expand-meal="${m.id}" aria-expanded="false">
+      <span class="health-meal-desc"><span class="health-meal-caret">▸</span>${esc(m.description)}</span>
+      <span class="health-meal-right">${m.kcal} kcal
+        <button class="health-icon-btn" data-edit-meal="${m.id}" title="Edit entry" aria-label="Edit meal">✎</button>
+        <button class="health-icon-btn" data-del-meal="${m.id}" title="Delete entry" aria-label="Delete meal">✕</button>
+      </span>
+    </div>
+    <div class="health-meal-detail" hidden>
+      <div class="health-meal-macros">${_macroLine(m)}${m.notes ? ` — ${esc(m.notes)}` : ''}</div>
+      <form class="health-inline-form health-meal-edit" data-edit-meal-form="${m.id}" hidden>
+        <input name="description" class="health-input" value="${esc(m.description)}" placeholder="Meal" aria-label="Description">
+        <input name="kcal" type="number" min="0" class="health-input health-input-sm" value="${v(m.kcal)}" placeholder="kcal" required aria-label="kcal">
+        <input name="protein_g" type="number" step="0.1" min="0" class="health-input health-input-sm" value="${v(m.protein_g)}" placeholder="protein g" aria-label="protein">
+        <input name="carbs_g" type="number" step="0.1" min="0" class="health-input health-input-sm" value="${v(m.carbs_g)}" placeholder="carbs g" aria-label="carbs">
+        <input name="fat_g" type="number" step="0.1" min="0" class="health-input health-input-sm" value="${v(m.fat_g)}" placeholder="fat g" aria-label="fat">
+        <input name="sugar_g" type="number" step="0.1" min="0" class="health-input health-input-sm" value="${v(m.sugar_g)}" placeholder="sugar g" aria-label="sugar">
+        <button class="health-btn" type="submit">Save</button>
+        <button type="button" class="health-btn-sub" data-cancel-edit-meal="${m.id}" style="cursor:pointer;padding:6px 12px;">Cancel</button>
+      </form>
+    </div>
+  </div>`;
+}
 
 async function _api(path, opts = {}) {
   const res = await fetch(`${API_BASE}/api/health${path}`, {
@@ -161,6 +200,7 @@ async function _renderHabits() {
             <span class="health-streak" title="Current streak">🔥 ${h.streak}</span>
             <span class="health-30d" title="Last 30 days">${h.done_30d}/30</span>
             <button class="health-check-btn${h.done_today ? ' done' : ''}" data-check="${h.id}" title="Toggle today">${h.done_today ? '✓ Done today' : 'Mark today'}</button>
+            <button class="health-check-btn health-check-yday${h.done_yesterday ? ' done' : ''}" data-check-yday="${h.id}" title="Toggle yesterday">${h.done_yesterday ? '✓ Yesterday' : 'Yesterday'}</button>
             <button class="health-icon-btn" data-edit-habit="${h.id}" title="Edit habit (rename, emoji, category)" aria-label="Edit habit">✎</button>
             <button class="health-icon-btn" data-del-habit="${h.id}" title="Delete habit" aria-label="Delete habit">✕</button>
           </div>
@@ -205,6 +245,12 @@ async function _renderHabits() {
   b.querySelectorAll('[data-check]').forEach((btn) => btn.addEventListener('click', async () => {
     try {
       await _api(`/habits/${btn.dataset.check}/check`, { method: 'POST', body: JSON.stringify({ day: _todayLocal() }) });
+      _renderHabits();
+    } catch (err) { uiModule.showError?.(err.message); }
+  }));
+  b.querySelectorAll('[data-check-yday]').forEach((btn) => btn.addEventListener('click', async () => {
+    try {
+      await _api(`/habits/${btn.dataset.checkYday}/check`, { method: 'POST', body: JSON.stringify({ day: _yesterdayLocal() }) });
       _renderHabits();
     } catch (err) { uiModule.showError?.(err.message); }
   }));
@@ -335,7 +381,7 @@ async function _renderCalories() {
         </div>
       </details>
       <div id="health-meal-est-note" class="health-muted" style="display:none;margin:-2px 0 8px;"></div>
-      <div class="health-list">${meals.length ? meals.map((m) => `<div class="health-row"><span>${esc(m.description)}</span><span>${m.kcal} kcal <button class="health-icon-btn" data-del-meal="${m.id}" aria-label="Delete">✕</button></span></div>`).join('') : '<div class="health-empty">No meals logged today.</div>'}</div>
+      <div class="health-list health-meal-list">${meals.length ? meals.map(_mealRowHtml).join('') : '<div class="health-empty">No meals logged today.</div>'}</div>
     </div>
     <div class="health-card">
       <div class="health-card-head"><strong>Last 14 days</strong></div>
@@ -405,6 +451,55 @@ async function _renderCalories() {
   });
   b.querySelectorAll('[data-del-meal]').forEach((btn) => btn.addEventListener('click', async () => {
     try { await _api(`/meals/${btn.dataset.delMeal}`, { method: 'DELETE' }); _renderCalories(); }
+    catch (err) { uiModule.showError?.(err.message); }
+  }));
+  // Expand a meal row to reveal its macros (clicking the row, not the ✎/✕ buttons).
+  b.querySelectorAll('[data-expand-meal]').forEach((head) => {
+    const toggle = (e) => {
+      if (e.target.closest('.health-icon-btn')) return;  // ✎/✕ handle themselves
+      const item = head.closest('.health-meal');
+      const detail = item?.querySelector('.health-meal-detail');
+      if (!detail) return;
+      const opening = detail.hasAttribute('hidden');
+      detail.toggleAttribute('hidden', !opening);
+      head.setAttribute('aria-expanded', String(opening));
+      item.classList.toggle('expanded', opening);
+    };
+    head.addEventListener('click', toggle);
+    head.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(e); } });
+  });
+  // ✎ → open the detail + reveal the inline edit form.
+  b.querySelectorAll('[data-edit-meal]').forEach((btn) => btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const item = btn.closest('.health-meal');
+    const detail = item?.querySelector('.health-meal-detail');
+    const form = item?.querySelector('.health-meal-edit');
+    if (!detail || !form) return;
+    detail.removeAttribute('hidden');
+    form.removeAttribute('hidden');
+    item.classList.add('expanded', 'editing');
+    item.querySelector('[data-expand-meal]')?.setAttribute('aria-expanded', 'true');
+    form.querySelector('[name="kcal"]')?.focus();
+  }));
+  b.querySelectorAll('[data-cancel-edit-meal]').forEach((btn) => btn.addEventListener('click', () => {
+    const item = btn.closest('.health-meal');
+    item?.classList.remove('editing');
+    item?.querySelector('.health-meal-edit')?.setAttribute('hidden', '');
+  }));
+  b.querySelectorAll('[data-edit-meal-form]').forEach((form) => form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const id = form.dataset.editMealForm;
+    const fd = new FormData(form);
+    const kcal = parseInt(fd.get('kcal'), 10);
+    if (!Number.isFinite(kcal)) return;
+    const payload = { description: (fd.get('description') || '').toString().trim() || 'Meal', kcal };
+    // Send all macros (the form is pre-filled) so blanking one clears it.
+    ['protein_g', 'carbs_g', 'fat_g', 'sugar_g'].forEach((k) => {
+      const raw = (fd.get(k) ?? '').toString().trim();
+      const val = parseFloat(raw);
+      payload[k] = raw === '' || !Number.isFinite(val) ? null : val;
+    });
+    try { await _api(`/meals/${id}`, { method: 'PUT', body: JSON.stringify(payload) }); _renderCalories(); }
     catch (err) { uiModule.showError?.(err.message); }
   }));
   // CSV export/import

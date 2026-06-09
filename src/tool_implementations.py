@@ -1950,9 +1950,11 @@ async def do_manage_health(content: str, owner: Optional[str] = None) -> Dict:
     Backed by src/health_store.py (the same store the Health panel UI uses), so
     anything logged here shows up in the UI for the same user and vice versa.
     Actions: create_habit, update_habit (rename / set emoji-icon / category /
-    color / cadence on an existing habit), delete_habit, check_habit,
-    list_habits, habit_heatmap, log_meal, log_weight, log_training, calories,
-    weight_trend, set_profile, summary.
+    color / cadence on an existing habit), delete_habit, check_habit (pass a
+    past `date` like yesterday to backfill), list_habits, habit_heatmap,
+    log_meal, update_meal / delete_meal (fix a logged entry by meal_id — get the
+    id from action=calories), log_weight, log_training, calories, weight_trend,
+    set_profile, summary.
     """
     from src import health_store as hs
 
@@ -2006,6 +2008,25 @@ async def do_manage_health(content: str, owner: Optional[str] = None) -> Dict:
             day = hs.daily_calories(ow)
             tgt = f" (today: {day['total_kcal']} kcal{', target ' + str(day['target_kcal']) if day.get('target_kcal') else ''})"
             return {"output": f"Logged {meal['description']} — {meal['kcal']} kcal{tgt}.", "meal": meal, "exit_code": 0}
+
+        if action in ("update_meal", "edit_meal", "delete_meal"):
+            # Fix a logged meal (Iris can mis-estimate). meal_id comes from the
+            # `calories` action (each meal in `meals` has an id) or a log_meal result.
+            try:
+                mid = int(args.get("meal_id") or args.get("id"))
+            except (TypeError, ValueError):
+                return {"error": f"{action} needs a numeric meal_id — get it from action=calories (each meal has an id).", "exit_code": 1}
+            if action == "delete_meal":
+                ok = hs.delete_meal(ow, mid)
+                return {"output": ("Deleted meal." if ok else "Meal not found."), "exit_code": 0 if ok else 1}
+            fields = {k: args.get(k) for k in ("description", "kcal", "protein_g", "carbs_g", "fat_g", "sugar_g", "notes")
+                      if args.get(k) is not None}
+            if not fields:
+                return {"error": "Nothing to update — pass description/kcal/protein_g/carbs_g/fat_g/sugar_g/notes.", "exit_code": 1}
+            meal = hs.update_meal(ow, mid, **fields)
+            if meal is None:
+                return {"error": "Meal not found.", "exit_code": 1}
+            return {"output": f"Updated meal #{meal['id']}: {meal['description']} — {meal['kcal']} kcal.", "meal": meal, "exit_code": 0}
 
         if action == "log_weight":
             kg = args.get("kg") or args.get("weight")
@@ -2102,7 +2123,15 @@ async def do_manage_health(content: str, owner: Optional[str] = None) -> Dict:
         if action == "calories":
             day = hs.daily_calories(ow, day=args.get("date") or args.get("day"))
             rem = f", {day['remaining_kcal']} remaining" if day.get("remaining_kcal") is not None else ""
-            return {"output": f"{day['day']}: {day['total_kcal']} kcal from {day['meal_count']} meals{rem}.", **day, "exit_code": 0}
+            lines = [f"{day['day']}: {day['total_kcal']} kcal from {day['meal_count']} meals{rem}."]
+            # Enumerate meals WITH their id so Iris can update_meal/delete_meal a wrong entry.
+            for m in (day.get("meals") or []):
+                macros = " ".join(
+                    f"{lbl}{round(m[k])}g" for lbl, k in (("P", "protein_g"), ("C", "carbs_g"), ("F", "fat_g"))
+                    if m.get(k) is not None
+                )
+                lines.append(f"  #{m['id']} {m['description']} — {m['kcal']} kcal{(' · ' + macros) if macros else ''}")
+            return {"output": "\n".join(lines), **day, "exit_code": 0}
 
         if action == "weight_trend":
             trend = hs.weight_trend(ow, days=args.get("days") or 90)

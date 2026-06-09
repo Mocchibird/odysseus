@@ -171,6 +171,18 @@ def setup_health_routes():
         )
         return {"ok": True, "meal": meal}
 
+    @router.put("/meals/{meal_id}")
+    async def update_meal(meal_id: int, request: Request):
+        owner = _owner(request)
+        body = await request.json()
+        meal = hs.update_meal(
+            owner, meal_id,
+            **{k: body[k] for k in ("description", "kcal", "protein_g", "carbs_g", "fat_g", "sugar_g", "eaten_at", "notes") if k in body},
+        )
+        if meal is None:
+            raise HTTPException(404, "Meal not found")
+        return {"ok": True, "meal": meal}
+
     @router.delete("/meals/{meal_id}")
     def delete_meal(meal_id: int, request: Request):
         if not hs.delete_meal(_owner(request), meal_id):

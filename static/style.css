@@ -38380,6 +38380,21 @@ body.theme-frosted .modal {
 }
 .health-row:last-child { border-bottom: 0; }
 .health-meal-form, .health-train-form { margin: 8px 0; }
+/* Expandable + editable logged-meal rows */
+.health-meal { border-bottom: 1px solid color-mix(in srgb, var(--fg) 7%, transparent); }
+.health-meal:last-child { border-bottom: 0; }
+.health-meal .health-meal-head { border-bottom: 0; cursor: pointer; border-radius: 6px; }
+.health-meal .health-meal-head:hover { background: color-mix(in srgb, var(--fg) 5%, transparent); }
+.health-meal-desc { display: inline-flex; align-items: center; gap: 6px; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.health-meal-right { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.health-meal-caret { font-size: 9px; opacity: 0.5; transition: transform 0.15s ease; display: inline-block; }
+.health-meal.expanded .health-meal-caret { transform: rotate(90deg); }
+.health-meal-detail { padding: 2px 6px 8px 18px; }
+.health-meal-macros { font-size: 12px; color: color-mix(in srgb, var(--fg) 60%, transparent); }
+.health-meal.editing .health-meal-macros { display: none; }
+.health-meal-edit { margin-top: 6px; flex-wrap: wrap; }
+.health-check-btn.health-check-yday { font-weight: 600; opacity: 0.72; }
+.health-check-btn.health-check-yday.done { opacity: 1; }
 
 /* Profile / goals */
 .health-profile summary { cursor: pointer; font-size: 13px; }

@@ -60,6 +60,61 @@ def test_meals_and_daily_calories():
     assert series[-1]["kcal"] == 800
 
 
+def test_update_meal_edits_fields_and_clears_macros():
+    owner = "alice-edit"
+    m = hs.log_meal(owner, "Lnch", 600, protein_g=20, carbs_g=50)
+    mid = m["id"]
+    upd = hs.update_meal(owner, mid, description="Lunch", kcal=550, protein_g=30, carbs_g=None)
+    assert upd is not None
+    assert upd["description"] == "Lunch" and upd["kcal"] == 550
+    assert upd["protein_g"] == 30
+    assert upd["carbs_g"] is None  # passing the key with None clears it (edit form blanks a macro)
+    assert hs.daily_calories(owner)["total_kcal"] == 550  # totals reflect the edit
+    # owner-scoped + missing
+    assert hs.update_meal("someone-else", mid, kcal=1) is None
+    assert hs.update_meal(owner, 999999, kcal=1) is None
+
+
+def test_update_meal_leaves_omitted_macros_untouched():
+    owner = "alice-edit2"
+    m = hs.log_meal(owner, "Snack", 200, protein_g=5, fat_g=8)
+    upd = hs.update_meal(owner, m["id"], kcal=250)  # macros not passed → unchanged
+    assert upd["kcal"] == 250 and upd["protein_g"] == 5 and upd["fat_g"] == 8
+
+
+def test_list_habits_reports_done_yesterday():
+    owner = "alice-yday"
+    h = hs.create_habit(owner, "Stretch")
+    yest = (date.today() - timedelta(days=1)).isoformat()
+    hs.set_habit_day(owner, h["id"], day=yest, done=True)
+    listed = hs.list_habits(owner)[0]
+    assert listed["done_yesterday"] is True
+    assert listed["done_today"] is False
+
+
+def test_manage_health_tool_update_and_delete_meal():
+    """The manage_health tool can fix a logged meal (so Iris can correct itself):
+    log → calories lists it with its #id → update_meal → delete_meal."""
+    import asyncio
+    import json
+    from src.tool_implementations import do_manage_health
+
+    owner = "tool-edit"
+    logged = asyncio.run(do_manage_health(json.dumps({"action": "log_meal", "description": "Pizza", "kcal": 800}), owner=owner))
+    mid = logged["meal"]["id"]
+    # calories enumerates the meal WITH its id (so Iris can target it)
+    cals = asyncio.run(do_manage_health(json.dumps({"action": "calories"}), owner=owner))
+    assert f"#{mid}" in cals["output"]
+    # update
+    upd = asyncio.run(do_manage_health(json.dumps({"action": "update_meal", "meal_id": mid, "kcal": 700}), owner=owner))
+    assert upd["exit_code"] == 0 and upd["meal"]["kcal"] == 700
+    # needs an id
+    assert asyncio.run(do_manage_health(json.dumps({"action": "update_meal"}), owner=owner))["exit_code"] == 1
+    # delete
+    assert asyncio.run(do_manage_health(json.dumps({"action": "delete_meal", "meal_id": mid}), owner=owner))["exit_code"] == 0
+    assert hs.daily_calories(owner)["total_kcal"] == 0
+
+
 def test_weight_trend():
     owner = "alice-weight"
     today = date.today().isoformat()

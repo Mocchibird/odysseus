@@ -24,7 +24,7 @@ import galleryModule from './js/gallery.js';
 import tasksModule from './js/tasks.js';
 import calendarModule from './js/calendar.js';
 import notesModule from './js/notes.js?v=385';
-import healthModule from './js/health.js?v=379';
+import healthModule from './js/health.js?v=386';
 import pingsModule from './js/pings.js?v=370';
 import knowledgeModule from './js/knowledge.js?v=383';
 import todayModule from './js/today.js?v=370';
