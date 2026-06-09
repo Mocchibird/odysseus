@@ -1,0 +1,12 @@
+# Optional extra Python deps, installed when INSTALL_EXTRA_DEPS=true (the default
+# in docker-compose). Odysseus's core (requirements.txt) already installs the
+# shared deps — mcp, httpx, beautifulsoup4, pypdf, icalendar, caldav,
+# cryptography, python-dateutil. These extras add: DuckDuckGo web search (ddgs),
+# Office text extraction (python-docx, openpyxl), recurring calendar events
+# (recurring-ical-events), charts (matplotlib), and bundled tz data.
+ddgs>=9.0
+python-docx>=1.0
+openpyxl>=3.1
+recurring-ical-events>=3.0
+matplotlib>=3.7
+tzdata>=2025.1

@@ -3,7 +3,7 @@ services:
     build:
       context: ${ODYSSEUS_REPO_DIR:-.}
       args:
-        INSTALL_IRIS_MCP_DEPS: ${INSTALL_IRIS_MCP_DEPS:-true}
+        INSTALL_EXTRA_DEPS: ${INSTALL_EXTRA_DEPS:-true}
         INSTALL_OPTIONAL: ${INSTALL_OPTIONAL:-false}
     ports:
       - "${APP_BIND:-127.0.0.1}:${APP_PORT:-7000}:7000"
@@ -20,13 +20,6 @@ services:
       # land under /app/.local for the odysseus user. Persist them so a
       # container recreate does not silently remove installed serve engines.
       - ./data/local:/app/.local:z
-      # Iris / Obsidian vault. This is Iris's durable memory source of truth;
-      # Odysseus stores per-user files under /vault/<username>/ and indexes
-      # them in data/app.db.
-      - ${ODYSSEUS_OBSIDIAN_VAULT_DIR:?Set ODYSSEUS_OBSIDIAN_VAULT_DIR to your AI_Memory vault path}:/vault
-      # Iris MCP is vendored at vendor/iris-mcp (baked into the image) — no sibling
-      # checkout or bind mount needed. For a live local checkout instead, point
-      # ODYSSEUS_OBSIDIAN_MCP_SCRIPT at its obsidian_memory_mcp.py and add a mount.
     extra_hosts:
       # Lets the container reach local services on the Docker host, including
       # Ollama at http://host.docker.internal:11434 and Proton Mail Bridge
@@ -61,16 +54,8 @@ services:
       - ODYSSEUS_SCRIPT_HOST=${ODYSSEUS_SCRIPT_HOST:-localhost}
       - ODYSSEUS_CHAT_UPLOAD_MAX_BYTES=${ODYSSEUS_CHAT_UPLOAD_MAX_BYTES:-10485760}
       - TZ=${TZ:-Europe/Zurich}
-      - ODYSSEUS_OBSIDIAN_MCP_SCRIPT=${ODYSSEUS_OBSIDIAN_MCP_SCRIPT:-/app/vendor/iris-mcp/obsidian_memory_mcp.py}
-      - ODYSSEUS_OBSIDIAN_VAULT_ROOT=${ODYSSEUS_OBSIDIAN_VAULT_ROOT:-/vault}
-      - IRIS_VAULT_ROOT=${IRIS_VAULT_ROOT:-/vault}
-      - ODYSSEUS_OBSIDIAN_MCP_TOOL_GROUPS=${ODYSSEUS_OBSIDIAN_MCP_TOOL_GROUPS:-vault,anime,warranties}
       - ODYSSEUS_PUBLIC_URL=${ODYSSEUS_PUBLIC_URL:-}
-      - ODYSSEUS_OBSIDIAN_CONTEXT_PATH=${ODYSSEUS_OBSIDIAN_CONTEXT_PATH:-00_Index/assistant_rules.md}
-      - ODYSSEUS_OBSIDIAN_CONTEXT_MAX_CHARS=${ODYSSEUS_OBSIDIAN_CONTEXT_MAX_CHARS:-60000}
-      - ODYSSEUS_DISABLE_OBSIDIAN_MCP=${ODYSSEUS_DISABLE_OBSIDIAN_MCP:-0}
       - ODYSSEUS_ICS_BLOCK_PRIVATE_IPS=${ODYSSEUS_ICS_BLOCK_PRIVATE_IPS:-0}
-      - ODYSSEUS_IRIS_VAULT_UPLOAD_MAX_BYTES=${ODYSSEUS_IRIS_VAULT_UPLOAD_MAX_BYTES:-26214400}
       - DATA_BRAVE_API_KEY=${DATA_BRAVE_API_KEY:-}
       - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
       - GOOGLE_PSE_CX=${GOOGLE_PSE_CX:-}

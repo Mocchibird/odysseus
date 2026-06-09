@@ -12,8 +12,8 @@ ENV DEBIAN_FRONTEND=noninteractive \
 # git/cmake are required when Cookbook builds llama.cpp on first llama.cpp
 # launch inside Docker.
 # nodejs/npm provide npx for the optional built-in Browser MCP server.
-# sqlite3/tzdata match Iris MCP's runtime assumptions for vault indexing and
-# timezone-aware notes; ffmpeg/libopus/libsndfile cover optional Iris audio work.
+# sqlite3/tzdata cover timezone-aware notes/calendar; ffmpeg/libopus/libsndfile
+# cover optional audio work.
 # gosu lets the entrypoint drop privileges cleanly so signals still reach
 # uvicorn directly (no extra shell layer like `su`/`sudo` would add).
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -38,18 +38,17 @@ WORKDIR /app
 # Install Python deps first (layer cache). Optional extras (PyMuPDF AGPL, etc.)
 # are opt-in so the default image stays MIT-core; see requirements-optional.txt.
 ARG INSTALL_OPTIONAL=false
-ARG INSTALL_IRIS_MCP_DEPS=false
-COPY requirements.txt requirements-optional.txt requirements-iris-mcp.txt ./
+ARG INSTALL_EXTRA_DEPS=false
+COPY requirements.txt requirements-optional.txt requirements-extras.txt ./
 RUN pip install --no-cache-dir -r requirements.txt \
     && if [ "$INSTALL_OPTIONAL" = "true" ]; then pip install --no-cache-dir -r requirements-optional.txt; fi \
-    && if [ "$INSTALL_IRIS_MCP_DEPS" = "true" ]; then pip install --no-cache-dir -r requirements-iris-mcp.txt; fi
+    && if [ "$INSTALL_EXTRA_DEPS" = "true" ]; then pip install --no-cache-dir -r requirements-extras.txt; fi
 
 # Copy app code
 COPY . .
 
-# Create data directory (mount a volume here for persistence) and the
-# conventional Iris/Obsidian vault mount point used by docker-compose.
-RUN mkdir -p data logs services/cache/search /vault
+# Create data directory (mount a volume here for persistence).
+RUN mkdir -p data logs services/cache/search
 
 # Entrypoint that drops to PUID/PGID (default 1000:1000) and repairs
 # ownership on the bind-mounted /app/data and /app/logs. Without this,
@@ -62,7 +61,7 @@ RUN chmod +x /usr/local/bin/entrypoint.sh
 
 EXPOSE 7000
 
-VOLUME ["/app/data", "/app/logs", "/vault"]
+VOLUME ["/app/data", "/app/logs"]
 
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "7000"]

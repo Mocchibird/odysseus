@@ -37,8 +37,6 @@ fi
 # to mkdir them. Chown the whole /app tree — fast (<1s on this size)
 # and idempotent via the `-not -uid` filter so we only touch files
 # that need fixing.
-# Do not chown /vault here: Obsidian vaults can be large and should be owned by
-# the host user selected via PUID/PGID.
 for dir in /app /app/data /app/logs; do
     if [ -d "$dir" ]; then
         # `find ... -not -uid` keeps this O(touched-files), not
