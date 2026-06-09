@@ -264,6 +264,24 @@ def semantic_search(owner: Optional[str], q: str, k: int = 5) -> list:
         return []
 
 
+def get(owner: Optional[str], kb_id: str) -> Optional[dict]:
+    """Full record incl. the FULL extracted text + upload_id (owner-scoped).
+    Backs the "open the actual file + see exactly what was extracted from it"
+    verification path — the user never has to trust RAG/LLM to inspect a source."""
+    from core.database import SessionLocal, KnowledgeFile
+
+    db = SessionLocal()
+    try:
+        kf = db.query(KnowledgeFile).filter(KnowledgeFile.id == kb_id).first()
+        if not kf or (owner is not None and kf.owner != owner):
+            return None
+        d = _to_dict(kf)
+        d["text"] = kf.text or ""  # full text (search results only carry an excerpt)
+        return d
+    finally:
+        db.close()
+
+
 def set_tags(owner: Optional[str], kb_id: str, tags) -> Optional[dict]:
     """Replace a file's user tags (owner-scoped). Returns the updated row or None."""
     from core.database import SessionLocal, KnowledgeFile

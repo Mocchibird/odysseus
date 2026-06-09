@@ -529,6 +529,10 @@ upload_router, upload_cleanup_func = setup_upload_routes(upload_handler)
 app.include_router(upload_router)
 upload_cleanup_task = None
 
+# Native knowledge base (deterministic search/browse of stored files + RAG recall).
+from routes.knowledge_routes import setup_knowledge_routes
+app.include_router(setup_knowledge_routes(upload_handler))
+
 # Emoji SVG proxy (same-origin, lazy-cached Twemoji) — lets the chat render
 # emojis as flat SVG instead of system color glyphs.
 from routes.emoji_routes import setup_emoji_routes

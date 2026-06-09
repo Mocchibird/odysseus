@@ -80,3 +80,28 @@ def test_delete_is_owner_scoped(tmp_path):
     assert kb.delete("kb-other", rec["id"]) is False
     assert kb.delete("kb-del", rec["id"]) is True
     assert kb.search("kb-del", q="deletable") == []
+
+
+def test_get_returns_full_text_owner_scoped(tmp_path):
+    path = _write(tmp_path, "doc.md", "FULL BODY " * 100)  # ~1000 chars
+    rec = kb.ingest("kb-get", file_path=path, filename="doc.md")
+    full = kb.get("kb-get", rec["id"])
+    assert full is not None
+    assert len(full["text"]) > len(rec["excerpt"])  # full text, not just the excerpt
+    assert full["upload_id"] is None  # ingested by path here; upload_id set via the route
+    assert kb.get("kb-other", rec["id"]) is None  # owner-scoped
+
+
+def test_knowledge_routes_expose_expected_paths():
+    """The deterministic (non-LLM) file API the user uses to find + open files."""
+    from routes.knowledge_routes import setup_knowledge_routes
+
+    class _UH:
+        def resolve_upload(self, *a, **k):
+            return None
+
+    paths = {r.path for r in setup_knowledge_routes(_UH()).routes}
+    assert "/api/knowledge" in paths
+    assert "/api/knowledge/tags" in paths
+    assert "/api/knowledge/{kb_id}" in paths
+    assert "/api/knowledge/{kb_id}/tags" in paths
