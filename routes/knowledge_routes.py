@@ -7,6 +7,7 @@ UI can open the ACTUAL stored file via /api/upload/{id} and `/{id}` returns the
 full extracted text to verify against the original. The RAG/semantic path is
 Iris-only and lives in the agent tool, never here.
 """
+import asyncio
 import logging
 import os
 
@@ -72,7 +73,11 @@ def setup_knowledge_routes(upload_handler) -> APIRouter:
         info = upload_handler.resolve_upload(upload_id, owner=owner)
         if not info or not info.get("path"):
             raise HTTPException(404, "Upload not found")
-        return kb.ingest(
+        # Ingest is SYNC and, for images, runs the remote vision model for OCR
+        # (can take minutes). Off-thread it so a single slow upload never blocks
+        # the event loop and freezes the whole app (the 504 seen during migration).
+        return await asyncio.to_thread(
+            kb.ingest,
             owner,
             file_path=info["path"],
             filename=info.get("name") or info.get("original_name") or upload_id,
@@ -105,6 +110,7 @@ def setup_knowledge_routes(upload_handler) -> APIRouter:
         """One-time: import the caller's Obsidian-vault files into the knowledge
         base (copy + extract + index). Idempotent. Returns {processed, errors, total}."""
         owner = get_current_user(request)
-        return kb.migrate_from_vault(owner)
+        # Long-running + sync (extracts/OCRs every vault file) → off-thread.
+        return await asyncio.to_thread(kb.migrate_from_vault, owner)
 
     return router

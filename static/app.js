@@ -26,6 +26,7 @@ import calendarModule from './js/calendar.js';
 import notesModule from './js/notes.js?v=382';
 import healthModule from './js/health.js?v=379';
 import pingsModule from './js/pings.js?v=370';
+import knowledgeModule from './js/knowledge.js?v=383';
 import todayModule from './js/today.js?v=370';
 import adminModule from './js/admin.js?v=380';
 import settingsModule from './js/settings.js?v=380';
@@ -209,8 +210,16 @@ function initializeEventListeners() {
     requestAnimationFrame(() => { _touchThrottled = false; });
   }, { passive: true });
 
-  // Internal #session-id links from AI search results
+  // Internal #session-id / #knowledge-id links from AI search results
   el('chat-history').addEventListener('click', (e) => {
+    // #knowledge-<id> citations from search_knowledge → open the file in the KB panel.
+    // Matched by href (not a class) so it works regardless of how it's rendered.
+    const kbLink = e.target.closest('a[href^="#knowledge-"]');
+    if (kbLink && knowledgeModule?.openKnowledge) {
+      e.preventDefault();
+      knowledgeModule.openKnowledge(kbLink.getAttribute('href').slice('#knowledge-'.length));
+      return;
+    }
     const link = e.target.closest('a.chat-link');
     if (!link) return;
     const href = link.getAttribute('href');
@@ -919,6 +928,15 @@ function initializeEventListeners() {
   const toolHabitsBtn = el('tool-habits-btn');
   if (toolHabitsBtn) {
     toolHabitsBtn.addEventListener('click', () => healthModule && healthModule.openHabits());
+  }
+
+  // Knowledge base — manually add files + browse/search/tag/open (toggles)
+  const toolKnowledgeBtn = el('tool-knowledge-btn');
+  if (toolKnowledgeBtn) {
+    toolKnowledgeBtn.addEventListener('click', () => {
+      if (!knowledgeModule) return;
+      knowledgeModule.isKnowledgeOpen() ? knowledgeModule.closeKnowledge() : knowledgeModule.openKnowledge();
+    });
   }
 
   // "Today" dashboard tool button (toggles open/closed)
@@ -3482,6 +3500,7 @@ function startOdysseusApp() {
   const _railToolMap = {
     'rail-today':     'tool-today-btn',
     'rail-books':     'tool-books-btn',
+    'rail-knowledge': 'tool-knowledge-btn',
     'rail-compare':   'tool-compare-btn',
     'rail-research':  'tool-research-btn',
     'rail-cookbook':   'tool-cookbook-btn',

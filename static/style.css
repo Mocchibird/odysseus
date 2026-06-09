@@ -38680,3 +38680,133 @@ body.theme-frosted .modal {
   .today-modal-content { width: 100vw; max-width: 100vw; height: 100%; }
   .today-date-label { display: none; }
 }
+
+/* ============================================================
+   Knowledge panel (knowledge.js) — manually add files, browse/
+   search/tag, open + verify. Mirrors .health-modal-content sizing,
+   gallery card/tag conventions, and the notes PDF scroll viewer.
+   ============================================================ */
+.knowledge-modal-content {
+  width: min(900px, 95vw);
+  max-width: 900px;
+  height: min(85vh, 920px);
+  display: flex;
+  flex-direction: column;
+}
+.knowledge-modal-content .modal-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;          /* inner views own their scroll */
+  padding: 12px 14px 14px;
+  display: flex;
+  flex-direction: column;
+}
+.kb-body.kb-dragover { outline: 2px dashed var(--accent, var(--red)); outline-offset: -6px; border-radius: 8px; }
+.kb-list-view, .kb-detail-view { display: flex; flex-direction: column; min-height: 0; flex: 1 1 auto; gap: 10px; }
+
+/* toolbar: search + add */
+.kb-toolbar { display: flex; gap: 8px; align-items: center; flex-shrink: 0; }
+.kb-search {
+  flex: 1 1 auto; min-width: 0;
+  padding: 8px 12px; border: 1px solid var(--border); border-radius: 8px;
+  background: var(--bg); color: var(--fg); font-size: 13px;
+}
+.kb-search:focus { outline: none; border-color: var(--accent, var(--red)); }
+.kb-upload-btn {
+  flex-shrink: 0; padding: 8px 14px; border: none; border-radius: 8px; cursor: pointer;
+  background: var(--accent, var(--red)); color: #fff; font-size: 13px; font-weight: 600;
+}
+.kb-upload-btn:hover { filter: brightness(1.08); }
+
+/* upload progress */
+.kb-upload-bar { flex-shrink: 0; }
+.kb-upload-track { background: var(--border); border-radius: 4px; overflow: hidden; height: 6px; }
+.kb-upload-progress { height: 100%; width: 0; background: var(--accent, var(--red)); transition: width 0.2s; }
+.kb-upload-status { font-size: 11px; opacity: 0.6; margin-top: 3px; }
+
+/* tag filter chips */
+.kb-tags-row { display: flex; flex-wrap: wrap; gap: 6px; flex-shrink: 0; max-height: 64px; overflow-y: auto; }
+.kb-tag-chip {
+  padding: 3px 10px; border: 1px solid var(--border); border-radius: 999px; cursor: pointer;
+  background: transparent; color: var(--fg); font-size: 11px; opacity: 0.75;
+}
+.kb-tag-chip:hover { opacity: 1; }
+.kb-tag-chip.active { background: var(--accent, var(--red)); color: #fff; border-color: transparent; opacity: 1; }
+
+/* file list */
+.kb-cards { flex: 1 1 auto; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; display: flex; flex-direction: column; gap: 8px; padding-right: 2px; }
+.kb-card {
+  display: flex; gap: 12px; align-items: flex-start; padding: 10px 12px;
+  border: 1px solid var(--border); border-radius: 10px; cursor: pointer;
+  background: color-mix(in srgb, var(--fg) 2%, transparent); transition: background 0.12s, border-color 0.12s;
+}
+.kb-card:hover { background: color-mix(in srgb, var(--fg) 6%, transparent); border-color: var(--accent, var(--red)); }
+.kb-card-badge {
+  flex-shrink: 0; min-width: 42px; height: 42px; padding: 0 6px; border-radius: 8px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 10px; font-weight: 800; letter-spacing: 0.5px; color: #fff; background: var(--fg-muted, #888);
+}
+.kb-kind-image { background: #2a9d6b; } .kb-kind-pdf { background: #c0392b; }
+.kb-kind-md { background: #3a6ea5; } .kb-kind-text { background: #6b7280; } .kb-kind-other { background: #8a6d3b; }
+.kb-card-main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.kb-card-name { font-weight: 600; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.kb-card-excerpt { font-size: 11.5px; opacity: 0.62; line-height: 1.4; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.kb-card-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 1px; }
+.kb-chip { font-size: 10px; padding: 1px 7px; border-radius: 999px; background: color-mix(in srgb, var(--fg) 10%, transparent); opacity: 0.8; }
+.kb-chip.ai { border: 1px dashed var(--border); background: transparent; }
+.kb-empty { flex: 1 1 auto; display: flex; align-items: center; justify-content: center; text-align: center; opacity: 0.5; font-size: 13px; padding: 24px; }
+.kb-loading { padding: 24px; text-align: center; opacity: 0.5; }
+
+/* detail view */
+.kb-detail-head { display: flex; gap: 8px; align-items: center; flex-shrink: 0; }
+.kb-back, .kb-delete, .kb-open-orig {
+  flex-shrink: 0; padding: 5px 10px; border: 1px solid var(--border); border-radius: 7px;
+  background: transparent; color: var(--fg); font-size: 12px; cursor: pointer; text-decoration: none;
+}
+.kb-back:hover, .kb-open-orig:hover { background: color-mix(in srgb, var(--fg) 8%, transparent); }
+.kb-delete { color: var(--red); border-color: color-mix(in srgb, var(--red) 40%, var(--border)); }
+.kb-delete:hover { background: color-mix(in srgb, var(--red) 12%, transparent); }
+.kb-detail-title { flex: 1 1 auto; min-width: 0; font-weight: 700; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.kb-detail-meta { font-size: 11px; opacity: 0.55; flex-shrink: 0; }
+.kb-tags-edit { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; flex-shrink: 0; }
+.kb-tags-current { display: flex; flex-wrap: wrap; gap: 5px; }
+.kb-chip.editable { display: inline-flex; align-items: center; gap: 3px; }
+.kb-chip-x { border: none; background: transparent; color: inherit; cursor: pointer; font-size: 13px; line-height: 1; padding: 0; opacity: 0.6; }
+.kb-chip-x:hover { opacity: 1; }
+.kb-tag-input { padding: 3px 9px; border: 1px solid var(--border); border-radius: 999px; background: var(--bg); color: var(--fg); font-size: 11px; width: 130px; }
+.kb-tag-input:focus { outline: none; border-color: var(--accent, var(--red)); }
+
+/* file viewer */
+.kb-viewer {
+  flex: 1 1 auto; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch;
+  border: 1px solid var(--border); border-radius: 8px;
+  background: color-mix(in srgb, var(--fg) 3%, transparent); padding: 12px 14px; box-sizing: border-box;
+}
+.kb-img { max-width: 100%; height: auto; display: block; margin: 0 auto; border-radius: 6px; }
+.kb-text { white-space: pre-wrap; word-break: break-word; font-family: var(--mono, monospace); font-size: 12px; margin: 0; }
+.kb-noview { opacity: 0.6; text-align: center; padding: 24px; font-size: 13px; }
+.kb-pdf-viewer { width: 100%; min-width: 0; min-height: 0; padding: 0; }
+.kb-indexed { flex-shrink: 0; font-size: 12px; }
+.kb-indexed > summary { cursor: pointer; opacity: 0.6; padding: 4px 0; }
+.kb-indexed-pre { white-space: pre-wrap; word-break: break-word; max-height: 200px; overflow-y: auto; background: color-mix(in srgb, var(--fg) 4%, transparent); border-radius: 6px; padding: 8px; font-size: 11px; margin: 4px 0 0; }
+
+/* .md prose (self-contained; KaTeX + highlight.js styles are global) */
+.kb-md { font-size: 13.5px; line-height: 1.6; }
+.kb-md h1, .kb-md h2, .kb-md h3 { margin: 0.8em 0 0.4em; line-height: 1.25; }
+.kb-md h1 { font-size: 1.5em; } .kb-md h2 { font-size: 1.3em; } .kb-md h3 { font-size: 1.12em; }
+.kb-md p { margin: 0.5em 0; } .kb-md ul, .kb-md ol { margin: 0.5em 0; padding-left: 1.5em; }
+.kb-md a { color: var(--accent, var(--red)); }
+.kb-md img { max-width: 100%; height: auto; }
+.kb-md code { background: color-mix(in srgb, var(--fg) 10%, transparent); padding: 1px 5px; border-radius: 4px; font-size: 0.9em; }
+.kb-md pre { background: color-mix(in srgb, var(--fg) 8%, transparent); border-radius: 8px; padding: 12px; overflow-x: auto; }
+.kb-md pre code { background: transparent; padding: 0; }
+.kb-md blockquote { margin: 0.6em 0; padding: 0.2em 1em; border-left: 3px solid var(--border); opacity: 0.85; }
+.kb-md table { border-collapse: collapse; margin: 0.6em 0; width: auto; max-width: 100%; }
+.kb-md th, .kb-md td { border: 1px solid var(--border); padding: 5px 10px; text-align: left; }
+.kb-md th { background: color-mix(in srgb, var(--fg) 6%, transparent); }
+.kb-md hr { border: none; border-top: 1px solid var(--border); margin: 1em 0; }
+
+@media (max-width: 768px) {
+  .knowledge-modal-content { width: 100vw; max-width: 100vw; height: 100%; }
+  .kb-card-badge { min-width: 38px; height: 38px; }
+}
