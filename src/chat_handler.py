@@ -172,6 +172,10 @@ class ChatHandler:
         # so guide-only/no-tools turns must not reach it.
         vision_enabled = False
         main_is_vision = False
+        # When a message carries an image but the session model is text-only, we
+        # route THIS message to the admin's default vision model (with the raw
+        # image) instead of OCR-injecting a text description. (url, model, headers).
+        vision_override = None
         if effective_att_ids:
             from src.settings import get_setting
             vision_enabled = get_setting("vision_enabled", True)
@@ -181,6 +185,27 @@ class ChatHandler:
                     sess.model or "",
                     getattr(sess, "endpoint_url", "") or "",
                 )
+            # Text-only session model + an image attached → resolve the admin's
+            # default vision model so THIS message is answered by it directly
+            # (raw image passed through), reverting to the session model after.
+            if vision_enabled and not main_is_vision:
+                _has_image_att = any(
+                    files_by_id.get(a)
+                    and self.upload_handler.is_image_file(
+                        files_by_id[a].get("name") or "", files_by_id[a].get("mime", "")
+                    )
+                    for a in effective_att_ids
+                )
+                if _has_image_att:
+                    try:
+                        from src.document_processor import _resolve_vl_model
+                        _vurl, _vmodel, _vheaders = await asyncio.to_thread(
+                            _resolve_vl_model, get_setting("vision_model", "") or "", owner
+                        )
+                        if _vmodel and _vmodel != (sess.model or ""):
+                            vision_override = (_vurl, _vmodel, _vheaders)
+                    except Exception:
+                        vision_override = None
 
         if effective_att_ids and vision_enabled:
             meta_by_id = {m["id"]: m for m in attachment_meta}
@@ -189,12 +214,14 @@ class ChatHandler:
                 if file_info and self.upload_handler.is_image_file(
                     file_info["name"], file_info.get("mime", "")
                 ):
-                    if main_is_vision:
-                        # Main model can see images — just note it, image is passed via build_user_content.
+                    if main_is_vision or vision_override:
+                        # Main model can see images (or we're routing THIS message
+                        # to the admin's default vision model) — just note it; the
+                        # raw image is passed through via build_user_content.
                         enhanced_message = f"{enhanced_message}\n\n[Image attached: {file_info['name']}]"
                         _m = meta_by_id.get(att_id)
                         if _m is not None:
-                            _m["vision_model"] = sess.model or ""
+                            _m["vision_model"] = (vision_override[1] if vision_override else sess.model) or ""
                         # If the user has hand-edited the OCR/caption via the
                         # chat attachment dropdown, fold it in as an explicit
                         # hint so even vision-capable models respect the
@@ -263,7 +290,7 @@ class ChatHandler:
                 if isinstance(item, dict) and item.get("type") == "text"
             ]
             user_content = "\n".join(text_parts).strip() if text_parts else enhanced_message
-        elif not main_is_vision and isinstance(user_content, list):
+        elif not main_is_vision and not vision_override and isinstance(user_content, list):
             text_parts = [
                 item.get("text", "") for item in user_content
                 if isinstance(item, dict) and item.get("type") == "text"
@@ -279,7 +306,7 @@ class ChatHandler:
         else:
             text_for_context = user_content
 
-        return enhanced_message, user_content, text_for_context, youtube_transcripts, attachment_meta
+        return enhanced_message, user_content, text_for_context, youtube_transcripts, attachment_meta, vision_override
 
     # ------------------------------------------------------------------
     # Session helpers

@@ -975,7 +975,14 @@ def setup_chat_routes(
                 _actual_model = None
                 # ── Chat mode: call stream_llm directly, NO tools, NO document access ──
                 try:
-                    _chat_candidates = [(sess.endpoint_url, sess.model, sess.headers)] + _fallback_candidates
+                    _vision_override = ctx.preprocessed.vision_override
+                    if _vision_override:
+                        # Image + text-only session model → answer THIS message with
+                        # the admin's default vision model (raw image), then revert.
+                        _chat_candidates = [_vision_override, (sess.endpoint_url, sess.model, sess.headers)] + _fallback_candidates
+                        _requested_model = _vision_override[1]
+                    else:
+                        _chat_candidates = [(sess.endpoint_url, sess.model, sess.headers)] + _fallback_candidates
                     async for chunk in stream_llm_with_fallback(
                         _chat_candidates,
                         messages,
@@ -1117,11 +1124,23 @@ def setup_chat_routes(
                         _max_rounds = _DEFAULT_ROUNDS
                     _max_rounds = max(1, min(_max_rounds, 200))
 
+                    _vision_override = ctx.preprocessed.vision_override
+                    if _vision_override:
+                        # Image + text-only session model → run THIS agent turn on
+                        # the admin's default vision model (raw image), keeping the
+                        # session model as a fallback. Reverts on the next message.
+                        _agent_url, _agent_model, _agent_headers = _vision_override
+                        _agent_fallbacks = [(sess.endpoint_url, sess.model, sess.headers)] + _fallback_candidates
+                        _requested_model = _agent_model
+                    else:
+                        _agent_url, _agent_model, _agent_headers = sess.endpoint_url, sess.model, sess.headers
+                        _agent_fallbacks = _fallback_candidates
+
                     async for chunk in stream_agent_loop(
-                        sess.endpoint_url,
-                        sess.model,
+                        _agent_url,
+                        _agent_model,
                         messages,
-                        headers=sess.headers,
+                        headers=_agent_headers,
                         temperature=ctx.preset.temperature,
                         max_tokens=ctx.preset.max_tokens,
                         prompt_type=preset_id,
@@ -1133,7 +1152,7 @@ def setup_chat_routes(
                         disabled_tools=disabled_tools if disabled_tools else None,
                         tool_policy=tool_policy,
                         owner=_user,
-                        fallbacks=_fallback_candidates,
+                        fallbacks=_agent_fallbacks,
                         plan_mode=plan_mode,
                         approved_plan=approved_plan or None,
                     ):

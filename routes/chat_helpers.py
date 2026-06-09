@@ -42,6 +42,9 @@ class PreprocessedMessage:
     text_for_context: str
     youtube_transcripts: list
     attachment_meta: list
+    # (url, model, headers) when this message has an image and the session model
+    # is text-only — route just this message to the admin's default vision model.
+    vision_override: Any = None
 
 
 @dataclass
@@ -325,7 +328,7 @@ async def preprocess(
     allow_tool_preprocessing: bool = True,
 ) -> PreprocessedMessage:
     """Run chat_handler.preprocess_message and wrap the result."""
-    enhanced, user_content, text_ctx, yt_transcripts, att_meta = (
+    enhanced, user_content, text_ctx, yt_transcripts, att_meta, vision_override = (
         await chat_handler.preprocess_message(
             message,
             att_ids,
@@ -340,6 +343,7 @@ async def preprocess(
         text_for_context=text_ctx,
         youtube_transcripts=yt_transcripts,
         attachment_meta=att_meta,
+        vision_override=vision_override,
     )
 
 

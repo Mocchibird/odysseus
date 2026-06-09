@@ -402,7 +402,7 @@ def test_chat_preprocess_does_not_surface_cross_owner_attachment(tmp_path, monke
     chat_handler = ChatHandler(None, None, None, None, None, handler)
     sess = SimpleNamespace(id="s1", owner="alice", model="text-model")
 
-    _enhanced, user_content, _text_ctx, _yt, attachment_meta = asyncio.run(
+    _enhanced, user_content, _text_ctx, _yt, attachment_meta, _vision_override = asyncio.run(
         chat_handler.preprocess_message(
             "hello",
             [bob_id],
