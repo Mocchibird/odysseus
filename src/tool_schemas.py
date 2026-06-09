@@ -642,6 +642,22 @@ FUNCTION_TOOL_SCHEMAS = [
     {
         "type": "function",
         "function": {
+            "name": "search_knowledge",
+            "description": "Search the user's KNOWLEDGE BASE — their uploaded files (PDFs, images, markdown, docs) — to recall facts/specs/notes. Combines exact keyword/tag matching with semantic recall. ALWAYS CITE the source file(s) in your answer: the tool returns [filename](#knowledge-<id>) links, and the user must be able to open the original to verify — never state a knowledge-base fact without naming the file it came from. Use for 'what do my files/notes say about X', 'find my file about Y', 'look up Z in my knowledge base'. NOT for live web info (use web_search) and NOT for the habit tracker (use manage_health).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "What to search for (keywords or a natural-language question)."},
+                    "tags": {"type": "array", "items": {"type": "string"}, "description": "Optional tag filter (AND-combined)."},
+                    "limit": {"type": "integer", "description": "Max files to return (default 12)."}
+                },
+                "required": ["query"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "api_call",
             "description": "Call a registered API integration (RSS reader, git forge, bookmark manager, smart home, etc.). Check the system context for available integrations and their endpoints.",
             "parameters": {

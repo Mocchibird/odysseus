@@ -75,6 +75,10 @@ ALWAYS_AVAILABLE = frozenset({
     # my habit / give it an emoji", "log my lunch", "did I work out" never miss
     # the tool and wrongly fall back to a checklist note or a vault search.
     "manage_health",
+    # The native knowledge base (uploaded files: pdf/image/md/…). Keep reachable
+    # so "what do my files say about X", "find my file on Y", "look up Z" hit
+    # search_knowledge instead of falling back to a vault search or web_search.
+    "search_knowledge",
     # Ask the user a multiple-choice question for a decision/clarification.
     # Always reachable so the agent can pause and ask at any point.
     "ask_user",
@@ -88,6 +92,7 @@ ASSISTANT_ALWAYS_AVAILABLE = frozenset({
     "list_email_accounts", "list_emails", "read_email", "send_email", "reply_to_email",
     "bulk_email", "archive_email", "delete_email", "mark_email_read",
     "manage_calendar", "manage_notes", "manage_tasks", "manage_health",
+    "search_knowledge",
     "manage_memory", "manage_iris_vault", "manage_books", "web_search", "read_file",
     "create_document", "update_document",
     "resolve_contact", "search_chats",
@@ -155,6 +160,7 @@ BUILTIN_TOOL_DESCRIPTIONS: Dict[str, str] = {
     "delete_email": "Delete an email — moves to Trash by default, or expunges permanently with permanent=true.",
     "mark_email_read": "Mark an email as read or unread by toggling the \\Seen flag.",
     "bulk_email": "Perform one action on many emails at once. Use for delete all those, archive these, mark all read, move spam to junk. Takes explicit UIDs from list_emails or all_unread=true. Always pass account for Gmail/work/custom mailbox results.",
+    "search_knowledge": "Search the user's KNOWLEDGE BASE — their uploaded files (PDFs, images, markdown, docs) — to recall facts/specs/notes (the native replacement for the vault search). Combines exact keyword/tag matching with semantic recall, and returns [filename](#knowledge-<id>) links — ALWAYS cite the source file so the user can open + verify the original. For 'what do my files/notes say about X', 'find my file about Y', 'look up Z in my knowledge'. Not for live web info (use web_search) and not the habit tracker (use manage_health).",
     "resolve_contact": "Look up a contact's email address by name. Searches CardDAV address book and sent email history. Use when the user says 'message [name]', 'email [name]', or 'send to [name]' without an email address.",
     "manage_contact": "Create, update, delete, or list CardDAV contacts. Use to save a new contact, change an existing one's email/phone, or remove one. Action=list returns uids needed for update/delete. Use when the user says 'save this contact', 'add [name] to contacts', 'update [name]'s email', 'delete [name] from contacts'. Do not use for user identity facts like 'my name is <name>'; those are memory.",
     "manage_notes": "Create and manage notes and checklists (Google Keep-style). ALWAYS use this for note/todo/checklist/reminder creation — NEVER hit /api/notes via app_api. BUT a recurring HABIT (one with streaks/a heatmap, e.g. 'add a habit', 'track meditation daily', 'rename my habit') is NOT a checklist — use manage_health for the habit tracker, not a note. Accepts natural-language `due_date` like 'tomorrow at 9am' or '11pm today' (parsed in the USER'S timezone). The due_date IS the reminder — it fires a notification at that time, so do NOT also create a calendar event for the same reminder. Set colors, labels, pin, archive. Do NOT use manage_memory for note content.",
@@ -392,6 +398,12 @@ class ToolIndex:
             {"manage_calendar"},
         frozenset({"note", "todo", "reminder", "remind", "checklist", "remember to"}):
             {"manage_notes"},
+        # The native knowledge base (uploaded files). "what do my files/notes say
+        # about X", "find my file on Y", "look up Z in my knowledge/docs".
+        frozenset({"knowledge", "knowledge base", "my files", "my file", "my docs",
+                   "my documents", "look up", "find my", "search my", "uploaded file",
+                   "what do my notes say", "in my files", "in my notes"}):
+            {"search_knowledge"},
         # Habit tracker + health/nutrition/training. Without this, "add a habit",
         # "rename my habit", "give it an emoji", "log my lunch" missed
         # manage_health (RAG ranked manage_notes higher) and the agent made a

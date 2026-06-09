@@ -1484,6 +1484,68 @@ async def do_manage_documents(content: str, owner: Optional[str] = None) -> Dict
         db.close()
 
 
+async def do_search_knowledge(content: str, owner: Optional[str] = None) -> Dict:
+    """Search the user's KNOWLEDGE BASE (uploaded files: pdf/image/md/docx/…).
+
+    Combines DETERMINISTIC keyword+tag matching (the user's verifiable path) with
+    semantic (RAG) recall, and returns each hit with its filename + id so the
+    answer can CITE the source the user can open and verify — the model must never
+    present knowledge-base facts without naming the file they came from.
+    """
+    import json as _json
+    from src import knowledge_base as _kb
+
+    try:
+        try:
+            args = _json.loads(content) if content and content.strip().startswith("{") else {"query": content}
+        except Exception:
+            args = {"query": content}
+        query = str(args.get("query") or args.get("q") or "").strip()
+        tags = args.get("tags")
+        if isinstance(tags, str):
+            tags = [t.strip() for t in tags.split(",") if t.strip()]
+        try:
+            limit = int(args.get("limit") or 12)
+        except (TypeError, ValueError):
+            limit = 12
+        if not query and not tags:
+            return {"error": "Provide a 'query' (and/or 'tags') to search the knowledge base.", "exit_code": 1}
+
+        # Deterministic keyword + tag match.
+        results = _kb.search(owner, q=query, tags=tags or [], limit=limit)
+        seen = {f["id"] for f in results}
+        # Semantic recall (RAG) — fold in extra hits not already matched.
+        if query:
+            for h in _kb.semantic_search(owner, query, k=6):
+                kid = h.get("kb_id")
+                if kid and kid not in seen:
+                    full = _kb.get(owner, kid)
+                    if full:
+                        seen.add(kid)
+                        results.append(full)
+
+        if not results:
+            label = query or ", ".join(tags or [])
+            return {"output": f"No knowledge-base files matched '{label}'.", "exit_code": 0, "files": []}
+
+        lines = [
+            f"Found {len(results)} knowledge-base file(s). CITE the source file(s) so the user "
+            f"can open and verify the original — link each as [filename](#knowledge-<id>):"
+        ]
+        files = []
+        for f in results[:limit]:
+            kid = f.get("id")
+            name = f.get("filename") or kid
+            excerpt = (f.get("excerpt") or "").strip().replace("\n", " ")[:240]
+            tag_str = ", ".join(f.get("tags") or []) or "—"
+            lines.append(f"• [{name}](#knowledge-{kid}) — tags: {tag_str}\n  {excerpt}")
+            files.append({"id": kid, "filename": name, "tags": f.get("tags") or []})
+        return {"output": "\n".join(lines), "exit_code": 0, "files": files}
+    except Exception as e:
+        logger.error(f"search_knowledge error: {e}")
+        return {"error": f"search_knowledge failed: {e}", "exit_code": 1}
+
+
 # ---------------------------------------------------------------------------
 # Settings/preferences management tool
 # ---------------------------------------------------------------------------

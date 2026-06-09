@@ -105,3 +105,34 @@ def test_knowledge_routes_expose_expected_paths():
     assert "/api/knowledge/tags" in paths
     assert "/api/knowledge/{kb_id}" in paths
     assert "/api/knowledge/{kb_id}/tags" in paths
+
+
+def test_search_knowledge_tool_registered_everywhere():
+    from src.agent_tools import TOOL_TAGS
+    from src.tool_index import ALWAYS_AVAILABLE, ASSISTANT_ALWAYS_AVAILABLE, BUILTIN_TOOL_DESCRIPTIONS
+    from src.tool_schemas import FUNCTION_TOOL_SCHEMAS
+    from src.tool_parsing import _TOOL_NAME_MAP
+
+    assert "search_knowledge" in TOOL_TAGS
+    assert "search_knowledge" in ALWAYS_AVAILABLE
+    assert "search_knowledge" in ASSISTANT_ALWAYS_AVAILABLE
+    assert "search_knowledge" in BUILTIN_TOOL_DESCRIPTIONS
+    assert _TOOL_NAME_MAP["kb_search"] == "search_knowledge"
+    assert "search_knowledge" in {s["function"]["name"] for s in FUNCTION_TOOL_SCHEMAS}
+
+
+def test_do_search_knowledge_returns_citable_results(tmp_path):
+    import asyncio
+    import json
+    from src.tool_implementations import do_search_knowledge
+
+    p = _write(tmp_path, "huawei.md", "Huawei Ascend P7 — display nits and battery specs")
+    kb.ingest("kb-tool", file_path=p, filename="huawei.md", tags="phones")
+
+    res = asyncio.run(do_search_knowledge(json.dumps({"query": "ascend"}), owner="kb-tool"))
+    assert res["exit_code"] == 0
+    assert "#knowledge-" in res["output"]  # cite the source so the user can open + verify
+    assert any(f["filename"] == "huawei.md" for f in res["files"])
+
+    miss = asyncio.run(do_search_knowledge(json.dumps({"query": "zzz-nomatch"}), owner="kb-tool"))
+    assert miss["exit_code"] == 0 and miss["files"] == []
