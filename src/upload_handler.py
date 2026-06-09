@@ -432,28 +432,11 @@ class UploadHandler:
         context: str = "",
         source: str = "",
     ) -> Optional[Dict[str, Any]]:
-        """Persist an uploaded file in the user's Iris vault when configured.
-
-        The upload cache remains available for chat thumbnails and legacy
-        `/api/upload/{id}` URLs, but the long-lived copy is the vault file.
-        """
-        try:
-            from src import iris_vault
-
-            with open(file_path, "rb") as f:
-                content = f.read()
-            row = iris_vault.save_uploaded_file(
-                owner or "local",
-                original_filename,
-                content,
-                mime=mime,
-                context=context,
-                source=source,
-            )
-            return iris_vault.row_to_dict(row)
-        except Exception as exc:
-            logger.warning("Vault mirror skipped for upload %s: %s", original_filename, exc)
-            return None
+        """No-op: the Obsidian vault was removed. Uploads live in the upload
+        cache (served via /api/upload/{id}); the durable, searchable store is now
+        the Knowledge base (manual add → /api/knowledge). Kept as a stub so the
+        call sites stay simple."""
+        return None
     
     def cleanup_rate_limits(self):
         """Remove stale entries from upload_rate_log."""

@@ -1089,7 +1089,7 @@ async def execute_tool_block(
         do_manage_mcp, do_manage_webhooks, do_manage_tokens,
         do_manage_documents, do_manage_settings, do_manage_notes,
         do_manage_health, do_search_knowledge,
-        do_manage_calendar, do_manage_iris_vault, do_manage_books,
+        do_manage_calendar, do_manage_books,
         do_download_model, do_serve_model, do_list_served_models, do_stop_served_model,
         do_tail_serve_output,
         do_list_downloads, do_cancel_download, do_search_hf_models, do_list_cached_models,
@@ -1345,9 +1345,6 @@ async def execute_tool_block(
     elif tool == "manage_calendar":
         desc = "manage_calendar"
         result = await do_manage_calendar(content, owner=owner)
-    elif tool == "manage_iris_vault":
-        desc = "manage_iris_vault"
-        result = await do_manage_iris_vault(content, owner=owner)
     elif tool == "manage_books":
         desc = "manage_books"
         result = await do_manage_books(content, owner=owner)

@@ -4,9 +4,8 @@ knowledge_base.py — native knowledge base.
 Any uploaded file (pdf / image / md / docx / txt / …) is stored in the uploads
 store, its text is extracted, recorded in the `knowledge_files` table, and
 indexed into the RAG vector store — so Iris can recall it AND the user can
-search / tag / browse it. This replaces the Obsidian-vault file index
-(`iris_vault`) with a native, DB-backed system that needs no Obsidian sync or
-iris-mcp.
+search / tag / browse it. The native, DB-backed knowledge store: files are added
+manually (upload → POST /api/knowledge) and live entirely inside Odysseus.
 
 Reuses, never reinvents:
   • text extraction  -> src.personal_docs (pdf / office / plain text)
@@ -421,46 +420,3 @@ def count(owner: Optional[str]) -> int:
         return q.count()
     finally:
         db.close()
-
-
-def migrate_from_vault(owner: Optional[str]) -> dict:
-    """One-time import of the owner's Obsidian-vault files into the KB: each
-    indexed vault file is copied in, text-extracted, RAG-indexed, and made
-    searchable/openable. Idempotent (content-hash dedupe). Returns
-    {processed, errors, total}. (Couples to iris_vault ONLY here, for migration.)"""
-    from core.database import SessionLocal, IrisVaultFile
-
-    try:
-        from src import iris_vault
-    except Exception as e:
-        logger.warning("knowledge: iris_vault unavailable for migration: %s", e)
-        return {"processed": 0, "errors": 0, "total": count(owner), "note": "vault module unavailable"}
-
-    db = SessionLocal()
-    try:
-        q = db.query(IrisVaultFile)
-        if owner is not None:
-            q = q.filter(IrisVaultFile.owner == owner)
-        rows = q.all()
-    finally:
-        db.close()
-
-    processed = errors = 0
-    for row in rows:
-        try:
-            path = iris_vault.resolve_owner_file(owner, row.rel_path)
-            if not path or not path.exists():
-                errors += 1
-                continue
-            ingest(
-                owner,
-                file_path=str(path),
-                filename=os.path.basename(row.rel_path) or (row.title or "file"),
-                mime=getattr(row, "mime", None),
-                source="vault-migration",
-            )
-            processed += 1
-        except Exception as e:
-            logger.debug("knowledge: migrate failed for %s: %s", getattr(row, "rel_path", "?"), e)
-            errors += 1
-    return {"processed": processed, "errors": errors, "total": count(owner)}

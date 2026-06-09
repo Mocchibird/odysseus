@@ -151,40 +151,6 @@ def test_ingest_copies_file_and_is_openable(tmp_path):
     assert kb.file_abspath("kb-other", rec["id"]) is None
 
 
-def test_migrate_from_vault(tmp_path, monkeypatch):
-    import hashlib as _h
-    from core.database import SessionLocal, IrisVaultFile
-
-    owner = "kb-mig"
-    vroot = tmp_path / "vault"
-    monkeypatch.setenv("ODYSSEUS_OBSIDIAN_VAULT_ROOT", str(vroot))
-    # vault layout: <root>/<owner>/<rel_path>
-    (vroot / owner / "notes").mkdir(parents=True)
-    (vroot / owner / "notes" / "huawei.md").write_text("Huawei Ascend specs", encoding="utf-8")
-    (vroot / owner / "plain.txt").write_text("just a plain note", encoding="utf-8")
-    db = SessionLocal()
-    try:
-        for rel in ("notes/huawei.md", "plain.txt"):
-            db.add(IrisVaultFile(
-                id=_h.sha256(f"{owner}/{rel}".encode()).hexdigest(),
-                owner=owner, rel_path=rel, title=rel,
-                sha256=_h.sha256(rel.encode()).hexdigest(),
-            ))
-        db.commit()
-    finally:
-        db.close()
-
-    res = kb.migrate_from_vault(owner)
-    assert res["processed"] == 2
-    assert res["total"] == 2
-    # imported files are searchable + openable, tagged as a migration
-    assert {h["filename"] for h in kb.search(owner, q="ascend")} == {"huawei.md"}
-    assert all(h["source"] == "vault-migration" for h in kb.search(owner, q=""))
-    # idempotent: re-running adds nothing (content-hash dedupe)
-    res2 = kb.migrate_from_vault(owner)
-    assert res2["total"] == 2
-
-
 def test_ingest_audio_is_stored_without_text(tmp_path):
     p = tmp_path / "voice.ogg"
     p.write_bytes(b"OggS fake audio bytes")

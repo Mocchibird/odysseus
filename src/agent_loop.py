@@ -287,8 +287,7 @@ Generate an image. Line 1 = description, line 2 = model name, line 3 = WxH (e.g.
     "list_models": "- ```list_models``` — Show all available AI models across all endpoints. Use when user asks what models are available.",
     "manage_session": "- ```manage_session``` — Rename, archive, delete, fork, switch, or `list` chats (the UI calls them 'chats'; 'session' is internal). Line 1 = action (list/switch/rename/archive/unarchive/delete/important/unimportant/truncate/fork), Line 2 = exact chat id from `list_sessions` (or `current` where supported). For delete/archive/truncate, always list first and reuse the exact id; never invent placeholder ids. `switch`/`open` returns a clickable anchor link the user can tap to open the chat — use for \"open my X chat\".",
     "manage_memory": "- ```manage_memory``` — Manage the user's persistent memory (facts, identity, preferences, context that persists across chats). Line 1 = action (list/add/edit/delete/search), rest = content. Use when user says 'remember this', states identity facts like 'my name is <name>' / 'call me <name>' / 'I live in <place>', or asks about stored memories.",
-    "manage_iris_vault": "- ```manage_iris_vault``` — Iris's persistent Obsidian vault file store. Args (JSON): {\"action\":\"status|search|read|write|delete|reindex\", \"query\":\"...\", \"path\":\"folder/file.md\", \"content\":\"...\"}. Files are stored under the current user's own vault folder (`<vault>/<username>/`) and indexed in SQLite. Use for durable retained files/knowledge, searching saved Obsidian-backed notes, and recalling user-specific stored material. Search/list before read when the path is unknown.",
-    "manage_books": "- ```manage_books``` — Iris's vault-backed EPUB/PDF reader. Args (JSON): {\"action\":\"list|read|progress\", \"query\":\"...\", \"path\":\"40_Attachments/epubs/book.epub\", \"chapter_index\":0, \"scroll_percent\":0}. Use for listing books, reading EPUB chapters/PDF pages, and saving or answering questions about reading progress.",
+    "manage_books": "- ```manage_books``` — Iris's EPUB/PDF reader. Args (JSON): {\"action\":\"list|read|progress\", \"query\":\"...\", \"path\":\"book.epub\", \"chapter_index\":0, \"scroll_percent\":0}. Use for listing books, reading EPUB chapters/PDF pages, and saving or answering questions about reading progress.",
     "manage_skills": "- ```manage_skills``` — Skill registry (SKILL.md format). Args (JSON): {\"action\": \"list|view|view_ref|search|add|edit|patch|publish|delete\", ...}. `list` returns the index of available skills (published + teacher-escalation drafts); `view name=foo` fetches the full SKILL.md; `view_ref name=foo path=...` loads a reference file under the skill directory. For `add`, provide an explicit kebab-case `name` and only report the exact returned name, because storage may normalize or dedupe it. Use this BEFORE doing domain work — there may already be a procedure (published or draft) that prescribes the correct steps. Drafts written by the teacher loop are authoritative guidance even though they're not yet published.",
     "manage_tasks": "- ```manage_tasks``` — Create and manage scheduled background tasks (recurring AI jobs). Args (JSON): {\"action\": \"list|create|edit|delete|pause|resume|run\", ...}",
     "manage_endpoints": "- ```manage_endpoints``` — Add, remove, or configure AI model API endpoints. Args (JSON): {\"action\": \"list|add|delete|enable|disable\", ...}. Use when user wants to add a new AI provider.",
@@ -786,14 +785,6 @@ def _build_system_prompt(
         agent_prompt = current_datetime_prompt() + agent_prompt
     except Exception:
         pass
-
-    try:
-        from src.obsidian_context import load_obsidian_session_context
-        obsidian_ctx = load_obsidian_session_context()
-        if obsidian_ctx:
-            agent_prompt = obsidian_ctx + "\n\n" + agent_prompt
-    except Exception:
-        logger.debug("Failed to add Obsidian session context", exc_info=True)
 
     # Document context is kept as a SEPARATE message (not merged into the tool
     # prompt) so the context trimmer doesn't destroy it when truncating the

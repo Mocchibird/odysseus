@@ -822,28 +822,6 @@ FUNCTION_TOOL_SCHEMAS = [
     {
         "type": "function",
         "function": {
-            "name": "manage_iris_vault",
-            "description": "Manage Iris's persistent Obsidian vault files for the current user. Files are stored under the user's own vault folder and indexed in SQLite for retrieval. Use search/list before read when the path is unknown; use write to retain durable notes/files.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "action": {
-                        "type": "string",
-                        "enum": ["status", "search", "list", "read", "write", "delete", "sort_inbox", "reindex"],
-                        "description": "Action to perform"
-                    },
-                    "query": {"type": "string", "description": "Search query for title/path/content"},
-                    "limit": {"type": "integer", "description": "Maximum search/list results"},
-                    "path": {"type": "string", "description": "Vault-relative path inside the current user's folder"},
-                    "content": {"type": "string", "description": "Text content for write"}
-                },
-                "required": ["action"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
             "name": "manage_books",
             "description": "List/read EPUB and PDF books stored in the user's Iris vault, and save reading progress. Use this when the user asks about books, EPUBs, PDFs, reading status, or what they have read.",
             "parameters": {

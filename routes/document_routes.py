@@ -64,28 +64,9 @@ from routes.document_helpers import (
 
 
 def _mirror_document_to_vault(owner: str | None, doc: Document) -> None:
-    if not owner or not doc or (doc.language or "").lower() == "email":
-        return
-    try:
-        from src import iris_vault
-
-        title = (doc.title or "Untitled Document").strip() or "Untitled Document"
-        rel_path = f"10_Notes/documents/{doc.id}.md"
-        language = (doc.language or "text").strip() or "text"
-        content = doc.current_content or ""
-        vault_text = (
-            "---\n"
-            "type: document\n"
-            "source: odysseus\n"
-            f"document_id: {doc.id}\n"
-            f"language: {language}\n"
-            "---\n\n"
-            f"# {title}\n\n"
-            f"{content}"
-        )
-        iris_vault.write_text_file(owner, rel_path, vault_text)
-    except Exception:
-        logger.debug("Document vault mirror skipped", exc_info=True)
+    """No-op: the Obsidian vault was removed. Documents live in the native
+    documents store; nothing is mirrored to a vault anymore."""
+    return
 
 
 def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:

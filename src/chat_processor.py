@@ -185,16 +185,6 @@ class ChatProcessor:
                 "role": "system",
                 "content": preset_system_prompt
             })
-        try:
-            from src.obsidian_context import load_obsidian_session_context
-            obsidian_ctx = load_obsidian_session_context()
-            if obsidian_ctx:
-                preface.append({
-                    "role": "system",
-                    "content": obsidian_ctx,
-                })
-        except Exception:
-            logger.debug("Failed to add Obsidian session context", exc_info=True)
         if not agent_mode:
             try:
                 from src.user_time import current_datetime_prompt

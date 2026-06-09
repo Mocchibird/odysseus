@@ -105,12 +105,4 @@ def setup_knowledge_routes(upload_handler) -> APIRouter:
             raise HTTPException(404, "Not found")
         return {"ok": True}
 
-    @router.post("/migrate-vault")
-    async def kb_migrate_vault(request: Request):
-        """One-time: import the caller's Obsidian-vault files into the knowledge
-        base (copy + extract + index). Idempotent. Returns {processed, errors, total}."""
-        owner = get_current_user(request)
-        # Long-running + sync (extracts/OCRs every vault file) → off-thread.
-        return await asyncio.to_thread(kb.migrate_from_vault, owner)
-
     return router

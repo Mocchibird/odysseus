@@ -745,9 +745,6 @@ app.include_router(setup_claude_routes())
 from routes.vault_routes import setup_vault_routes
 app.include_router(setup_vault_routes())
 
-from routes.iris_vault_routes import setup_iris_vault_routes
-app.include_router(setup_iris_vault_routes())
-
 from routes.book_routes import setup_book_routes
 app.include_router(setup_book_routes())
 

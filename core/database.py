@@ -221,26 +221,6 @@ class Document(TimestampMixin, Base):
                            cascade="all, delete-orphan", order_by="DocumentVersion.version_number")
 
 
-class IrisVaultFile(TimestampMixin, Base):
-    """Obsidian-backed persistent file indexed for Iris retrieval."""
-    __tablename__ = "iris_vault_files"
-
-    id         = Column(String, primary_key=True, index=True)
-    owner      = Column(String, nullable=False, index=True)
-    rel_path   = Column(String, nullable=False, index=True)
-    title      = Column(String, nullable=False, default="")
-    mime       = Column(String, nullable=True)
-    size       = Column(Integer, nullable=False, default=0)
-    sha256     = Column(String(64), nullable=False, index=True)
-    mtime      = Column(DateTime, nullable=True, index=True)
-    excerpt    = Column(Text, nullable=True)
-    content    = Column(Text, nullable=True)
-
-    __table_args__ = (
-        Index("ix_iris_vault_owner_path", "owner", "rel_path", unique=True),
-    )
-
-
 class DocumentVersion(Base):
     """Immutable snapshot of a document at a point in time."""
     __tablename__ = "document_versions"

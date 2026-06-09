@@ -83,81 +83,6 @@ _BUILTIN_NPX_SERVERS = {
     },
 }
 
-_OBSIDIAN_MCP_SERVER_ID = "iris_obsidian"
-
-
-def _env_truthy(name: str) -> bool:
-    return os.environ.get(name, "").strip().lower() in {"1", "true", "yes", "on"}
-
-
-def _prepend_pythonpath(path: str, existing: str | None) -> str:
-    if not existing:
-        return path
-    parts = existing.split(os.pathsep)
-    if path in parts:
-        return existing
-    return os.pathsep.join([path, existing])
-
-
-def _obsidian_mcp_config_from_env() -> dict | None:
-    """Return optional Iris/Obsidian MCP stdio config from env vars.
-
-    This is intentionally not part of _BUILTIN_SERVERS: Odysseus hides Python
-    built-ins from function-calling because those are legacy internal tools.
-    Iris is an external tool surface, so it must stay visible as ordinary MCP.
-    """
-    script = os.environ.get("ODYSSEUS_OBSIDIAN_MCP_SCRIPT", "").strip()
-    if not script:
-        # Default to the vendored copy bundled in this repo (vendor/iris-mcp) so
-        # Odysseus is self-contained — no sibling obsidian-iris-mcp checkout or
-        # bind-mount needed. An explicit env override still wins (e.g. to point
-        # at a live local checkout for development).
-        vendored = Path(__file__).resolve().parents[1] / "vendor" / "iris-mcp" / "obsidian_memory_mcp.py"
-        if vendored.exists():
-            script = str(vendored)
-    if not script:
-        return None
-    script_path = Path(script).expanduser().resolve(strict=False)
-    if not script_path.exists():
-        logger.warning(
-            "Obsidian MCP script configured but not found: %s",
-            script_path,
-        )
-        return None
-
-    env = {
-        "PYTHONPATH": _prepend_pythonpath(
-            str(script_path.parent),
-            os.environ.get("PYTHONPATH"),
-        ),
-    }
-    vault_root = os.environ.get("ODYSSEUS_OBSIDIAN_VAULT_ROOT", "").strip()
-    if vault_root:
-        env["IRIS_VAULT_ROOT"] = vault_root
-
-    # Load only the vault-management tool groups (plus anime + warranties) from
-    # iris-mcp; Odysseus has no Discord and ships its own calendar/tasks and
-    # native Health/Habits, so those iris groups are deliberately left out to
-    # avoid duplicate/competing tool surfaces. Override with a comma list of
-    # group names (vault,calendar,health,anime,vocab,warranties,discord,web,
-    # voice,users) or set to empty to load every iris tool. See
-    # obsidian-iris-mcp/_iris/tools/__init__.py for the group map.
-    tool_groups = os.environ.get(
-        "ODYSSEUS_OBSIDIAN_MCP_TOOL_GROUPS", "vault,anime,warranties"
-    ).strip()
-    if tool_groups:
-        env["IRIS_TOOL_GROUPS"] = tool_groups
-
-    command = os.environ.get("ODYSSEUS_OBSIDIAN_MCP_COMMAND", "").strip() or sys.executable
-    return {
-        "server_id": _OBSIDIAN_MCP_SERVER_ID,
-        "name": os.environ.get("ODYSSEUS_OBSIDIAN_MCP_NAME", "").strip()
-        or "Iris: Obsidian Vault",
-        "command": command,
-        "args": [str(script_path)],
-        "env": env,
-    }
-
 
 # Global flag to disable MCP if there are compatibility issues
 MCP_DISABLED = os.environ.get("ODYSSEUS_DISABLE_MCP", "").lower() in ("1", "true", "yes")
@@ -199,33 +124,6 @@ async def register_builtin_servers(mcp_manager):
             continue
         asyncio.create_task(_connect_python_server(server_id, script_path, name))
 
-    obsidian_cfg = (
-        None
-        if _env_truthy("ODYSSEUS_DISABLE_OBSIDIAN_MCP")
-        else _obsidian_mcp_config_from_env()
-    )
-    if obsidian_cfg:
-        async def _connect_obsidian_server():
-            try:
-                ok = await mcp_manager.connect_server(
-                    server_id=obsidian_cfg["server_id"],
-                    name=obsidian_cfg["name"],
-                    transport="stdio",
-                    command=obsidian_cfg["command"],
-                    args=obsidian_cfg["args"],
-                    env=obsidian_cfg["env"],
-                )
-                if ok:
-                    logger.info("Obsidian MCP server registered: %s", obsidian_cfg["name"])
-                else:
-                    logger.warning("Obsidian MCP server failed to connect: %s", obsidian_cfg["name"])
-            except asyncio.CancelledError:
-                logger.warning("Obsidian MCP server cancelled")
-                raise
-            except BaseException as e:
-                logger.warning("Obsidian MCP server error: %s: %s", type(e).__name__, e)
-
-        asyncio.create_task(_connect_obsidian_server())
 
     # Register NPX-based servers in the background (they take longer to start)
     npx_path = _find_npx()

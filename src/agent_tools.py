@@ -40,7 +40,7 @@ TOOL_TAGS = {"bash", "python", "web_search", "web_fetch", "read_file", "write_fi
              "suggest_document",
              "manage_endpoints", "manage_mcp", "manage_webhooks",
              "manage_tokens", "manage_documents", "manage_settings",
-             "manage_notes", "manage_health", "search_knowledge", "manage_calendar", "manage_iris_vault", "manage_books",
+             "manage_notes", "manage_health", "search_knowledge", "manage_calendar", "manage_books",
              "resolve_contact", "manage_contact", "list_email_accounts", "send_email", "list_emails",
              "read_email", "reply_to_email", "bulk_email", "archive_email",
              "delete_email", "mark_email_read",
@@ -110,7 +110,6 @@ from src.tool_implementations import (  # noqa: E402, F401
     do_manage_tokens,
     do_manage_documents,
     do_manage_settings,
-    do_manage_iris_vault,
     do_manage_books,
     do_api_call,
 )

@@ -1965,30 +1965,11 @@ def setup_email_routes():
             content = await read_upload_limited(file, EMAIL_COMPOSE_UPLOAD_MAX_BYTES, "Attachment")
             with open(filepath, "wb") as f:
                 f.write(content)
-            vault_meta = {}
-            try:
-                from src import iris_vault
-
-                row = iris_vault.save_uploaded_file(
-                    owner or "local",
-                    safe_name,
-                    content,
-                    mime=file.content_type or "",
-                    context=f"Email compose attachment {safe_name}",
-                    source="email",
-                )
-                vault_meta = {
-                    "vault_path": row.rel_path,
-                    "vault_title": getattr(row, "title", "") or "",
-                }
-            except Exception:
-                logger.debug("Email compose attachment vault mirror skipped", exc_info=True)
             return {
                 "success": True,
                 "token": token,
                 "filename": safe_name,
                 "size": len(content),
-                **vault_meta,
             }
         except HTTPException:
             raise

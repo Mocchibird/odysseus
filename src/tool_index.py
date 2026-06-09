@@ -64,10 +64,7 @@ ALWAYS_AVAILABLE = frozenset({
     # of topic. Without this, RAG drops it and the agent falls back to
     # app_api /api/memory/add which fails with 422 on first attempt.
     "manage_memory",
-    # Iris's Obsidian vault is the durable user-file store. Keep it reachable
-    # for save/recall requests even when the wording is vague.
-    "manage_iris_vault",
-    # Reading state is also durable vault context; keep it reachable for
+    # Reading state is durable user context; keep it reachable for
     # "what was I reading?" and book/PDF follow-ups.
     "manage_books",
     # The native habit/health tracker is a first-class, frequently-used feature
@@ -93,7 +90,7 @@ ASSISTANT_ALWAYS_AVAILABLE = frozenset({
     "bulk_email", "archive_email", "delete_email", "mark_email_read",
     "manage_calendar", "manage_notes", "manage_tasks", "manage_health",
     "search_knowledge",
-    "manage_memory", "manage_iris_vault", "manage_books", "web_search", "read_file",
+    "manage_memory", "manage_books", "web_search", "read_file",
     "create_document", "update_document",
     "resolve_contact", "search_chats",
     "api_call",  # For Miniflux/Gitea/Linkding/etc. integrations
@@ -139,8 +136,7 @@ BUILTIN_TOOL_DESCRIPTIONS: Dict[str, str] = {
     "manage_webhooks": "Webhook management: list, add, delete, enable, or disable webhooks.",
     "manage_tokens": "API token management: list, create, or delete API access tokens.",
     "manage_documents": "List, read, delete, or tidy documents in the editor panel. action='list' returns clickable rows (most-recent first) so the user can open any doc by clicking. action='read' (aka view/open/get) with document_id returns the content. action='delete' with document_id removes a doc (only way to delete). Use this for ANY 'show/read/list/open my documents/docs/files/notes' request — never shell or curl.",
-    "manage_iris_vault": "Persistent Obsidian vault file storage for Iris. Search/list/read/write/delete/sort_inbox/reindex files under the current user's own vault folder. Use for durable personal knowledge, retained files, recalling saved notes, and Obsidian-backed storage. Search before read when path is unknown.",
-    "manage_books": "EPUB/PDF e-reader over the Iris vault: list books, read EPUB chapters or PDF pages, and save/read reading progress. Use for books, ebooks, EPUBs, PDFs, chapter/page status, and what the user has read.",
+    "manage_books": "EPUB/PDF e-reader: list books, read EPUB chapters or PDF pages, and save/read reading progress. Use for books, ebooks, EPUBs, PDFs, chapter/page status, and what the user has read.",
     "manage_research": "List, read/open, or delete saved DEEP RESEARCH results from the Library. action='list' returns clickable [query](#research-<id>) rows (most-recent first). action='read' (aka open/view/get) with id returns the report + sources. action='delete' with id removes it. Use this for ANY 'open/read/find/delete my research / that report / the research on X' request. NOTE: this is for EXISTING research; to START new research use trigger_research.",
     "manage_settings": "Change ANY real app setting (the ones the Settings panel writes) so the user never has to open it: TTS voice/provider/speed, STT, search engine + result count, default/teacher/task/utility/vision/image/research models, image quality, reminder channel (browser/email/ntfy), agent timeout/tool-call budget, and more. action=set with key (friendly aliases ok: voice, 'search engine', 'default model', 'teacher model', 'image quality', 'reminder channel'...) + value; get/list/reset too. Also toggles tools on/off (disable_tool/enable_tool/list_tools). Secrets/API keys are read-only. Use for any 'change my…/set my…/use X for…/turn on…' preference request.",
     "create_session": "Create a new chat with a name and model.",
@@ -417,7 +413,7 @@ class ToolIndex:
         frozenset({"book", "books", "ebook", "ebooks", "epub", "pdf", "reader",
                    "e-reader", "ereader", "chapter", "page", "reading progress",
                    "what i read", "where i stopped"}):
-            {"manage_books", "manage_iris_vault"},
+            {"manage_books"},
         # Chat/session management. "rename" alone maps to documents below, so a
         # request like "rename the last 12 sessions/chats" needs these session
         # keywords to surface the right tools (NOT app_api — /api/sessions is

@@ -189,10 +189,6 @@ _TOOL_NAME_MAP = {
     "manage_health": "manage_health",
     "health": "manage_health",
     "habits": "manage_health",
-    "manage_iris_vault": "manage_iris_vault",
-    "iris_vault": "manage_iris_vault",
-    "vault_files": "manage_iris_vault",
-    "obsidian_files": "manage_iris_vault",
 }
 
 _MISFENCED_WEB_TOOL_NAMES = {
