@@ -5,7 +5,7 @@ import uiModule from './ui.js';
 import markdownModule from './markdown.js';
 import { addAITTSButton } from './tts-ai.js';
 import { providerLogo, providerLabel } from './providers.js';
-import settingsModule from './settings.js?v=378';
+import settingsModule from './settings.js?v=380';
 import spinnerModule from './spinner.js';
 import { bindMenuDismiss } from './escMenuStack.js';
 import { matchModelKey } from './model/matchKey.js';
@@ -2123,6 +2123,28 @@ export function addMessage(role, content, modelName, metadata) {
       }
       if (markdownModule.renderMermaid) markdownModule.renderMermaid(box);
       return lastWrap;
+    }
+
+    // --- Wake-task / supervisor system check-in ---
+    // The self-wake mechanism injects "Did you finish?" as a user message
+    // (or persisted history shows a "[Task] Self-check: <id>" envelope)
+    // so the agent loop re-enters and re-checks status. Render as a
+    // normal user-style bubble — same chrome as a real user message,
+    // just with role "Supervisor" and a short summary body — instead of
+    // a slim system chip. Matches chat style and integrates cleanly
+    // into the conversation flow.
+    let _isWakeCheck = !!(metadata?.wake_check_in || metadata?.hidden_from_user_view);
+    if (!_isWakeCheck && typeof textRaw === 'string') {
+      // Also catch historical messages persisted as "[Task] Self-check: <sid>"
+      // (older wake tasks that didn't set wake_check_in metadata).
+      if (/^\s*\[Task\]\s+Self-check:/i.test(textRaw)) {
+        _isWakeCheck = true;
+      }
+    }
+    if (_isWakeCheck) {
+      // Supervisor self-check messages are an internal control signal —
+      // skip rendering entirely so they don't show up in the conversation.
+      return null;
     }
 
     // --- Standard single-bubble message ---

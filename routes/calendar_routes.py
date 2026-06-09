@@ -14,7 +14,7 @@ from dateutil.rrule import rrulestr
 
 from core.database import SessionLocal, CalendarCal, CalendarEvent
 from src.auth_helpers import require_user
-from src.upload_limits import read_upload_limited
+from src.upload_limits import read_upload_limited, ICS_MAX_BYTES
 
 logger = logging.getLogger(__name__)
 
@@ -128,10 +128,10 @@ def _resolve_base_uid(uid: str) -> str:
     return base
 
 
-# 10 MB hard cap on ICS import. Loading the whole calendar into memory is
-# unavoidable with python-icalendar, so file uploads and feed downloads share
-# the same cap.
-_ICS_MAX_BYTES = 10 * 1024 * 1024
+# 10 MB hard cap on ICS import (ICS_MAX_BYTES, imported from src.upload_limits,
+# env-overridable via ODYSSEUS_ICS_MAX_BYTES). Loading the whole calendar into
+# memory is unavoidable with python-icalendar, so file uploads and feed
+# downloads share the same cap.
 _ICS_MAX_REDIRECTS = 5
 
 
@@ -200,7 +200,7 @@ async def _fetch_ics_feed(url: str) -> tuple[bytes, str]:
                     total = 0
                     async for chunk in resp.aiter_bytes():
                         total += len(chunk)
-                        if total > _ICS_MAX_BYTES:
+                        if total > ICS_MAX_BYTES:
                             raise HTTPException(413, "ICS feed exceeds 10 MB limit")
                         chunks.append(chunk)
                     return b"".join(chunks), str(resp.url)
@@ -1501,6 +1501,9 @@ def setup_calendar_routes() -> APIRouter:
         finally:
             db.close()
 
+    # Hard cap on ICS upload (ICS_MAX_BYTES, default 10 MB). Loading the whole
+    # file into memory is unavoidable with python-icalendar, so an unbounded
+    # upload would OOM.
     @router.post("/import")
     async def import_ics(request: Request, file: Optional[UploadFile] = File(None), calendar_name: str = ""):
         """Import events from an .ics file or http(s)/webcal ICS feed URL."""
@@ -1508,7 +1511,7 @@ def setup_calendar_routes() -> APIRouter:
         db = SessionLocal()
         try:
             if file is not None:
-                content = await read_upload_limited(file, _ICS_MAX_BYTES, "ICS file")
+                content = await read_upload_limited(file, ICS_MAX_BYTES, "ICS file")
                 return _import_ics_content(
                     db,
                     owner=owner,

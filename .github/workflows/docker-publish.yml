@@ -22,7 +22,6 @@ concurrency:
 
 permissions:
   contents: read
-  packages: write
 
 env:
   REGISTRY: ghcr.io
@@ -32,6 +31,9 @@ jobs:
   build:
     name: build (${{ matrix.arch }})
     runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+      packages: write
     strategy:
       fail-fast: false
       matrix:
@@ -44,10 +46,20 @@ jobs:
             runner: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6.0.3
+        with:
+          persist-credentials: false
       - name: Lowercase image name (GHCR requires a lowercase repository name)
         run: echo "IMAGE_NAME=${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
       - name: Set up Buildx
         uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5  # v4.1.0
+        with:
+          # Route docker.io base-image pulls through Google's pull-through mirror to dodge the
+          # anonymous Docker Hub rate-limit timeouts ("registry-1.docker.io/v2/: context deadline
+          # exceeded") that hit shared CI runner IPs. BuildKit transparently falls back to
+          # docker.io if the mirror does not have an image, so this is safe.
+          buildkitd-config-inline: |
+            [registry."docker.io"]
+              mirrors = ["mirror.gcr.io"]
       - name: Log in to GHCR
         uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee  # v4.2.0
         with:
@@ -80,8 +92,13 @@ jobs:
     name: merge manifest + tag
     runs-on: ubuntu-latest
     needs: build
+    permissions:
+      contents: read
+      packages: write
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6.0.3
+        with:
+          persist-credentials: false
       - name: Lowercase image name (GHCR requires a lowercase repository name)
         run: echo "IMAGE_NAME=${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
       - name: Read APP_VERSION + short sha
@@ -120,6 +137,8 @@ jobs:
         run: |
           tags=$(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON")
           digests=$(printf "${REGISTRY}/${IMAGE_NAME}@sha256:%s " *)
+          # word-splitting is intended: $tags and $digests each expand to multiple args
+          # shellcheck disable=SC2086
           docker buildx imagetools create $tags $digests
         env:
           REGISTRY: ${{ env.REGISTRY }}

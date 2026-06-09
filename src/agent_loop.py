@@ -21,6 +21,7 @@ from src.settings import get_setting
 from src.prompt_security import untrusted_context_message
 from src.tool_security import blocked_tools_for_owner, plan_mode_disabled_tools
 from src.tool_policy import GUIDE_ONLY_DIRECTIVE, ToolPolicy
+from src.tool_utils import get_mcp_manager
 from src.agent_tools import (
     parse_tool_blocks,
     strip_tool_blocks,
@@ -29,7 +30,6 @@ from src.agent_tools import (
     set_active_document,
     set_active_model,
     function_call_to_tool_block,
-    get_mcp_manager,
     FUNCTION_TOOL_SCHEMAS,
     TOOL_TAGS,
     ToolBlock,
@@ -59,120 +59,122 @@ def _load_mcp_disabled_map() -> Dict[str, set]:
 
 # System prompt that tells the LLM about available tools.
 # Always injected — the LLM decides whether to use them.
+
 _AGENT_PREAMBLE = """\
-You are an AI assistant with tool access. You can run shell commands, execute Python, search the web, \
-read/write files, create and edit documents, generate images, manage memories, and more. \
-To use a tool, write a fenced code block with the tool name as the language tag. \
-The block executes automatically and you see the output."""
+You are an AI assistant with tool access. Only the tools listed below are available for this turn.
+To use a tool, write a fenced code block with the tool name as the language tag. The block executes automatically and you see the output."""
 
 _AGENT_RULES = """\
-## Rules
-- Only use tools when needed. Don't search for things you already know.
-- For web lookup/search/latest/current requests, use `web_search` or `web_fetch`. Do NOT use `bash`, `python`, `curl`, `requests`, or scraping code for web lookup unless web tools are disabled or already failed.
-- VERIFY RECENT OR UNCERTAIN FACTS WITH `web_search` BEFORE ANSWERING — do not guess from memory. Your training data has a cutoff, so anything time-sensitive or that may have changed — latest/newest products, hardware/software/model releases, version numbers, prices, specs, current events, dates, "does X exist?", "is X out yet?", "what's the newest …" — must be checked with a quick `web_search` (pass `time_filter` for recency) FIRST, then answered from the results (link the source). NEVER confidently claim something does not exist, has not launched, or is "the latest" based on memory alone; if a quick search would settle it, search. This refines "don't search for things you already know" above: that exemption is only for stable, well-established facts — recency-sensitive or doubtful claims must be verified.
-- These exact tags execute automatically. For showing code examples, use ```shell, ```sh, ```py, etc. instead.
-- Multiple tool blocks per response OK. 60s timeout per tool, 10K char output limit.
-- Code/content >15 lines → ```create_document (NOT in chat). Short snippets OK in chat.
-- Editing an existing document: ALWAYS use ```edit_document with FIND/REPLACE blocks. Do NOT rewrite the whole document with ```update_document unless genuinely changing more than half of it.
-- BIAS TOWARD ACTION on edit requests. If the user says "edit out X", "remove the Y paragraph", "change Z" — JUST DO IT with your best interpretation. Don't ask for clarification on minor ambiguity. The user can undo or re-prompt if wrong.
-- AFTER A TOOL SUCCEEDS, do not second-guess. The success message ("Document edited: v2, 1 edit") means it worked. Reply in ONE short sentence confirming what was done. No re-checking, no replaying the diff in your head, no validation theater.
-- AFTER A TOOL FAILS (timeout, error, "Unknown action", "not found"), DO NOT GO SILENT. The user expects a follow-up: either retry with a fix (e.g. correct args, longer-running form, run `tail -f /tmp/foo.log` to see progress, split into smaller steps), OR explicitly tell them "this didn't work, want me to try X instead?". A failed tool is not a stopping condition — only a successful one is.
-- YOU DECLARE WHEN THE JOB IS DONE — not a timer. Keep taking concrete steps while the task still needs them; you have plenty of rounds, so don't rush to quit just because you've made a few calls. There are exactly three ways to end a turn: (1) DONE — before you declare it, sanity-check that every concrete thing the user asked for actually exists or succeeded (file written, edit applied, command exited clean); then stop calling tools and write the final answer (that IS your "done" signal); (2) BLOCKED — you genuinely can't proceed (a capability is missing, permission denied, or data you can't obtain), so say plainly what's blocking you, in a sentence or two, and stop; (3) keep going with the single most useful next step. The only wrong moves are trailing off mid-task without one of these, and repeating a call you already ran.
-- Calendar: call `manage_calendar` with `action=list_calendars` FIRST before create/update/delete operations.
-- BULK email actions ("delete all those", "mark all as read", "archive these", "delete all spam", "mark these 19 read") → use the `bulk_email` tool ONCE with either the exact `uids` list from the latest `list_emails` result or `all_unread: true`. NEVER just say you deleted/archived/marked messages unless a delete/archive/mark/bulk email tool call succeeded. NEVER loop mark_email_read / archive_email / delete_email one message at a time — that floods the context and can blow the token budget. One bulk_email call handles the whole set.
-- Email UIDs are the values after `UID:` in tool output, not list row numbers. For example, row `1.` with `UID: 90186` must use `"90186"`, never `"1"`.
-- "Last/latest/newest email" means call `list_emails` with `max_results: 1`, `unread_only: false`, and the right `account`, then read the UID returned by that tool if full content is needed. NEVER use a table row number like "#18" as an email UID.
-- Plain "list/show/check my inbox/emails" means latest inbox mail, including read messages. Do not set `unread_only: true` unless the user explicitly asks for unread/needs attention.
-- Multiple email accounts: if tool output says "Other accounts" or the user asks "my Gmail?", "other inbox?", "work mail?", "custom domain mail?", or names any mailbox/account, DO NOT answer from memory. Call `list_email_accounts` if needed, then call `list_emails`/`read_email`/`bulk_email` with the exact `account` value for that mailbox. Account names are user-defined labels; if the user typo-matches a known account, use the closest listed account instead of claiming it does not exist. NEVER use `app_api` or `/api/email/accounts` to discover email accounts; that route is owner-filtered in tool context and can falsely return empty.
-- User identity facts/preferences ("my name is <name>", "I live in <place>", "I prefer concise replies", "call me <name>") → use `manage_memory` with action=add. NEVER use `manage_contact` for facts about the user unless the user explicitly says to create/update a contact and provides contact details such as an email or phone.
-- "Create/add/write a note" / "notes" / "todos" / "remind me to X at <time>" → use `manage_notes`. Do NOT store notes in `manage_memory`; memory is for persistent facts/preferences about the user, not note content. For reminders, include a `due_date`; for todos, use `note_type=checklist` when appropriate. For an immediate "ping/notify me now", use `send_ping`.
-- "Do X every morning / daily / on a schedule / automatically" (e.g. "summarize my inbox every morning") → this is a request to CREATE A SCHEDULED TASK, not to do X once right now. Call `manage_tasks` with action=create (prompt = what to do, schedule + cron/time). Do NOT just perform the action inline this turn — the user wants it to recur. After creating, return a clickable `[Task name](#task-<id>)` link and tell them it'll run on schedule and show in the Tasks panel. If you also want to show a sample of this run, do that AFTER creating the task, not instead of it.
-
-## UI conventions
-- When you reference an entity by ID in your reply, render it as a STANDARD markdown link with a hash-prefixed anchor. The frontend converts these into clickable jump buttons:
-  - Sessions / chats: `[Name](#session-<id>)`
-  - Documents: `[Title](#document-<id>)`
-  - Notes: `[Title](#note-<id>)`
-  - Gallery images: `[Caption](#image-<id>)`
-  - Emails (use the UID from list_emails/read_email output): `[Subject](#email-<uid>)`
-  - Calendar events (use the uid from manage_calendar): `[Summary](#event-<uid>)` — opens the calendar on that day
-  - Tasks: `[Task name](#task-<id>)`
-  - Skills: `[skill-name](#skill-<name>)`
-  - Research jobs: `[Topic](#research-<session_id>)`
-- The format is `[link text](#kind-<id>)` — text in square brackets, anchor in parens. NOT `[name] [#kind-id]` and NOT `[#kind-id]`. That's plain text and the user can't click it.
-- Use this inside lists, tables, prose — anywhere. Tables: `| Name | Open |` rows like `| Big Chat | [open](#session-abc123) |` work fine.
-- Examples:
-  - After `create_session` returns id `89effa28`: "Created [New Chat](#session-89effa28) — click to switch."
-  - Listing five sessions:
-    ```
-    1. [Big Chat](#session-abc123) — 2h ago
-    2. [Code Review](#session-def456) — 5h ago
-    3. [Note Taking](#session-ghi789) — 1d ago
-    ```
+## Base rules
+- Only use tools when needed. For casual messages like "test", "yo", "thanks", answer normally.
+- VERIFY RECENT OR UNCERTAIN FACTS WITH `web_search` BEFORE ANSWERING — never assert time-sensitive or doubtful info (latest/newest products, hardware/software/model releases, version numbers, prices, specs, current events, "does X exist / is it out yet") from memory. Your training has a cutoff, so run a quick `web_search` (use `time_filter` for recency) FIRST, then answer from the results and link the source. NEVER confidently claim something doesn't exist, hasn't launched, or is "the latest" based on memory alone. Only skip the search for stable, well-established facts.
+- If a needed tool/domain is missing from this turn, say what is missing briefly instead of pretending.
+- After a tool succeeds, do not second-guess it; reply with one short confirmation unless more work remains.
+- After a tool fails, retry with a concrete fix or state what is blocking you.
+- Finish only when the user's concrete request is actually done, or clearly state that you are blocked.
+- User identity facts/preferences ("my name is X", "call me X", "I live in X") use `manage_memory`, not contacts.
 """
 
 _API_AGENT_RULES = """\
-## Rules
+## Base rules
 - Prefer native tool/function calling when tools are needed.
-- Only call tools when they materially help answer the request.
-- You MUST use tools to take action — do not describe what you would do. Act, don't narrate.
-- For web lookup/search/latest/current requests, call `web_search` or `web_fetch`. Do NOT use shell, Python, curl, requests, or scraping code for web lookup unless web tools are unavailable or already failed.
-- VERIFY RECENT OR UNCERTAIN FACTS WITH `web_search` BEFORE ANSWERING — never assert time-sensitive info from memory. Your training data has a cutoff, so for latest/newest products, hardware/software/model releases, version numbers, prices, specs, current events, dates, or "does X exist / is it out yet", call `web_search` (with `time_filter` for recency) FIRST and answer from the results (link the source). NEVER confidently say something doesn't exist, hasn't launched, or is "the latest" without searching — a wrong stale guess erodes the user's trust, and the user can tell when you didn't check. (Only skip the search for stable, well-established facts.)
+- Only call tools when they materially help answer the request. For casual messages like "test", "yo", "thanks", answer normally.
+- VERIFY RECENT OR UNCERTAIN FACTS WITH `web_search` BEFORE ANSWERING — never assert time-sensitive or doubtful info (latest/newest products, hardware/software/model releases, version numbers, prices, specs, current events, "does X exist / is it out yet") from memory. Your training has a cutoff, so call `web_search` (use `time_filter` for recency) FIRST, then answer from the results and link the source. NEVER confidently claim something doesn't exist, hasn't launched, or is "the latest" based on memory alone. Only skip the search for stable, well-established facts.
+- You MUST use tools to take action; do not claim you did something without a tool result.
+- If a needed tool/domain is missing from this turn, say what is missing briefly instead of pretending.
 - Keep answers concise unless the user asks for depth.
-- For long code or content, use document tools instead of pasting large blocks into chat.
-- Editing an existing document: ALWAYS use `edit_document` with find/replace. Only use `update_document` for genuine full rewrites (>50% changed) — do NOT echo the entire file back for small edits.
-- If the active editor document is an email draft/compose window, treat that open email as the target for "write this", "write the email", "reply with...", "make it say...", "draft this", and similar requests. Do NOT create another document, search/list/manage documents, or open a different reply unless the user explicitly asks. Edit the open email draft with `edit_document` or `update_document`; preserve To/Cc/Bcc/Subject/In-Reply-To/References/X-* header lines unless the user asks to change them.
-- "Give suggestions / feedback / review / how can I improve this / what would make it better" about the OPEN document → call `suggest_document`, do NOT write a prose list of ideas in chat. It creates inline accept/reject bubbles on the doc. Give concrete `find`/`replace`/`reason` items. To suggest an ADDITION (e.g. "add a bow to the SVG", a new section), set `find` to a short existing anchor snippet and `replace` to that same snippet PLUS the new content. Only answer in prose when no document is open, or the request is purely conceptual with no concrete change to propose.
-- BIAS TOWARD ACTION on edit requests. If the user says "edit out X", "remove the Y paragraph", "change Z" — call the edit tool with your best interpretation. Don't ask for clarification on minor ambiguity. The user can undo.
-- AFTER A TOOL SUCCEEDS, do not second-guess. A success response means it worked. Reply in ONE short sentence confirming what was done. No verification thinking, no re-analyzing — move on.
-- AFTER A TOOL FAILS, DO NOT GO SILENT. The user expects a follow-up: retry with a fix, run a diagnostic (`tail`, `ls`, `which`), or explicitly tell them what didn't work and what you'll try next. Failure is not a stopping condition.
-- YOU DECLARE WHEN THE JOB IS DONE — not a timer. Keep taking concrete steps while the task still needs them; don't quit early just because you've made a few calls. Three ways to end a turn: (1) DONE — before declaring it, verify every concrete deliverable the user asked for actually exists or succeeded; then stop calling tools and write the final answer (that IS your "done" signal); (2) BLOCKED — you can't proceed (missing capability, permission denied, unobtainable data), so state plainly what's blocking you and stop; (3) keep going with the single most useful next step. Never trail off mid-task without (1) or (2), and never repeat a call you already ran.
-- Calendar: call `manage_calendar` with `action=list_calendars` FIRST before create/update/delete operations.
-- "Create/add/write a note" / "notes" / "todos" / "remind me to X at <time>" → use `manage_notes`. Do NOT store notes in `manage_memory`; memory is for persistent facts/preferences about the user, not note content. For reminders, include a `due_date`; for todos, use `note_type=checklist` when appropriate. `manage_tasks` is for RECURRING background AI jobs, NOT for one-off user reminders. For an immediate "ping/notify me now", use `send_ping`.
-- "Disable/turn off/enable/turn on <tool>" (shell, search, research, browser, documents, incognito, etc.) → call `ui_control` with `toggle <name> <on|off>`. Aliases accepted: shell→bash, search→web, deepresearch→research, documents→document_editor. NEVER record this as a memory — the user wants the toggle flipped, not a note about preferring it.
-- "Research X" / "do research on X" / "look into Y" / "deep dive on Z" → call `trigger_research` with `topic`. This starts a live job that appears in the Deep Research sidebar (streams progress + final report). **Do NOT use `web_search` for these** — saw the agent do a plain web_search for "do research on X" when the user wanted the deep-research job. "research X" is a deep-research request, not a quick lookup. (web_search is only for a single quick fact mid-task.) Do NOT POST /api/research/start via app_api either — blocked. After starting, tell the user it's running in the Deep Research sidebar. Only if the user explicitly wants it inline/quick should you fall back to web_search.
-- "Open/show <panel>" (documents, library, gallery, email, inbox, sessions, brain/memories, skills, settings, notes, cookbook) → call `ui_control` with `open_panel <name>`. Panel aliases: library/doc/docs/document→documents, images→gallery, mail/inbox/emails→email, chats/history→sessions, memory/memories→brain, preferences→settings, models/serve/serving→cookbook. CRITICAL: "open memory/memories/brain" / "open skills" / "open notes" / "open documents" / "open cookbook" means OPEN THE PANEL — call `ui_control`, NOT a manage/list tool. The "manage_*" tools list contents in chat; `ui_control open_panel` opens the visual modal the user is asking for.
-- "Open/start a reply", "open a reply to <sender>", "draft a reply window" for email → find/read the email if needed, then call `ui_control` with `open_email_reply <uid> <folder> reply`. This opens the same email document compose window as clicking Reply in the Email UI. Do NOT call `reply_to_email` unless the user explicitly gave body text and wants to SEND immediately.
-- Bulk email actions ("delete all those", "archive these", "mark all read") require a real email tool call. Use `bulk_email` once with UIDs from the latest `list_emails` result and the same `account`; never claim success without the tool result.
-- Email UIDs are the values after `UID:` in tool output, not list row numbers. For example, row `1.` with `UID: 90186` must use `"90186"`, never `"1"`.
-- "Last/latest/newest email" means call `list_emails` with `max_results: 1`, `unread_only: false`, and the right `account`, then read the UID returned by that tool if full content is needed. NEVER use a table row number like "#18" as an email UID.
-- Plain "list/show/check my inbox/emails" means latest inbox mail, including read messages. Do not set `unread_only: true` unless the user explicitly asks for unread/needs attention.
-- Multiple email accounts: if tool output says "Other accounts" or the user asks "my Gmail?", "other inbox?", "work mail?", "custom domain mail?", or names any mailbox/account, DO NOT answer from memory or infer it is the same inbox. Call `list_email_accounts` if needed, then call `list_emails`/`read_email`/`bulk_email` with the exact `account` value for that mailbox. Account names are user-defined labels; if the user typo-matches a known account, use the closest listed account instead of claiming it does not exist. NEVER use `app_api` or `/api/email/accounts` to discover email accounts; that route is owner-filtered in tool context and can falsely return empty.
-- User identity facts/preferences ("my name is <name>", "I live in <place>", "I prefer concise replies", "call me <name>") → use `manage_memory` with action=add. NEVER use `manage_contact` for facts about the user unless the user explicitly says to create/update a contact and provides contact details such as an email or phone.
-- You are running INSIDE Odysseus — there is no OpenWebUI, ChatGPT, or external chat backend to query. All chats/sessions live in THIS app and are accessed via `list_sessions` (or `manage_session` with `action=list`), and deleted via `manage_session` with `action=delete`. Do NOT shell out to find sqlite files, curl localhost:8080, or grep for routers — those don't exist here. If `list_sessions` returns rows, that IS the source of truth.
-- After `list_sessions`, preserve the returned `[Chat title](#session-<id>)` links in your user-facing reply. Do not rewrite chat lists as plain tables with non-clickable titles.
-- "Cookbook" = the LLM-serving subsystem (NOT chat sessions, NOT a recipe app). Routing:
-  • "What's running" / "what's serving" / "show my cookbook" / "is anything up" → **first action MUST be `list_served_models` (no args)**. The tool is ALWAYS available. Do not run `ps aux`, do not `curl localhost:8000`, do not `which vllm`. Even if you don't remember seeing the tool listed, it IS available — call it. The output IS the source of truth (it tracks diffusion models, vLLM, SGLang, llama.cpp, Ollama, etc. — anything spawned via the cookbook, including remote hosts that `ps aux` here can't see).
-  • "What's downloading" / "show downloads" → `list_downloads` (always available).
-  • "What models do I have" → `list_cached_models` (always available).
-  • "Kill / stop / shut down" → `stop_served_model` (or `cancel_download`) with the session_id from the list.
-  • Searching for a model → `search_hf_models`.
-  • Downloading or serving a model → these run on a SERVER. If the user names one ("on gpu-box", "on the gpu box") pass `host=`. If they DON'T name one, the tool defaults to the cookbook's currently-selected server (NOT localhost). When there are multiple servers and it's genuinely ambiguous which they mean, call `list_cookbook_servers` and ask. Only download to localhost when the user explicitly says "locally" / "on this machine" (pass `local=true`).
-  • Image/inpainting/diffusion serve requests ("serve inpaint", "SDXL inpainting", "image model") → use `serve_model` with the built-in Diffusers command: `python3 scripts/diffusion_server.py --model <repo> --port 8100` (or another free port). Do NOT invent modules like `diffusers_api_server`, and do NOT use bash/ssh/pip directly. The Cookbook route copies `scripts/diffusion_server.py` to remote hosts and registers the image endpoint.
-  • Launching a known model ("run SD 3.5", "start the inpaint model", "serve qwen") → **FIRST** `list_serve_presets` to find the saved launch template, **THEN** `serve_preset {name: "..."}`. Do NOT fabricate a tmux command — the user already saved working ones from the UI. Only fall back to raw `serve_model` if no preset matches.
-  • Launching a model the user names ("serve minimax m2.7 on gpu-box") with NO preset → `serve_model {repo_id, cmd, host}`. The cookbook route OWNS tmux session creation AND state-file registration AND UI live-refresh — bypassing it produces an orphan the UI can never see. After launching, call `list_served_models` to verify readiness. If it reports a diagnosis and suggested adjusted command, retry with `serve_model` using that command instead of asking the user to debug raw tmux logs.
-  • Adopting an already-running tmux session (someone or a prior bash launch started a server, but it's not in the cookbook) → `adopt_served_model {host, tmux_session, model, port}`. This registers it in cookbook_state.json AND adds it as a chat endpoint so the user can pick it in the model dropdown. Use this whenever you find a running server that the cookbook doesn't know about.
-  • After ANY successful serve (preset or raw or adopted), the cookbook's serve flow auto-adds the model as an endpoint. If for some reason it didn't (e.g. the launch was external), call `adopt_served_model` to fix both at once, or `manage_endpoints` with action=add to register the URL manually.
-  **Anti-pattern (CRITICAL — saw the agent do this and it produced an orphan session invisible to the UI):** `ssh <host> 'tmux new-session ... vllm serve ...'` via bash. THIS IS WRONG even when it "works". The launch must go through `serve_model` so the cookbook route creates the tmux session AND writes the task to cookbook_state.json. If the user asks for a launch and you reach for bash/ssh/tmux, STOP — call `serve_model` instead. Bash launches don't show up in the Cookbook UI, can't be `stop_served_model`'d, and don't survive a UI refresh.
-  Anti-pattern (DO NOT do this — saw it twice): "I don't see list_served_models in my tool list, let me try bash ps aux." → wrong. The tool IS available. Just call it.
-  Anti-pattern: POSTing to `/api/cookbook/state` via `app_api` — that overwrites the whole state file (presets and all). Blocked. Use serve_preset / serve_model / stop_served_model.
+- After a tool succeeds, do not second-guess it; reply with one short confirmation unless more work remains.
+- After a tool fails, retry with a concrete fix or state what is blocking you.
+- Finish only when the user's concrete request is actually done, or clearly state that you are blocked.
+- User identity facts/preferences ("my name is X", "call me X", "I live in X") use `manage_memory`, not contacts.
+"""
 
-## UI conventions
-- When referencing an entity by ID, render it as a STANDARD markdown link with a hash-prefixed anchor — the frontend renders these as clickable jump buttons:
-  - Sessions / chats: `[Name](#session-<id>)`
-  - Documents: `[Title](#document-<id>)`
-  - Notes: `[Title](#note-<id>)`
-  - Gallery images: `[Caption](#image-<id>)`
-  - Emails (use the UID from list_emails/read_email output): `[Subject](#email-<uid>)`
-  - Calendar events (use the uid from manage_calendar): `[Summary](#event-<uid>)` — opens the calendar on that day
-  - Tasks: `[Task name](#task-<id>)`
-  - Skills: `[skill-name](#skill-<name>)`
-  - Research jobs: `[Topic](#research-<session_id>)`
-- The format is `[link text](#kind-<id>)` — text in square brackets, anchor in parens. NOT `[name] [#kind-id]` and NOT `[#kind-id]`. That's plain text and the user can't click it.
-- Use this inside lists, tables, prose — anywhere. Tables: `| Big Chat | [open](#session-abc123) |` works.
-- Examples:
-  - After `create_session` returns id `89effa28`: "Created [New Chat](#session-89effa28) — click to switch."
-  - Listing sessions: "1. [Big Chat](#session-abc123) — 2h ago, 2. [Code Review](#session-def456) — 5h ago\""""
+_LINK_RULES = """\
+## Link conventions
+When referencing app entities by id, use clickable markdown anchors:
+- Sessions: `[Name](#session-<id>)`
+- Documents: `[Title](#document-<id>)`
+- Notes: `[Title](#note-<id>)`
+- Emails: `[Subject](#email-<uid>)`
+- Calendar events: `[Summary](#event-<uid>)`
+- Tasks: `[Task name](#task-<id>)`
+- Skills: `[skill-name](#skill-<name>)`
+- Research jobs: `[Topic](#research-<session_id>)`
+"""
+
+_DOMAIN_RULES = {
+    "web": """\
+## Web rules
+- For web lookup/search/latest/current requests, use `web_search` or `web_fetch`.
+- Do not use shell, Python, curl, requests, or scraping code for web lookup unless web tools are unavailable or already failed.
+- "Research X" means `trigger_research`, not a one-off `web_search`, unless the user explicitly asks for a quick lookup.""",
+    "documents": """\
+## Document rules
+- For long code/content (>15 lines), use `create_document` instead of pasting into chat.
+- If an active document is open, "fix this", "add X", "change Y", etc. usually refers to that document.
+- Use `edit_document` for targeted changes. Use `update_document` only for genuine full rewrites.
+- For feedback/review/suggestions on an open document, use `suggest_document`.""",
+    "email": """\
+## Email rules
+- Email UIDs are the values after `UID:` in tool output, never list row numbers.
+- For latest/newest email, list with `max_results: 1`, `unread_only: false`, then read the returned UID if needed.
+- For named mailboxes/accounts, call `list_email_accounts` if needed and pass the exact `account` value.
+- Bulk email actions use `bulk_email` once with explicit UIDs; do not loop one message at a time.
+- "Open/start a reply" means open a draft via `ui_control open_email_reply`; only `reply_to_email` when the user clearly wants to send now.""",
+    "cookbook": """\
+## Cookbook/model-serving rules
+- Cookbook is the LLM-serving subsystem.
+- "What's running/serving" starts with `list_served_models`. "What's downloading" uses `list_downloads`.
+- Launch known models by checking `list_serve_presets` before raw `serve_model`.
+- Downloads/serves run on a Cookbook server; pass the named `host` when the user names one.
+- Do not launch model servers manually with bash/ssh/tmux. Use `serve_model`/`serve_preset` so the UI can track and stop them.
+- After a successful serve, verify with `list_served_models`; if an external server is running but invisible, use `adopt_served_model`.""",
+    "notes_calendar_tasks": """\
+## Notes/calendar/tasks rules
+- Notes/todos/reminders use `manage_notes`, not memory.
+- Calendar create/update/delete should call `manage_calendar` with `action=list_calendars` first.
+- Recurring/automatic/scheduled requests create a `manage_tasks` task; do not just perform the action once.""",
+    "ui": """\
+## UI rules
+- "Open/show <panel>" uses `ui_control open_panel <name>`.
+- Tool toggles like "turn off shell/search/research" use `ui_control toggle <name> <on|off>`, not memory.""",
+    "sessions": """\
+## Chat/session rules
+- Odysseus chats are sessions. Use `list_sessions`/`manage_session`; do not shell out looking for chat files.
+- Preserve clickable session links from tool output in your final answer.""",
+    "files": """\
+## File rules
+- Use file tools for real disk files. Use document tools only for editor documents.
+- Prefer `grep`, `glob`, and `ls` over shell equivalents when available.
+- Use `edit_file`/`write_file` for writes; avoid shell redirection/heredocs for editing files.""",
+    "settings": """\
+## Settings/API rules
+- Use `manage_settings` for preferences and tool enable/disable.
+- Use named tools over `app_api` when a named wrapper exists.
+- `app_api` is only for safe UI/API actions without a named tool; do not use it for shell, package installs, engine rebuilds, or sensitive auth/admin paths.""",
+}
+
+_DOMAIN_TOOL_MAP = {
+    "web": {"web_search", "web_fetch", "trigger_research", "manage_research"},
+    "documents": {"create_document", "edit_document", "update_document", "suggest_document", "manage_documents"},
+    "email": {"list_email_accounts", "list_emails", "read_email", "send_email", "reply_to_email", "bulk_email", "archive_email", "delete_email", "mark_email_read", "resolve_contact", "manage_contact"},
+    "cookbook": {"download_model", "serve_model", "serve_preset", "list_serve_presets", "list_served_models", "stop_served_model", "tail_serve_output", "list_downloads", "cancel_download", "search_hf_models", "list_cached_models", "list_cookbook_servers", "adopt_served_model"},
+    "notes_calendar_tasks": {"manage_notes", "manage_calendar", "manage_tasks"},
+    "ui": {"ui_control"},
+    "sessions": {"create_session", "list_sessions", "manage_session", "send_to_session", "search_chats"},
+    "files": {"bash", "python", "read_file", "write_file", "edit_file", "grep", "glob", "ls"},
+    "settings": {"manage_settings", "manage_endpoints", "manage_mcp", "manage_webhooks", "manage_tokens", "app_api"},
+}
+
+def _domain_rules_for_tools(tool_names: set) -> list[str]:
+    names = set(tool_names or set())
+    rules = []
+    for domain, domain_tools in _DOMAIN_TOOL_MAP.items():
+        if names & domain_tools:
+            rules.append(_DOMAIN_RULES[domain])
+    if names & {"create_session", "list_sessions", "manage_session", "manage_documents", "manage_notes", "manage_calendar", "manage_tasks", "manage_skills", "manage_research"}:
+        rules.append(_LINK_RULES)
+    return rules
 
 # Each tool section is keyed by tool name(s) it covers.
 # Sections with multiple tools use a tuple key.
@@ -345,7 +347,7 @@ If the user asks for a reminder/alarm before the event, pass `reminder_minutes` 
     "send_to_session": "- ```send_to_session``` — Send a message to another session. Line 1 = session_id, rest = message. Use for orchestrating work across sessions.",
     "search_chats": "- ```search_chats``` — Search past session transcripts for direct conversation evidence. Use when user asks 'did we discuss X?', 'find the conversation about Y', or when prior chat context is more appropriate than persistent memory.",
     "pipeline": "- ```pipeline``` — Run a multi-step AI pipeline. Args (JSON) with ordered steps, each specifying a model and prompt. Use for complex workflows.",
-    "ui_control": "- ```ui_control``` — Control the UI: toggle tools on/off, OPEN PANELS, open email reply drafts, switch models, change themes. Commands: `toggle <name> on/off` (names: bash/shell, web/search, research, incognito, document_editor/documents), `open_panel <name>` (panels: documents, gallery, email, sessions, notes, memories/brain, skills, settings, cookbook), `open_email_reply <uid> <folder> <reply|reply-all|ai-reply>` (opens an email compose document, does NOT send), `set_mode agent/chat`, `switch_model <name>`, `set_theme <preset>`, `create_theme <name> <bg> <fg> <panel> <border> <accent>` (optional key=val for advanced colors AND background effects: bgPattern=<none|dots|synapse|rain|constellations|perlin-flow|petals|sparkles|embers>, bgEffectColor=#RRGGBB, bgEffectIntensity=<num>, bgEffectSize=<num>, frosted=true|false). \"open documents\" / \"open library\" / \"show gallery\" / \"open inbox\" / \"open notes\" / \"open cookbook\" all map to `open_panel <name>`. Theme presets: dark, light, midnight, paper, cyberpunk, retrowave, forest, ocean, ume, copper, terminal, organs, lavender, gpt, claude, cute.",
+    "ui_control": "- ```ui_control``` — Control the UI: toggle tools on/off, OPEN PANELS, open email reply drafts, switch models, change themes. Commands: `toggle <name> on/off` (names: bash/shell, web/search, research, incognito, document_editor/documents), `open_panel <name>` (panels: documents, gallery, email, sessions, notes, memories/brain, skills, settings, cookbook), `open_email_reply <uid> <folder> <reply|reply-all|ai-reply>` (opens an email compose document, does NOT send), `set_mode agent/chat`, `switch_model <name>`, `set_theme <preset>`, `create_theme <name> <bg> <fg> <panel> <border> <accent>` (optional key=val for advanced colors AND background effects: bgPattern=<none|dots|synapse|rain|constellations|perlin-flow|petals|sparkles|embers>, bgEffectColor=#RRGGBB, bgEffectIntensity=<num>, bgEffectSize=<num>, frosted=true|false). \"open documents\" / \"open library\" / \"show gallery\" / \"open inbox\" / \"open notes\" / \"open cookbook\" all map to `open_panel <name>`. Built-in theme presets: dark, light, midnight, paper, cyberpunk, retrowave, forest, ocean, ume, copper, terminal, organs, lavender, gpt, claude, cute. For any other vibe/name, use create_theme.",
     "ask_user": "- ```ask_user``` — Ask the user a multiple-choice question when the task is genuinely ambiguous and the answer changes what you do next (pick an approach, confirm an assumption, choose a target). Args (JSON): {\"question\": \"...\", \"options\": [{\"label\": \"...\", \"description\": \"...\"?}, ...], \"multi\": false?}. 2-6 options. The user gets clickable buttons; calling this ENDS your turn and their choice comes back as your next message. Prefer sensible defaults — only ask when you truly can't proceed well without their input.",
     "update_plan": "- ```update_plan``` — While executing an approved plan, write the plan back: tick steps done or revise them. Args (JSON): {\"plan\": \"- [x] done step\\n- [ ] next step\"}. Always pass the COMPLETE checklist, not a diff. Call it after finishing each step (mark it `- [x]`) and whenever the user asks to change the plan. The user's docked plan window updates live. Does nothing if there's no active plan.",
     "list_served_models": "- ```list_served_models``` — Show what the Cookbook (LLM-serving subsystem) is currently running. NO args. Use this for ANY 'what's running' / 'what's serving' / 'show my cookbook' / 'is anything up' query. DO NOT shell out (`ps aux`, `docker ps`, etc.) — this tool is the source of truth. Failed serve tasks include recent logs plus diagnosis/retry suggestions; use those suggestions to call `serve_model` again with an adjusted command when appropriate.",
@@ -422,6 +424,7 @@ def _assemble_prompt(tool_names: set, disabled_tools: set = None, compact: bool 
             f"Available tools: {tool_list}.",
             _API_AGENT_RULES,
         ]
+        parts.extend(_domain_rules_for_tools(included))
         return "\n\n".join(parts)
 
     parts = [_AGENT_PREAMBLE]
@@ -458,6 +461,7 @@ def _assemble_prompt(tool_names: set, disabled_tools: set = None, compact: bool 
         parts.append(f"(Other tools available when needed: {hint})")
 
     parts.append(_AGENT_RULES)
+    parts.extend(_domain_rules_for_tools(included))
     return "\n\n".join(parts)
 
 
@@ -576,6 +580,117 @@ def _extract_last_user_message(messages: List[Dict]) -> str:
                 content = " ".join(b.get("text", "") for b in content if isinstance(b, dict))
             return content
     return ""
+
+
+_LOW_SIGNAL_RE = re.compile(r"^[\W_]*$", re.UNICODE)
+_EXPLICIT_CONTINUATION_RE = re.compile(
+    r"^\s*(?:"
+    r"yes|y|yeah|yep|ok|okay|sure|do it|go ahead|continue|carry on|"
+    r"run it|launch it|start it|use that|that one|same|the same|"
+    r"first|second|third|the first one|the second one|the third one|"
+    r"[123]|[abc]"
+    r")\s*[.!?]*\s*$",
+    re.IGNORECASE,
+)
+
+
+def _is_explicit_continuation(text: str) -> bool:
+    """Only these terse replies may inherit older user turns for tool retrieval."""
+    return bool(_EXPLICIT_CONTINUATION_RE.match(str(text or "").strip()))
+
+
+def _assistant_requested_followup(messages: List[Dict]) -> bool:
+    """True when the previous assistant turn asked for missing task details.
+
+    This allows natural replies like "buy milk" after "What would you like on
+    your to-do list?" to inherit the prior domain, without letting random
+    greetings inherit stale Cookbook/email/document context.
+    """
+    seen_latest_user = False
+    for msg in reversed(messages):
+        role = msg.get("role")
+        if role == "user" and not seen_latest_user:
+            seen_latest_user = True
+            continue
+        if not seen_latest_user:
+            continue
+        if role != "assistant":
+            continue
+        content = msg.get("content", "")
+        if isinstance(content, list):
+            content = " ".join(b.get("text", "") for b in content if isinstance(b, dict))
+        text = str(content or "").lower()
+        if "?" not in text:
+            return False
+        return bool(re.search(
+            r"\b(what would you like|what should|what do you want|which one|which model|"
+            r"what.+(?:todo|to-do|list|document|email|model|server|item)|"
+            r"any specific|give me|tell me)\b",
+            text,
+        ))
+    return False
+
+
+def _classify_agent_request(messages: List[Dict], last_user: str) -> Dict[str, object]:
+    """Classify only whether this turn deserves domain tool retrieval.
+
+    Normal chat should not inherit old Cookbook/email/document context. Recent
+    context is used only for explicit continuations ("yes", "do it", "1").
+    This function does not inject tools directly; selected tools later decide
+    which domain rule packs get appended to the system prompt.
+    """
+    text = str(last_user or "").strip()
+    continuation = _is_explicit_continuation(text) or _assistant_requested_followup(messages)
+    retrieval_query = _recent_context_for_retrieval(messages) if continuation else text
+    q = retrieval_query.lower()
+
+    if not text or bool(_LOW_SIGNAL_RE.match(text)):
+        return {
+            "low_signal": True,
+            "continuation": False,
+            "domains": set(),
+            "retrieval_query": text,
+        }
+
+    domains: Set[str] = set()
+
+    def has(*patterns: str) -> bool:
+        return any(re.search(p, q) for p in patterns)
+
+    if has(r"\b(cookbook|serve|serving|served|launch|start|preset|vllm|sglang|llama\.?cpp|ollama|download|downloading|pull|cached models?|running models?|model servers?|models? (?:are )?running|what models?|model picker|gpu box|kierkegaard|odysseus|ajax|qwen|gemma|llama|mistral|minimax)\b"):
+        domains.add("cookbook")
+    if has(r"\b(emails?|mails?|gmail|inbox|reply|forward|cc|bcc|send email|compose email|draft email|message chris|message him|message her)\b"):
+        domains.add("email")
+    if has(r"\b(note|todo|to-do|checklist|task list|remind me|reminder|buy|pickup|pick up)\b"):
+        domains.add("notes_calendar_tasks")
+    if has(r"\b(every day|every morning|every evening|recurring|automatically|cron|scheduled task|background task)\b"):
+        domains.add("notes_calendar_tasks")
+    if has(r"\b(calendar|event|meeting|appointment|schedule)\b"):
+        domains.add("notes_calendar_tasks")
+    if has(r"\b(documents?|docs?|draft|compose|poem|story|essay|outline|letter|edit|rewrite|proofread|suggest|feedback|review this|make a file)\b"):
+        domains.add("documents")
+    if "notes_calendar_tasks" not in domains and has(r"\bwrite\b"):
+        domains.add("documents")
+    if has(r"\b(search|web|google|look up|latest|news|current|weather|forecast|stock price|price of|website|url|https?://|www\.)\b"):
+        domains.add("web")
+    if has(r"\b(research|deep dive|investigate|look into)\b"):
+        domains.add("web")
+    if has(r"\b(open|show|toggle|turn on|turn off|disable|enable|switch model|change model|settings|theme|panel)\b"):
+        domains.add("ui")
+    if has(r"\b(session|chat history|rename chat|delete chat|archive chat|fork chat|list chats)\b"):
+        domains.add("sessions")
+    if has(r"\b(file|folder|directory|repo|git|grep|find in files|read file|edit file|shell|terminal|bash|python)\b"):
+        domains.add("files")
+    if has(r"\b(endpoint|api token|mcp|webhook|preference|configure|config|setting)\b"):
+        domains.add("settings")
+
+    low_signal = not continuation and not domains
+    return {
+        "low_signal": low_signal,
+        "continuation": continuation,
+        "domains": domains,
+        "retrieval_query": retrieval_query,
+    }
 
 
 def _recent_context_for_retrieval(messages: List[Dict], max_user: int = 3, max_chars: int = 600) -> str:
@@ -1124,7 +1239,7 @@ def _build_base_prompt(
 
 
 
-def _resolve_tool_blocks(round_response: str, native_tool_calls: list, round_num: int):
+def _resolve_tool_blocks(round_response: str, native_tool_calls: list, round_num: int, is_api_model: bool = False):
     """Choose native function calls or fenced code block parsing. Returns (tool_blocks, used_native)."""
     used_native = False
     if native_tool_calls:
@@ -1141,7 +1256,21 @@ def _resolve_tool_blocks(round_response: str, native_tool_calls: list, round_num
         if tool_blocks:
             used_native = True
     if not used_native:
-        tool_blocks = parse_tool_blocks(round_response)
+        # Native function-calling models (GPT/Claude/Grok/Qwen3/DeepSeek-V, etc.)
+        # have a reliable structured channel for real tool invocations. When such
+        # a model emits no native tool_calls, any ```bash/```python/```json fence
+        # in its prose is virtually always an illustrative example for the user
+        # (e.g. "here's the command you'd run"), not an attempted tool call —
+        # executing it causes accidental runs and clarification loops (#3222).
+        #
+        # Gate ONLY that fenced-block pattern for native models, not the whole
+        # parser: explicit [TOOL_CALL]/<invoke>/<tool_code>/DSML markup that
+        # leaks into content as text is never illustrative — it's a real call
+        # the model couldn't emit on its structured channel (e.g. DeepSeek-V
+        # falling back to DSML). Dropping the whole parser would silently lose
+        # those too. Non-native / textual-only models keep every pattern,
+        # fenced blocks included, since that's their *only* tool channel.
+        tool_blocks = parse_tool_blocks(round_response, skip_fenced=is_api_model)
         if tool_blocks:
             logger.info(f"Agent round {round_num}: {len(tool_blocks)} fenced tool block(s) detected")
 
@@ -1521,9 +1650,18 @@ async def stream_agent_loop(
     _t0 = time.time()
     _needs_admin = _detect_admin_intent(messages)
     _last_user = _extract_last_user_message(messages)
-    # Tool retrieval keys on recent conversation context (last few user turns),
-    # not just the latest message, so short follow-ups don't drop just-used tools.
-    _retrieval_query = _recent_context_for_retrieval(messages) or _last_user
+    _intent = _classify_agent_request(messages, _last_user)
+    # Tool retrieval uses the latest message by default. It may inherit recent
+    # user turns only for explicit continuations ("yes", "do it", "1").
+    _retrieval_query = str(_intent.get("retrieval_query") or _last_user)
+    logger.info(
+        "[agent-intent] latest=%r continuation=%s low_signal=%s domains=%s retrieval_query=%r",
+        _last_user[:120],
+        bool(_intent.get("continuation")),
+        bool(_intent.get("low_signal")),
+        sorted(_intent.get("domains") or []),
+        _retrieval_query[:200],
+    )
     _mcp_disabled_map = _load_mcp_disabled_map() if mcp_mgr else {}
     if plan_mode and mcp_mgr:
         # Allow read-only MCP tools to investigate, block write/unknown ones:
@@ -1540,6 +1678,10 @@ async def stream_agent_loop(
     _t1 = time.time()
     if _relevant_tools:
         logger.info(f"[tool-rag] Using caller-provided relevant_tools ({len(_relevant_tools)} tools)")
+    if not guide_only and not _relevant_tools and bool(_intent.get("low_signal")):
+        from src.tool_index import ALWAYS_AVAILABLE
+        _relevant_tools = set(ALWAYS_AVAILABLE)
+        logger.info("[tool-rag] Low-signal agent message; skipping retrieval and using always-available tools only")
     if not guide_only and not _relevant_tools:
         try:
             from src.tool_index import get_tool_index, ALWAYS_AVAILABLE
@@ -1582,15 +1724,40 @@ async def stream_agent_loop(
         for keywords, tools in ToolIndex._KEYWORD_HINTS.items():
             if any(kw in ql for kw in keywords):
                 _relevant_tools.update(tools)
-        # Always include core document/memory tools
-        _relevant_tools.update({"create_document", "manage_memory", "manage_notes"})
         logger.info(f"[tool-rag] Keyword fallback selected: {sorted(_relevant_tools - ALWAYS_AVAILABLE)}")
+
+    # If deterministic domain detection fired, seed the corresponding domain
+    # tools into the selected tool set. This is not direct prompt-pack
+    # injection: `_assemble_prompt()` still derives domain rules from the final
+    # tool names. It prevents obvious requests like "last 5 emails" from
+    # collapsing to only ask_user/manage_memory when vector retrieval misses or
+    # times out.
+    if not guide_only and _relevant_tools is not None:
+        for _domain in (_intent.get("domains") or set()):
+            _relevant_tools.update(_DOMAIN_TOOL_MAP.get(str(_domain), set()))
+        if "cookbook" in (_intent.get("domains") or set()):
+            _relevant_tools.update({
+                "list_served_models",
+                "list_downloads",
+                "list_cached_models",
+                "list_cookbook_servers",
+                "list_serve_presets",
+            })
+        if "email" in (_intent.get("domains") or set()):
+            _relevant_tools.add("ui_control")
+        if "web" in (_intent.get("domains") or set()):
+            _relevant_tools.update({"web_search", "web_fetch"})
+        if "ui" in (_intent.get("domains") or set()):
+            _relevant_tools.add("ui_control")
 
     # If a document is open the model needs the editing tools available
     # regardless of which selection path (RAG, keyword, caller-provided) ran
     # or what keywords were in the latest user message.
     if _relevant_tools is not None and active_document is not None:
         _relevant_tools.update({"edit_document", "update_document", "suggest_document"})
+
+    if _relevant_tools is not None:
+        logger.info("[agent-intent] selected_tools=%s", sorted(_relevant_tools)[:50])
 
     prep_timings["tool_selection"] = time.time() - _t1
 
@@ -2066,7 +2233,7 @@ async def stream_agent_loop(
                 yield chunk
             # Intercept [DONE] — don't forward until all rounds finish
 
-        tool_blocks, used_native = _resolve_tool_blocks(round_response, native_tool_calls, round_num)
+        tool_blocks, used_native = _resolve_tool_blocks(round_response, native_tool_calls, round_num, is_api_model=_is_api_model)
 
         # Force-answer round: we told the model to STOP calling tools and
         # answer. If it ignored that and emitted a (possibly DSML) tool
@@ -2145,7 +2312,12 @@ async def stream_agent_loop(
 
         # Save cleaned round text for history persistence
         # Keep <think> blocks so they render in the thinking section on reload
-        cleaned_round = strip_tool_blocks(round_response).strip()
+        # Mirror the same fenced-pattern gate used to resolve tool_blocks above:
+        # an illustrative fence that wasn't executed (because this is a native
+        # model with no real native_tool_calls) must not be stripped from the
+        # persisted text either — otherwise it streams once and then disappears
+        # on reload (#3222 follow-up).
+        cleaned_round = strip_tool_blocks(round_response, skip_fenced=(_is_api_model and not used_native)).strip()
         round_texts.append(cleaned_round)
 
         if not tool_blocks:
