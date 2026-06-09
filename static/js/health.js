@@ -188,6 +188,10 @@ async function _renderHabits() {
     </div>
     ${weeklyCard}
     ${cards.length ? cards.join('') : '<div class="health-empty">No habits yet — add one above to start your streak.</div>'}`;
+  // GitHub-style heatmap runs oldest→newest, so today is the rightmost column.
+  // Scroll each heatmap to its right edge so TODAY is visible without the user
+  // having to scroll across a year of history.
+  b.querySelectorAll('.health-hm-scroll').forEach((el) => { el.scrollLeft = el.scrollWidth; });
   b.querySelector('#health-add-habit')?.addEventListener('submit', async (e) => {
     e.preventDefault();
     const fd = new FormData(e.target);
