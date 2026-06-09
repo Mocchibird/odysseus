@@ -849,6 +849,31 @@ class TaskScheduler:
                 except Exception as _pe:
                     logger.debug(f"pings_store.create (task) failed: {_pe}")
 
+            # General "notification" delivery = in-app Pings feed (above) AND a
+            # push to the user's ntfy. Wired to the OUTPUT TARGET (not to any one
+            # action) so every task with Output = Notification pushes — briefs,
+            # research, custom LLM tasks, etc. Uses send_ntfy (resolved from the
+            # global ntfy integration, NOT gated on the per-user reminder_channel)
+            # so it fires reliably from this background context.
+            if (
+                output == "notification"
+                and getattr(task, "notifications_enabled", True)
+                and run.status in ("success", "error")
+            ):
+                try:
+                    from src.ntfy_client import send_ntfy
+                    _ntfy_res = await send_ntfy(
+                        title=task.name or "Task",
+                        message=(run.result or "").strip() or (task.name or "Task"),
+                        owner=task.owner or "",
+                    )
+                    if not _ntfy_res.get("ntfy_sent"):
+                        logger.debug(
+                            f"task '{task.name}' ntfy push not sent: {_ntfy_res.get('ntfy_error')}"
+                        )
+                except Exception as _ne:
+                    logger.debug(f"task '{task.name}' ntfy push error: {_ne}")
+
             # Log result to the assistant chat so all task activity is visible.
             # Skip skipped/error rows — user shouldn't see "skipped: …" noise
             # for cron tasks that no-op'd, or duplicate error spam for tasks

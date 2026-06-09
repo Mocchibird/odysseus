@@ -893,9 +893,20 @@ def setup_note_routes(task_scheduler=None):
         _override: dict = {}
         if is_test:
             # Any authenticated user may fire a TEST reminder to their OWN
-            # configured channel/topic (previously admin-only). require_user
-            # above gates anonymous callers, and dispatch_reminder is
-            # owner-scoped, so a test only ever exercises the caller's delivery.
+            # configured channel/topic (require_user above gates anonymous
+            # callers, and dispatch_reminder is owner-scoped) — EXCEPT the
+            # webhook channel. Webhook connections are global/admin-configured,
+            # so a non-admin test-firing one could push arbitrary content
+            # through the admin's webhook. Keep webhook test-fires admin-only;
+            # ntfy/email/browser tests stay open to every user.
+            _wants_webhook = (
+                str(body.get("channel") or "").strip().lower() == "webhook"
+                or bool(body.get("webhook_integration_id"))
+            )
+            if _wants_webhook:
+                _am = getattr(getattr(request.app, "state", None), "auth_manager", None)
+                if not (_am and _am.is_admin(caller)):
+                    raise HTTPException(403, "Webhook test reminders are admin-only.")
             title = (body.get("title") or "Test Reminder").strip() or "Test Reminder"
             note_body = (body.get("body") or "").strip()
             # Optional overrides let the admin settings test button pass the

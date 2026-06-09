@@ -1112,91 +1112,6 @@ async def action_daily_brief(owner: str, **kwargs) -> Tuple[str, bool]:
         return str(e), False
 
 
-async def action_today_brief(owner: str, **kwargs) -> Tuple[str, bool]:
-    """Concise morning brief: TODAY's schedule + due/overdue reminders — mirrors
-    the "Today" panel, minus habits. Deterministic (no LLM, so it never rambles)
-    and SHORT, and it's pushed to the user via their reminder channel
-    (Settings → Reminders → ntfy/email/browser) so it lands as a real ping.
-    Schedule a daily task with type=Action, action=today_brief."""
-    try:
-        from datetime import datetime as _dt, timedelta as _td, timezone as _tz
-        from core.database import SessionLocal, CalendarEvent, CalendarCal, Note
-        from routes.today_routes import _to_local_naive, _parse_due
-
-        try:
-            from core.auth import AuthManager
-            _allow_null = not AuthManager().is_configured
-        except Exception:
-            _allow_null = False
-
-        now = _dt.now()
-        start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-        tomorrow = start + _td(days=1)
-
-        events, reminders = [], []
-        db = SessionLocal()
-        try:
-            ev_q = db.query(CalendarEvent).join(CalendarCal).filter(
-                CalendarEvent.dtstart < tomorrow + _td(days=1),
-                CalendarEvent.dtend > start - _td(days=1),
-                CalendarEvent.status != "cancelled",
-            )
-            if owner:
-                ev_q = owner_filter(ev_q, CalendarCal, owner, include_shared=_allow_null)
-            for e in ev_q.order_by(CalendarEvent.dtstart).all():
-                ls = e.dtstart if e.all_day else _to_local_naive(e.dtstart, e.is_utc)
-                le = e.dtend if e.all_day else _to_local_naive(e.dtend, e.is_utc)
-                if ls is None or not (ls < tomorrow and (le or ls) > start):
-                    continue
-                when = "all day" if e.all_day else ls.strftime("%H:%M")
-                loc = f" @ {e.location}" if e.location else ""
-                events.append(f"{when} · {e.summary or '(untitled)'}{loc}")
-
-            n_q = db.query(Note).filter(Note.archived == False)  # noqa: E712
-            if owner:
-                n_q = owner_filter(n_q, Note, owner, include_shared=_allow_null)
-            rem_rows = []
-            for n in n_q.all():
-                if not n.due_date:
-                    continue
-                due = _parse_due(n.due_date)
-                if due is None or due >= tomorrow:
-                    continue  # only due-today or overdue
-                rem_rows.append((due, due < start, n.title or "(untitled)"))
-            rem_rows.sort(key=lambda x: x[0])
-            for due, overdue, title in rem_rows:
-                tag = "overdue · " if overdue else (due.strftime("%H:%M") + " · " if due > start else "")
-                reminders.append(f"{tag}{title}")
-        finally:
-            db.close()
-
-        date_label = start.strftime("%A, %B %d")
-        lines = [f"Schedule ({len(events)}):"]
-        lines += [f"• {e}" for e in events] or ["• Nothing scheduled."]
-        lines.append("")
-        lines.append(f"Reminders ({len(reminders)}):")
-        lines += [f"• {r}" for r in reminders] or ["• No reminders due."]
-        brief = "\n".join(lines)
-
-        # Push via the user's reminder channel (ntfy/email/browser) so it's a
-        # real ping — same dispatch path the note reminders use.
-        try:
-            from routes.note_routes import dispatch_reminder
-            await dispatch_reminder(
-                title=f"Today · {date_label}",
-                note_body=brief,
-                note_id="today-brief",
-                owner=owner or "",
-            )
-        except Exception as _de:
-            logger.debug(f"today_brief dispatch failed: {_de}")
-
-        return f"Today · {date_label}\n{brief}", True
-    except Exception as e:
-        logger.error(f"today_brief action failed: {e}")
-        return str(e), False
-
-
 async def action_test_skills(owner: str, **kwargs) -> Tuple[str, bool]:
     """Run the per-skill Test on every skill: agent runs the procedure in a
     sandbox, LLM judges the transcript, verdict is recorded on the skill.
@@ -2568,7 +2483,11 @@ BUILTIN_ACTIONS = {
     # ping_events removed from the user-facing registry. Calendar reminders
     # are represented as Notes, so note pings are the single dispatch path.
     "daily_brief": action_daily_brief,
-    "today_brief": action_today_brief,
+    # Back-compat alias: today_brief was merged into daily_brief (one brief action
+    # that pushes ntfy via the "notification" output target). Keep the key so any
+    # pre-existing task/chain referencing it still runs; hidden from the UI
+    # (removed from BUILTIN_ACTION_INFO below).
+    "today_brief": action_daily_brief,
     "morning_routine": action_morning_routine,
     "evening_wrapup": action_evening_wrapup,
     "weekly_review": action_weekly_review,
@@ -2595,8 +2514,7 @@ BUILTIN_ACTION_INFO = {
     "draft_email_replies": "Pre-draft AI reply suggestions for new inbox emails",
     "extract_email_events": "Scan emails for booking/meeting confirmations and auto-add to calendar",
     "classify_events": "Tag upcoming events with importance (low/normal/high/critical) and type (work/health/travel/etc.); colors them too",
-    "daily_brief": "Build a morning digest: today's calendar, unread email count + top senders, active todos",
-    "today_brief": "Concise daily brief: today's schedule + due/overdue reminders (the Today panel, minus habits). Short + deterministic, and pushed to you via your reminder channel (ntfy/email/browser) — ideal for a 7am ntfy ping.",
+    "daily_brief": "Morning digest: today's calendar, unread email count + top senders, active todos. With Output = Notification it lands in the Pings feed AND pushes your ntfy.",
     "morning_routine": "Kick off the day: ensure today's daily note exists, carry overdue reminders forward to 9am, and return the morning digest",
     "evening_wrapup": "End-of-day summary: today's events, open todos, habit status, and a preview of tomorrow's schedule",
     "weekly_review": "ISO-week roll-up: events, notes created, open todos, habit completion (x/7 + streaks), and weight change",

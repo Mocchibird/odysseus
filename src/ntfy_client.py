@@ -145,3 +145,82 @@ async def send_ntfy_notification(
         "url": url,
         "exit_code": 0,
     }
+
+
+async def send_ntfy(
+    title: str,
+    message: str,
+    *,
+    owner: str = "",
+    topic: Optional[str] = None,
+    integration_id: Optional[str] = None,
+    priority: str = "high",
+    tags: str = "bell",
+    actions: Optional[str] = None,
+) -> Dict[str, Any]:
+    """High-level, reusable ntfy push: resolve the target ntfy connection + topic
+    from the saved integrations/settings, then send.
+
+    Intended as the single entry point anything (scheduled tasks, reminders,
+    tools) can call to push an ntfy notification.
+
+    Robust for BACKGROUND contexts: it keys off the ntfy *integration* (a global
+    connection list) plus the topic, and is deliberately NOT gated on the
+    per-user ``reminder_channel`` setting — so it still fires from the task
+    scheduler, where that per-user setting may not resolve for the task owner.
+
+    Returns ``{"ntfy_sent": bool, "ntfy_error": str, "topic": str}``.
+    """
+    try:
+        from src.integrations import load_integrations
+        from src.settings import get_setting, get_user_setting
+    except Exception as exc:  # pragma: no cover - import safety
+        return {"ntfy_sent": False, "ntfy_error": f"ntfy setup unavailable: {exc}", "topic": ""}
+
+    # Topic: explicit arg -> per-user pref -> global pref -> (later) the
+    # connection's own configured topic -> conventional default "reminders".
+    resolved_topic = str(topic or "").strip()
+    if not resolved_topic:
+        try:
+            resolved_topic = str(
+                get_user_setting(
+                    "reminder_ntfy_topic", owner or "", get_setting("reminder_ntfy_topic", "")
+                ) or ""
+            ).strip()
+        except Exception:
+            resolved_topic = ""
+
+    resolved_id = integration_id
+    if not resolved_id:
+        try:
+            resolved_id = get_user_setting("reminder_ntfy_integration_id", owner or "", "") or None
+        except Exception:
+            resolved_id = None
+
+    try:
+        integrations = load_integrations()
+    except Exception as exc:
+        return {"ntfy_sent": False, "ntfy_error": f"could not load integrations: {exc}", "topic": resolved_topic}
+
+    intg = resolve_ntfy_integration(integrations, topic=resolved_topic or None, integration_id=resolved_id)
+    if not intg:
+        return {"ntfy_sent": False, "ntfy_error": "No enabled ntfy integration", "topic": resolved_topic}
+
+    # Prefer the explicitly-resolved topic; fall back to the connection's own
+    # configured topic, then the conventional default.
+    send_topic = resolved_topic or str(intg.get("ntfy_topic") or "").strip() or "reminders"
+    result = await send_ntfy_notification(
+        intg,
+        send_topic,
+        message,
+        title=title or "Reminder",
+        priority=priority,
+        tags=tags,
+        actions=actions,
+    )
+    ok = result.get("exit_code") == 0
+    return {
+        "ntfy_sent": ok,
+        "ntfy_error": "" if ok else str(result.get("error") or "ntfy send failed"),
+        "topic": send_topic,
+    }
