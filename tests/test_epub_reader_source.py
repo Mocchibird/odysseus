@@ -134,7 +134,9 @@ def test_books_has_dedicated_reader_ui_hooks():
 
 
 def test_agent_tool_registration_for_books():
-    agent_tools = (ROOT / "src" / "agent_tools.py").read_text(encoding="utf-8")
+    # upstream #3435 moved tool execution into the src/agent_tools/ package
+    # (agent_tools.py -> agent_tools/__init__.py); the manage_books tag lives there.
+    agent_tools = (ROOT / "src" / "agent_tools" / "__init__.py").read_text(encoding="utf-8")
     schemas = (ROOT / "src" / "tool_schemas.py").read_text(encoding="utf-8")
     execution = (ROOT / "src" / "tool_execution.py").read_text(encoding="utf-8")
     index = (ROOT / "src" / "tool_index.py").read_text(encoding="utf-8")
