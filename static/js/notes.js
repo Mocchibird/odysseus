@@ -1848,10 +1848,6 @@ export function openPanel() {
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3h10l4 4v14H5z"/><path d="M15 3v5h5"/><path d="M8 17.5 15.5 10l2.5 2.5L10.5 20H8z"/></svg>
         <span class="notes-header-btn-label">Notes</span>
       </button>
-      <button id="notes-vault-toggle" class="doc-action-icon-btn notes-header-text-btn" title="Browse vault files" style="opacity:0.8;gap:5px;">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7h5l2 2h11v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M3 7V5a2 2 0 0 1 2-2h4l2 2h4"/></svg>
-        <span class="notes-header-btn-label">Vault</span>
-      </button>
       <button id="notes-books-toggle" class="doc-action-icon-btn notes-header-text-btn" title="Read books" style="opacity:0.8;gap:5px;">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
         <span class="notes-header-btn-label">Books</span>
@@ -1868,11 +1864,6 @@ export function openPanel() {
     </div>
     <div class="notes-search-bar">
       <input type="text" id="notes-search" class="memory-search-input" placeholder="Search notes…" autocomplete="off" />
-      <button id="notes-vault-upload" class="notes-select-trigger notes-vault-only" type="button" title="Upload into the vault">Upload</button>
-      <button id="notes-vault-daily" class="notes-select-trigger notes-vault-only" type="button" title="Quick-capture to today's daily note">+ Daily</button>
-      <button id="notes-vault-organize" class="notes-select-trigger notes-vault-only" type="button" title="Let Iris triage your inbox into folders">Organize</button>
-      <button id="notes-vault-graph" class="notes-select-trigger notes-vault-only" type="button" title="Backlink graph">Graph</button>
-      <button id="notes-vault-reindex" class="notes-select-trigger notes-vault-only" type="button" title="Reindex your vault folder">Reindex</button>
       <button id="notes-books-upload" class="notes-select-trigger notes-books-only" type="button" title="Upload EPUB or PDF">Upload EPUB/PDF</button>
       <button id="notes-select-btn" class="notes-select-trigger" type="button">Select</button>
     </div>
@@ -1960,22 +1951,6 @@ export function openPanel() {
     });
   }
 
-  const vaultBtn = document.getElementById('notes-vault-toggle');
-  if (vaultBtn) {
-    vaultBtn.addEventListener('click', async () => {
-      if (_notesMode === 'vault') return;
-      _notesMode = 'vault';
-      _destroyBookPdfReader();
-      _bookOpenBook = null;
-      _epubOpenBook = null;
-      _syncNotesModeChrome();
-      _vaultLoading = true;
-      _renderNotes();
-      await _fetchVaultFiles();
-      _renderNotes();
-    });
-  }
-
   const booksBtn = document.getElementById('notes-books-toggle');
   if (booksBtn) {
     booksBtn.addEventListener('click', async () => {
@@ -1989,69 +1964,6 @@ export function openPanel() {
       _renderNotes();
       await _fetchBooks();
       _renderNotes();
-    });
-  }
-
-  const vaultUploadBtn = document.getElementById('notes-vault-upload');
-  if (vaultUploadBtn) {
-    vaultUploadBtn.addEventListener('click', () => {
-      const input = document.createElement('input');
-      input.type = 'file';
-      input.multiple = true;
-      input.style.cssText = 'position:fixed;left:-9999px;top:-9999px;';
-      document.body.appendChild(input);
-      input.addEventListener('change', async () => {
-        try {
-          await _uploadVaultFiles(input.files);
-          uiModule.showToast?.('Uploaded to vault');
-          _renderNotes();
-        } catch (e) {
-          uiModule.showError?.(e?.message || 'Vault upload failed');
-        } finally {
-          input.remove();
-        }
-      }, { once: true });
-      input.click();
-    });
-  }
-
-  const vaultGraphBtn = document.getElementById('notes-vault-graph');
-  if (vaultGraphBtn) {
-    vaultGraphBtn.addEventListener('click', () => {
-      _vaultGraphOpen = !_vaultGraphOpen;
-      _vaultOrganizeOpen = false;
-      _vaultOpenFile = null;
-      if (!_vaultGraphOpen) _destroyVaultGraph();
-      _renderNotes();
-    });
-  }
-
-  const vaultOrganizeBtn = document.getElementById('notes-vault-organize');
-  if (vaultOrganizeBtn) {
-    vaultOrganizeBtn.addEventListener('click', () => {
-      _vaultOrganizeOpen = !_vaultOrganizeOpen;
-      _vaultGraphOpen = false; _destroyVaultGraph();
-      _vaultOpenFile = null;
-      _renderNotes();
-    });
-  }
-
-  const vaultDailyBtn = document.getElementById('notes-vault-daily');
-  if (vaultDailyBtn) {
-    vaultDailyBtn.addEventListener('click', async () => {
-      const text = ((await uiModule.styledPrompt('Quick-capture to today’s daily note', { title: 'Daily note', placeholder: 'What\'s on your mind?', confirmText: 'Add', maxLength: 500 })) || '').trim();
-      if (!text) return;
-      try {
-        const res = await fetch(`${API_BASE}/api/iris-vault/daily-note`, {
-          method: 'POST', credentials: 'same-origin',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ path: '', content: text }),
-        });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.detail || 'Failed to capture');
-        uiModule.showToast?.(`Added to ${data.path}`);
-        if (_notesMode === 'vault') { await _fetchVaultFiles(); _renderNotes(); }
-      } catch (e) { uiModule.showError?.(e?.message || 'Daily-note capture failed'); }
     });
   }
 
@@ -2087,22 +1999,6 @@ export function openPanel() {
       input.click();
     });
   }
-  const vaultReindexBtn = document.getElementById('notes-vault-reindex');
-  if (vaultReindexBtn) {
-    vaultReindexBtn.addEventListener('click', async () => {
-      try {
-        vaultReindexBtn.disabled = true;
-        const count = await _reindexVaultFiles();
-        uiModule.showToast?.(`Indexed ${count} file${count === 1 ? '' : 's'}`);
-        _renderNotes();
-      } catch (e) {
-        uiModule.showError?.(e?.message || 'Vault reindex failed');
-      } finally {
-        vaultReindexBtn.disabled = false;
-      }
-    });
-  }
-
   // View toggle
   const archiveBtn = document.getElementById('notes-archive-toggle');
   if (archiveBtn) {
@@ -2837,48 +2733,6 @@ function _renderVaultFiles() {
   }
   if (_vaultError) {
     body.innerHTML = html + `<div class="notes-empty-msg">${_esc(_vaultError)}</div>`;
-    return;
-  }
-  if (_vaultGraphOpen) {
-    _destroyVaultGraph();
-    body.innerHTML = html + `<div class="notes-vault-graph-wrap">
-      <div class="notes-vault-reader-head">
-        <button type="button" class="notes-vault-back" title="Back to files">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
-        </button>
-        <div class="notes-vault-reader-title"><strong>Backlink graph</strong><span id="notes-vault-graph-meta"></span></div>
-      </div>
-      <div id="notes-vault-graph-host" class="notes-vault-graph"></div>
-    </div>`;
-    body.querySelector('.notes-vault-back')?.addEventListener('click', () => { _vaultGraphOpen = false; _destroyVaultGraph(); _renderNotes(); });
-    (async () => {
-      // NB: the toggle button in the toolbar already owns id="notes-vault-graph";
-      // the canvas host must use a DISTINCT id or getElementById returns the
-      // button and the graph mounts into it (the old empty/overflow bug).
-      const host = document.getElementById('notes-vault-graph-host');
-      if (host) host.innerHTML = '<div class="notes-empty-msg">Building graph…</div>';
-      try {
-        const res = await fetch(`${API_BASE}/api/iris-vault/graph`, { credentials: 'same-origin' });
-        const data = await res.json();
-        const g = (data && data.graph) || { nodes: [], links: [] };
-        const meta = document.getElementById('notes-vault-graph-meta');
-        if (meta) meta.textContent = `${g.nodes.length} notes · ${g.links.length} links${g.truncated ? ' · top 800' : ''}`;
-        if (!_vaultGraphOpen || !host) return;
-        if (!g.nodes.length) { host.innerHTML = '<div class="notes-empty-msg">No [[wikilinks]] found in your notes yet — link some notes and rebuild.</div>'; return; }
-        host.innerHTML = '';
-        const { createVaultGraph } = await import('./vaultGraph.js');
-        if (!_vaultGraphOpen) return;
-        _vaultGraphCtl = createVaultGraph(host, {
-          nodes: g.nodes, links: g.links,
-          onOpen: (path) => {
-            _vaultGraphOpen = false; _destroyVaultGraph();
-            _readVaultFile(path).then(() => _renderNotes()).catch((e) => uiModule.showError?.(e.message));
-          },
-        });
-      } catch (e) {
-        if (host) host.innerHTML = `<div class="notes-empty-msg">Couldn't build the graph: ${_esc(e.message || 'error')}</div>`;
-      }
-    })();
     return;
   }
   if (_vaultOrganizeOpen) {
