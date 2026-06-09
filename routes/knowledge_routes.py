@@ -8,8 +8,10 @@ full extracted text to verify against the original. The RAG/semantic path is
 Iris-only and lives in the agent tool, never here.
 """
 import logging
+import os
 
 from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import FileResponse
 
 from src.auth_helpers import get_current_user
 from src import knowledge_base as kb
@@ -42,6 +44,20 @@ def setup_knowledge_routes(upload_handler) -> APIRouter:
         if not rec:
             raise HTTPException(404, "Not found")
         return rec
+
+    @router.get("/{kb_id}/raw")
+    async def kb_raw(request: Request, kb_id: str):
+        """Serve the ACTUAL stored file — the user's open-and-verify path."""
+        owner = get_current_user(request)
+        path = kb.file_abspath(owner, kb_id)
+        if not path:
+            raise HTTPException(404, "File not found")
+        rec = kb.get(owner, kb_id) or {}
+        return FileResponse(
+            path,
+            media_type=rec.get("mime") or None,
+            filename=rec.get("filename") or os.path.basename(path),
+        )
 
     @router.post("")
     async def kb_add(request: Request):
@@ -78,10 +94,17 @@ def setup_knowledge_routes(upload_handler) -> APIRouter:
 
     @router.delete("/{kb_id}")
     async def kb_delete(request: Request, kb_id: str):
-        """Remove a file's knowledge-base record (the uploaded bytes are kept)."""
+        """Remove a file's knowledge-base record + its KB-owned bytes."""
         owner = get_current_user(request)
         if not kb.delete(owner, kb_id):
             raise HTTPException(404, "Not found")
         return {"ok": True}
+
+    @router.post("/migrate-vault")
+    async def kb_migrate_vault(request: Request):
+        """One-time: import the caller's Obsidian-vault files into the knowledge
+        base (copy + extract + index). Idempotent. Returns {processed, errors, total}."""
+        owner = get_current_user(request)
+        return kb.migrate_from_vault(owner)
 
     return router

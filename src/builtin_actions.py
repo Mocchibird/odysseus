@@ -2470,6 +2470,29 @@ async def action_morning_routine(owner: str, **kwargs) -> Tuple[str, bool]:
         return str(e), False
 
 
+async def action_migrate_vault_to_knowledge(owner: str, **kwargs) -> Tuple[str, bool]:
+    """One-time: import the user's Obsidian-vault files into the native knowledge
+    base — copies each indexed vault file in, extracts its text, RAG-indexes it,
+    and makes it searchable + openable. Idempotent (content-hash dedupe), so it's
+    safe to re-run. Trigger via Tasks → new Action task → migrate_vault_to_knowledge
+    → Run now (or POST /api/knowledge/migrate-vault)."""
+    try:
+        from src import knowledge_base as kb
+        res = kb.migrate_from_vault(owner)
+        msg = f"Vault → Knowledge base: imported {res.get('processed', 0)} file(s)"
+        if res.get("errors"):
+            msg += f", {res['errors']} skipped/errored (missing on disk — reindex the vault?)"
+        if res.get("note"):
+            msg += f" — {res['note']}"
+        msg += (f". Your knowledge base now holds {res.get('total', 0)} file(s). "
+                "Find them under Knowledge, or ask Iris (it uses search_knowledge "
+                "and cites the source file so you can open + verify it).")
+        return msg, True
+    except Exception as e:
+        logger.error(f"migrate_vault_to_knowledge action failed: {e}")
+        return str(e), False
+
+
 BUILTIN_ACTIONS = {
     "tidy_sessions": action_tidy_sessions,
     "tidy_pings": action_tidy_pings,
@@ -2500,6 +2523,7 @@ BUILTIN_ACTIONS = {
     "audit_skills": action_audit_skills,
     "check_email_urgency": action_check_email_urgency,
     "cookbook_serve": action_cookbook_serve,
+    "migrate_vault_to_knowledge": action_migrate_vault_to_knowledge,
     # ping_notes removed from the registry — runs only inside `_note_pings_loop`.
 }
 
@@ -2515,6 +2539,7 @@ BUILTIN_ACTION_INFO = {
     "extract_email_events": "Scan emails for booking/meeting confirmations and auto-add to calendar",
     "classify_events": "Tag upcoming events with importance (low/normal/high/critical) and type (work/health/travel/etc.); colors them too",
     "daily_brief": "Morning digest: today's calendar, unread email count + top senders, active todos. With Output = Notification it lands in the Pings feed AND pushes your ntfy.",
+    "migrate_vault_to_knowledge": "One-time: import your Obsidian-vault files into the native Knowledge base (copies, text-extracts + indexes them so they're searchable, openable, and recallable by Iris). Idempotent — safe to re-run.",
     "morning_routine": "Kick off the day: ensure today's daily note exists, carry overdue reminders forward to 9am, and return the morning digest",
     "evening_wrapup": "End-of-day summary: today's events, open todos, habit status, and a preview of tomorrow's schedule",
     "weekly_review": "ISO-week roll-up: events, notes created, open todos, habit completion (x/7 + streaks), and weight change",

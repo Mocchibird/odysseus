@@ -14,10 +14,12 @@ from src import knowledge_base as kb  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
-def _tables_and_no_rag(monkeypatch):
+def _tables_and_no_rag(monkeypatch, tmp_path):
     Base.metadata.create_all(bind=engine)
-    # Don't touch a real vector store in unit tests.
+    # Don't touch a real vector store, and keep KB file copies in a temp dir
+    # (never write into the repo's data/ during tests).
     monkeypatch.setattr("src.rag_singleton.get_rag_manager", lambda: None)
+    monkeypatch.setattr("src.knowledge_base._data_dir", lambda: str(tmp_path / "kbdata"))
     yield
 
 
@@ -136,3 +138,48 @@ def test_do_search_knowledge_returns_citable_results(tmp_path):
 
     miss = asyncio.run(do_search_knowledge(json.dumps({"query": "zzz-nomatch"}), owner="kb-tool"))
     assert miss["exit_code"] == 0 and miss["files"] == []
+
+
+def test_ingest_copies_file_and_is_openable(tmp_path):
+    src = _write(tmp_path, "doc.md", "openable body text")
+    rec = kb.ingest("kb-copy", file_path=src, filename="doc.md")
+    assert rec["has_file"] is True
+    assert rec["url"] == f"/api/knowledge/{rec['id']}/raw"
+    # the KB owns a copy of the bytes -> always openable, owner-scoped
+    path = kb.file_abspath("kb-copy", rec["id"])
+    assert path and open(path, encoding="utf-8").read() == "openable body text"
+    assert kb.file_abspath("kb-other", rec["id"]) is None
+
+
+def test_migrate_from_vault(tmp_path, monkeypatch):
+    import hashlib as _h
+    from core.database import SessionLocal, IrisVaultFile
+
+    owner = "kb-mig"
+    vroot = tmp_path / "vault"
+    monkeypatch.setenv("ODYSSEUS_OBSIDIAN_VAULT_ROOT", str(vroot))
+    # vault layout: <root>/<owner>/<rel_path>
+    (vroot / owner / "notes").mkdir(parents=True)
+    (vroot / owner / "notes" / "huawei.md").write_text("Huawei Ascend specs", encoding="utf-8")
+    (vroot / owner / "plain.txt").write_text("just a plain note", encoding="utf-8")
+    db = SessionLocal()
+    try:
+        for rel in ("notes/huawei.md", "plain.txt"):
+            db.add(IrisVaultFile(
+                id=_h.sha256(f"{owner}/{rel}".encode()).hexdigest(),
+                owner=owner, rel_path=rel, title=rel,
+                sha256=_h.sha256(rel.encode()).hexdigest(),
+            ))
+        db.commit()
+    finally:
+        db.close()
+
+    res = kb.migrate_from_vault(owner)
+    assert res["processed"] == 2
+    assert res["total"] == 2
+    # imported files are searchable + openable, tagged as a migration
+    assert {h["filename"] for h in kb.search(owner, q="ascend")} == {"huawei.md"}
+    assert all(h["source"] == "vault-migration" for h in kb.search(owner, q=""))
+    # idempotent: re-running adds nothing (content-hash dedupe)
+    res2 = kb.migrate_from_vault(owner)
+    assert res2["total"] == 2

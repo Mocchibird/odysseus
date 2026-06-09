@@ -326,6 +326,7 @@ class KnowledgeFile(TimestampMixin, Base):
     mime       = Column(String, nullable=True)
     file_size  = Column(Integer, nullable=True)                 # bytes
     sha256     = Column(String(64), nullable=True, index=True)  # dedupe within an owner
+    path       = Column(String, nullable=True)                  # KB-owned copy, relative to DATA_DIR/knowledge_files (served at /api/knowledge/{id}/raw)
     text       = Column(Text, nullable=True, default="")        # extracted text (search + preview)
     tags       = Column(String, nullable=True, default="")      # user tags (comma-separated)
     ai_tags    = Column(Text, nullable=True, default="")        # LLM-generated tags (comma-separated)

@@ -19,6 +19,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import os
+import shutil
 import uuid
 from typing import List, Optional
 
@@ -42,6 +43,56 @@ def _sha256_file(path: str) -> Optional[str]:
         return h.hexdigest()
     except OSError:
         return None
+
+
+def _data_dir() -> str:
+    try:
+        from src.constants import DATA_DIR
+        return DATA_DIR
+    except Exception:
+        return os.path.join(os.getcwd(), "data")
+
+
+def _kb_files_dir() -> str:
+    """KB-owned file store (separate from chat uploads): the durable bytes the
+    knowledge base serves, so files stay openable even after the vault is gone."""
+    return os.path.join(_data_dir(), "knowledge_files")
+
+
+def _owner_slug(owner) -> str:
+    raw = str(owner or "_anon")
+    return "".join(c if (c.isalnum() or c in "-_.@") else "_" for c in raw) or "_anon"
+
+
+def _copy_into_kb(owner, kb_id: str, src_path: str, filename: str) -> Optional[str]:
+    """Copy the source file into the KB-owned store; return the path relative to
+    _kb_files_dir() (stored on the row, served via /api/knowledge/{id}/raw)."""
+    try:
+        ext = os.path.splitext(filename or src_path)[1].lower()
+        rel = os.path.join(_owner_slug(owner), kb_id[:2], f"{kb_id}{ext}")
+        dest = os.path.join(_kb_files_dir(), rel)
+        os.makedirs(os.path.dirname(dest), exist_ok=True)
+        shutil.copy2(src_path, dest)
+        return rel
+    except Exception as e:
+        logger.warning("knowledge: could not copy %s into KB store: %s", filename, e)
+        return None
+
+
+def file_abspath(owner: Optional[str], kb_id: str) -> Optional[str]:
+    """Absolute path to a KB file's bytes (owner-scoped) for serving — None if
+    missing/forbidden. The user's deterministic 'open the real file' path."""
+    from core.database import SessionLocal, KnowledgeFile
+
+    db = SessionLocal()
+    try:
+        kf = db.query(KnowledgeFile).filter(KnowledgeFile.id == kb_id).first()
+        if not kf or (owner is not None and kf.owner != owner) or not kf.path:
+            return None
+        p = os.path.join(_kb_files_dir(), kf.path)
+        return p if os.path.exists(p) else None
+    finally:
+        db.close()
 
 
 def extract_text(file_path: str, filename: str = "", mime: str = "",
@@ -109,6 +160,11 @@ def _to_dict(kf) -> dict:
         "ai_tags": _split_tags(kf.ai_tags),
         "source": kf.source,
         "indexed": bool(kf.indexed),
+        # The real-file open URL (KB-owned bytes preferred; falls back to the
+        # uploads store). The user's "double-check the actual file" path.
+        "url": (f"/api/knowledge/{kf.id}/raw" if kf.path
+                else (f"/api/upload/{kf.upload_id}" if kf.upload_id else None)),
+        "has_file": bool(kf.path or kf.upload_id),
         "excerpt": (kf.text or "")[:300],
         "created_at": kf.created_at.isoformat() if kf.created_at else None,
     }
@@ -166,14 +222,17 @@ def ingest(owner: Optional[str], *, file_path: str, filename: str = "",
                 return _to_dict(existing)
 
         text = extract_text(file_path, filename, mime or "", owner=owner) if extract else ""
+        kid = uuid.uuid4().hex
+        rel_path = _copy_into_kb(owner, kid, file_path, filename)  # KB owns its bytes -> always openable
         kf = KnowledgeFile(
-            id=uuid.uuid4().hex,
+            id=kid,
             owner=owner,
             upload_id=upload_id,
             filename=filename,
             mime=mime,
             file_size=size,
             sha256=sha,
+            path=rel_path,
             text=text,
             tags=_norm_tags(tags),
             ai_tags="",
@@ -318,8 +377,7 @@ def list_tags(owner: Optional[str]) -> List[str]:
 
 
 def delete(owner: Optional[str], kb_id: str) -> bool:
-    """Delete a knowledge file record (owner-scoped). Bytes in the uploads store
-    are left as-is (shared/dedup-safe)."""
+    """Delete a knowledge file record (owner-scoped) + its KB-owned bytes."""
     from core.database import SessionLocal, KnowledgeFile
 
     db = SessionLocal()
@@ -327,8 +385,71 @@ def delete(owner: Optional[str], kb_id: str) -> bool:
         kf = db.query(KnowledgeFile).filter(KnowledgeFile.id == kb_id).first()
         if not kf or (owner is not None and kf.owner != owner):
             return False
+        rel = kf.path
         db.delete(kf)
         db.commit()
+        if rel:
+            try:
+                os.remove(os.path.join(_kb_files_dir(), rel))
+            except OSError:
+                pass
         return True
     finally:
         db.close()
+
+
+def count(owner: Optional[str]) -> int:
+    """Number of knowledge files for an owner."""
+    from core.database import SessionLocal, KnowledgeFile
+
+    db = SessionLocal()
+    try:
+        q = db.query(KnowledgeFile)
+        if owner is not None:
+            q = q.filter(KnowledgeFile.owner == owner)
+        return q.count()
+    finally:
+        db.close()
+
+
+def migrate_from_vault(owner: Optional[str]) -> dict:
+    """One-time import of the owner's Obsidian-vault files into the KB: each
+    indexed vault file is copied in, text-extracted, RAG-indexed, and made
+    searchable/openable. Idempotent (content-hash dedupe). Returns
+    {processed, errors, total}. (Couples to iris_vault ONLY here, for migration.)"""
+    from core.database import SessionLocal, IrisVaultFile
+
+    try:
+        from src import iris_vault
+    except Exception as e:
+        logger.warning("knowledge: iris_vault unavailable for migration: %s", e)
+        return {"processed": 0, "errors": 0, "total": count(owner), "note": "vault module unavailable"}
+
+    db = SessionLocal()
+    try:
+        q = db.query(IrisVaultFile)
+        if owner is not None:
+            q = q.filter(IrisVaultFile.owner == owner)
+        rows = q.all()
+    finally:
+        db.close()
+
+    processed = errors = 0
+    for row in rows:
+        try:
+            path = iris_vault.resolve_owner_file(owner, row.rel_path)
+            if not path or not path.exists():
+                errors += 1
+                continue
+            ingest(
+                owner,
+                file_path=str(path),
+                filename=os.path.basename(row.rel_path) or (row.title or "file"),
+                mime=getattr(row, "mime", None),
+                source="vault-migration",
+            )
+            processed += 1
+        except Exception as e:
+            logger.debug("knowledge: migrate failed for %s: %s", getattr(row, "rel_path", "?"), e)
+            errors += 1
+    return {"processed": processed, "errors": errors, "total": count(owner)}
