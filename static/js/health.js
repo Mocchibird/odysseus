@@ -392,7 +392,7 @@ async function _renderCalories() {
       <div class="health-inline-form">
         <select id="health-csv-kind" class="health-input"><option value="meals">Meals</option><option value="weights">Weights</option><option value="training">Training</option></select>
         <button class="health-btn" id="health-csv-export" type="button">Export ⤓</button>
-        <label class="health-btn-sub" style="cursor:pointer;padding:6px 12px;">Import ⤒<input id="health-csv-import" type="file" accept=".csv,text/csv" style="display:none"></label>
+        <label class="health-btn" style="cursor:pointer;">Import ⤒<input id="health-csv-import" type="file" accept=".csv,text/csv" style="display:none"></label>
       </div>
     </div>
     <details class="health-card health-profile">

@@ -32361,6 +32361,15 @@ body.notes-mobile-mode.notes-drag-mode .note-card-pin.active {
   align-items: center;
   gap: 8px;
 }
+/* Pin the reader chrome (head + chapter/page nav) to the top so scrolling —
+   which prepends the previous chapter in continuous mode — can't carry the
+   menu out of reach (it used to scroll up into the just-prepended chapter). */
+.notes-book-chrome {
+  position: sticky;
+  top: 0;
+  z-index: 6;
+  background: var(--panel, var(--bg));
+}
 .notes-book-head .notes-vault-reader-title {
   flex: 1 1 auto;
   min-width: 0;
@@ -32448,6 +32457,7 @@ body.notes-mobile-mode.notes-drag-mode .note-card-pin.active {
 /* ---- Reader tools: search / bookmark / annotations / read-aloud ---- */
 .notes-book-tools { display: inline-flex; gap: 2px; align-items: center; }
 .notes-book-tool {
+  box-sizing: border-box;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -38009,6 +38019,10 @@ body.theme-frosted .modal {
 .health-input-sm { width: 78px; flex: 0 0 auto; }
 .health-input-icon { width: 52px; flex: 0 0 auto; text-align: center; }
 .health-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
   background: color-mix(in srgb, var(--accent-primary, var(--red)) 18%, transparent);
   border: 1px solid color-mix(in srgb, var(--accent-primary, var(--red)) 38%, var(--border));
   color: var(--fg);
@@ -38016,6 +38030,7 @@ body.theme-frosted .modal {
   padding: 6px 12px;
   font: inherit;
   font-size: 12px;
+  line-height: 1.5;
   font-weight: 700;
   cursor: pointer;
   flex: 0 0 auto;
@@ -38124,6 +38139,11 @@ body.theme-frosted .modal {
 .health-week-num { flex: 0 0 auto; font-size: 11px; opacity: 0.6; width: 30px; text-align: right; }
 .health-btn-sub { background: transparent; border: 1px solid var(--border); color: color-mix(in srgb, var(--fg) 70%, transparent); border-radius: 7px; font-size: 12px; font-weight: 700; }
 .health-btn-sub:hover { color: var(--fg); }
+/* Profile & goals collapsible: render its summary like a normal card head so it
+   reads as a clear section (it used to inherit a gold accent → an unexplained
+   "yellow" sliver below the fold that the user couldn't identify). */
+.health-profile > summary { color: var(--fg); cursor: pointer; padding: 2px 0; }
+.health-profile > summary strong { color: var(--fg); font-size: 13px; }
 .health-list { display: flex; flex-direction: column; gap: 2px; }
 .health-row {
   display: flex;

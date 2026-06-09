@@ -615,6 +615,7 @@ function _renderBookReader(body, baseHtml) {
   // One compact header line: back + title + (nav toggle) + reader tools + open/rename.
   // The chapter/page nav lives in a collapsible row beneath it (navRowHtml).
   const headHtml = `
+    <div class="notes-book-chrome">
     <div class="notes-vault-reader-head notes-book-head">
       <button type="button" class="notes-vault-back" title="Back to books">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
@@ -632,7 +633,8 @@ function _renderBookReader(body, baseHtml) {
         </button>
       </div>
     </div>
-    ${navRowHtml}`;
+    ${navRowHtml}
+    </div>`;
   if (isPdf) {
     // Continuous-scroll PDF via pdfReader.js (PDF.js → canvas), so multi-page
     // PDFs scroll consistently on desktop AND mobile — the native <iframe> viewer
