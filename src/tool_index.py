@@ -157,6 +157,7 @@ BUILTIN_TOOL_DESCRIPTIONS: Dict[str, str] = {
     "mark_email_read": "Mark an email as read or unread by toggling the \\Seen flag.",
     "bulk_email": "Perform one action on many emails at once. Use for delete all those, archive these, mark all read, move spam to junk. Takes explicit UIDs from list_emails or all_unread=true. Always pass account for Gmail/work/custom mailbox results.",
     "search_knowledge": "Search the user's KNOWLEDGE BASE — their uploaded files (PDFs, images, markdown, docs) — to recall facts/specs/notes (the native replacement for the vault search). Combines exact keyword/tag matching with semantic recall, and returns [filename](#knowledge-<id>) links — ALWAYS cite the source file so the user can open + verify the original. For 'what do my files/notes say about X', 'find my file about Y', 'look up Z in my knowledge'. Not for live web info (use web_search) and not the habit tracker (use manage_health).",
+    "manage_knowledge": "EDIT the user's KNOWLEDGE BASE files: replace/correct a file's text (edit), add to it (append), set tags (retag), AI-generate tags (autotag), or delete it. Identify the file by id (from a search_knowledge #knowledge-<id> link) or a unique filename/keywords. For .md/.txt files an edit rewrites the file; for PDFs/images it corrects the searchable extracted text; every change re-indexes recall. Use after search_knowledge for 'fix/append to/tag/delete my file on X'. Not for reading (use search_knowledge) or authoring new documents (use the document tools).",
     "resolve_contact": "Look up a contact's email address by name. Searches CardDAV address book and sent email history. Use when the user says 'message [name]', 'email [name]', or 'send to [name]' without an email address.",
     "manage_contact": "Create, update, delete, or list CardDAV contacts. Use to save a new contact, change an existing one's email/phone, or remove one. Action=list returns uids needed for update/delete. Use when the user says 'save this contact', 'add [name] to contacts', 'update [name]'s email', 'delete [name] from contacts'. Do not use for user identity facts like 'my name is <name>'; those are memory.",
     "manage_notes": "Create and manage notes and checklists (Google Keep-style). ALWAYS use this for note/todo/checklist/reminder creation — NEVER hit /api/notes via app_api. BUT a recurring HABIT (one with streaks/a heatmap, e.g. 'add a habit', 'track meditation daily', 'rename my habit') is NOT a checklist — use manage_health for the habit tracker, not a note. Accepts natural-language `due_date` like 'tomorrow at 9am' or '11pm today' (parsed in the USER'S timezone). The due_date IS the reminder — it fires a notification at that time, so do NOT also create a calendar event for the same reminder. Set colors, labels, pin, archive. Do NOT use manage_memory for note content.",
@@ -398,8 +399,10 @@ class ToolIndex:
         # about X", "find my file on Y", "look up Z in my knowledge/docs".
         frozenset({"knowledge", "knowledge base", "my files", "my file", "my docs",
                    "my documents", "look up", "find my", "search my", "uploaded file",
-                   "what do my notes say", "in my files", "in my notes"}):
-            {"search_knowledge"},
+                   "what do my notes say", "in my files", "in my notes",
+                   "edit my file", "edit my knowledge", "update my file", "fix the text",
+                   "tag my file", "retag", "delete my file", "append to my"}):
+            {"search_knowledge", "manage_knowledge"},
         # Habit tracker + health/nutrition/training. Without this, "add a habit",
         # "rename my habit", "give it an emoji", "log my lunch" missed
         # manage_health (RAG ranked manage_notes higher) and the agent made a

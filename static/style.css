@@ -38559,6 +38559,22 @@ body.theme-frosted .modal {
 .kb-indexed { flex-shrink: 0; font-size: 12px; }
 .kb-indexed > summary { cursor: pointer; opacity: 0.6; padding: 4px 0; }
 .kb-indexed-pre { white-space: pre-wrap; word-break: break-word; max-height: 200px; overflow-y: auto; background: color-mix(in srgb, var(--fg) 4%, transparent); border-radius: 6px; padding: 8px; font-size: 11px; margin: 4px 0 0; }
+/* edit text + suggest tags (lightweight content correction — not a 2nd doc editor) */
+.kb-suggest-tags { flex-shrink: 0; padding: 3px 10px; border: 1px solid var(--border); border-radius: 999px; background: var(--bg); color: var(--fg); font-size: 11px; cursor: pointer; }
+.kb-suggest-tags:hover:not(:disabled) { background: color-mix(in srgb, var(--fg) 8%, transparent); }
+.kb-suggest-tags:disabled { opacity: 0.5; cursor: default; }
+.kb-indexed-actions { display: flex; align-items: center; gap: 8px; margin: 6px 0 0; }
+.kb-edit-text { padding: 3px 10px; border: 1px solid var(--border); border-radius: 7px; background: transparent; color: var(--fg); font-size: 11px; cursor: pointer; }
+.kb-edit-text:hover { background: color-mix(in srgb, var(--fg) 8%, transparent); }
+.kb-edit-hint { font-size: 10px; opacity: 0.5; }
+.kb-edit-wrap { margin: 6px 0 0; }
+.kb-edit-area { width: 100%; box-sizing: border-box; min-height: 200px; resize: vertical; font-family: var(--mono, monospace); font-size: 11px; line-height: 1.5; padding: 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--fg); }
+.kb-edit-area:focus { outline: none; border-color: var(--accent, var(--red)); }
+.kb-edit-controls { display: flex; gap: 8px; margin: 6px 0 0; }
+.kb-edit-save, .kb-edit-cancel { padding: 5px 12px; border: 1px solid var(--border); border-radius: 7px; font-size: 12px; cursor: pointer; background: transparent; color: var(--fg); }
+.kb-edit-save { border-color: var(--accent, var(--red)); background: color-mix(in srgb, var(--accent, var(--red)) 15%, transparent); }
+.kb-edit-save:hover { background: color-mix(in srgb, var(--accent, var(--red)) 25%, transparent); }
+.kb-edit-cancel:hover { background: color-mix(in srgb, var(--fg) 8%, transparent); }
 
 /* .md prose (self-contained; KaTeX + highlight.js styles are global) */
 .kb-md { font-size: 13.5px; line-height: 1.6; }

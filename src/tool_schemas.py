@@ -659,6 +659,25 @@ FUNCTION_TOOL_SCHEMAS = [
     {
         "type": "function",
         "function": {
+            "name": "manage_knowledge",
+            "description": "EDIT the user's KNOWLEDGE BASE files (uploaded PDFs/images/markdown/docs): correct or replace a file's text, append to it, set or AI-generate tags, or delete it. Find the file with search_knowledge first to get its id. For text files (.md/.txt) an edit rewrites the stored file; for PDFs/images it corrects only the searchable extracted text. Every content change re-indexes recall so search stays in sync. NOT for reading/finding files (use search_knowledge) and NOT for authoring long new documents (use the document tools / Library).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string", "enum": ["edit", "append", "retag", "autotag", "delete"], "description": "edit = replace full text; append = add text; retag = set user tags; autotag = AI-generate tags from the text; delete = remove the file."},
+                    "id": {"type": "string", "description": "The knowledge file id (from a search_knowledge #knowledge-<id> link). Preferred."},
+                    "query": {"type": "string", "description": "Alternative to id: a filename or keywords that identify exactly ONE file."},
+                    "text": {"type": "string", "description": "For edit: the new FULL content. For append: the text to add."},
+                    "tags": {"type": "array", "items": {"type": "string"}, "description": "For retag: the tags to set (replaces the existing user tags)."},
+                    "filename": {"type": "string", "description": "Optional new filename when editing (rename)."}
+                },
+                "required": ["action"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "api_call",
             "description": "Call a registered API integration (RSS reader, git forge, bookmark manager, smart home, etc.). Check the system context for available integrations and their endpoints.",
             "parameters": {

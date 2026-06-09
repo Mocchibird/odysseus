@@ -205,6 +205,59 @@ def _index_in_rag(kf) -> bool:
         return False
 
 
+def _remove_from_rag(kb_id: str) -> int:
+    """Drop a file's chunks from the RAG vector store (by kb_id). Used before
+    re-indexing an edit and on delete, so stale/removed text never resurfaces in
+    Iris's recall. Best-effort — returns 0 when RAG is unavailable."""
+    try:
+        from src.rag_singleton import get_rag_manager
+        rag = get_rag_manager()
+        if not rag:
+            return 0
+        fn = getattr(rag, "delete_by_kb_id", None)
+        return int(fn(kb_id)) if fn else 0
+    except Exception as e:
+        logger.debug("knowledge: RAG delete failed for %s: %s", kb_id, e)
+        return 0
+
+
+def _generate_tags_via_llm(text: str, owner: Optional[str]) -> List[str]:
+    """Ask the configured Utility model for a few lowercase topical tags for a
+    document's text. Reuses the standard utility lane + fallback chain; returns
+    [] on any failure so auto-tagging never blocks ingest/edit."""
+    text = (text or "").strip()
+    if not text:
+        return []
+    try:
+        from src.endpoint_resolver import resolve_endpoint, resolve_utility_fallback_candidates
+        from src.llm_core import llm_call_with_fallback
+
+        url, model, headers = resolve_endpoint("utility", owner=owner)
+        candidates = [(url, model, headers)] + resolve_utility_fallback_candidates(owner=owner)
+        prompt = (
+            "Read the document below and output 3-8 short, lowercase topical tags "
+            "that capture what it is ABOUT (single words or 2-3 word phrases; no "
+            "sentences). Return ONLY a comma-separated list, nothing else.\n\n"
+            f"---\n{text[:6000]}\n---"
+        )
+        out = llm_call_with_fallback(
+            candidates, [{"role": "user", "content": prompt}],
+            temperature=0.2, max_tokens=120,
+        ) or ""
+        seen, clean = set(), []
+        for raw in out.replace("\n", ",").split(","):
+            t = raw.strip().strip("#.-•*").strip().lower()
+            if t and len(t) <= 40 and t not in seen:
+                seen.add(t)
+                clean.append(t)
+            if len(clean) >= 8:
+                break
+        return clean
+    except Exception as e:
+        logger.debug("knowledge: ai-tag generation failed: %s", e)
+        return []
+
+
 def ingest(owner: Optional[str], *, file_path: str, filename: str = "",
            mime: Optional[str] = None, upload_id: Optional[str] = None,
            source: str = "upload", tags="", extract: bool = True) -> dict:
@@ -391,6 +444,88 @@ def rename(owner: Optional[str], kb_id: str, new_filename: str) -> Optional[dict
         db.close()
 
 
+# Editable-content extensions: keep this LIGHTWEIGHT (a correction textarea), not
+# a second document editor — heavy authoring belongs in Library/Documents.
+def update_text(owner: Optional[str], kb_id: str, new_text: Optional[str], *,
+                filename: Optional[str] = None) -> Optional[dict]:
+    """Edit a KB file's content/searchable text (owner-scoped) and RE-INDEX RAG.
+
+    For text-based files (.md/.txt/…) this also rewrites the stored bytes so the
+    opened file matches what's searched; for binaries (pdf/image/…) it updates
+    only the extracted/searchable text (the user's correction of OCR/extraction),
+    leaving the original file + its hash intact. Returns the updated row or None."""
+    from core.database import SessionLocal, KnowledgeFile
+
+    if new_text is None and not filename:
+        return None
+    db = SessionLocal()
+    try:
+        kf = db.query(KnowledgeFile).filter(KnowledgeFile.id == kb_id).first()
+        if not kf or (owner is not None and kf.owner != owner):
+            return None
+        if filename:
+            kf.filename = str(filename).strip()[:255] or kf.filename
+        if new_text is not None:
+            ext = os.path.splitext(kf.filename or kf.path or "")[1].lower()
+            if ext in _TEXT_EXTS and kf.path:
+                abspath = os.path.join(_kb_files_dir(), kf.path)
+                try:
+                    os.makedirs(os.path.dirname(abspath), exist_ok=True)
+                    with open(abspath, "w", encoding="utf-8") as fh:
+                        fh.write(new_text)
+                    kf.sha256 = _sha256_file(abspath)
+                    kf.file_size = os.path.getsize(abspath)
+                except OSError as e:
+                    logger.warning("knowledge: could not rewrite bytes for %s: %s", kb_id, e)
+            kf.text = new_text
+            _remove_from_rag(kb_id)            # drop stale chunks first…
+            kf.indexed = _index_in_rag(kf)     # …then index the new text
+        db.commit()
+        db.refresh(kf)
+        return _to_dict(kf)
+    finally:
+        db.close()
+
+
+def append_text(owner: Optional[str], kb_id: str, extra_text: str) -> Optional[dict]:
+    """Append text to a KB file's content (owner-scoped) and re-index. Convenience
+    over update_text for Iris's "add this to my notes on X" flows."""
+    extra = (extra_text or "").strip()
+    rec = get(owner, kb_id)
+    if not rec:
+        return None
+    if not extra:
+        return rec
+    combined = ((rec.get("text") or "").rstrip() + "\n\n" + extra).strip()
+    return update_text(owner, kb_id, combined)
+
+
+def generate_ai_tags(owner: Optional[str], kb_id: str) -> Optional[dict]:
+    """Generate + store AI topical tags for a file from its extracted text, via
+    the Utility model. Best-effort: leaves ai_tags unchanged when nothing usable
+    comes back. Safe to run as a background task (does its own LLM call off the
+    request path). Returns the (possibly-updated) row."""
+    rec = get(owner, kb_id)
+    if not rec:
+        return None
+    tags = _generate_tags_via_llm(rec.get("text") or "", owner)
+    if not tags:
+        return rec
+    from core.database import SessionLocal, KnowledgeFile
+
+    db = SessionLocal()
+    try:
+        kf = db.query(KnowledgeFile).filter(KnowledgeFile.id == kb_id).first()
+        if not kf or (owner is not None and kf.owner != owner):
+            return None
+        kf.ai_tags = _norm_tags(tags)
+        db.commit()
+        db.refresh(kf)
+        return _to_dict(kf)
+    finally:
+        db.close()
+
+
 def list_tags(owner: Optional[str]) -> List[str]:
     """All distinct tags (user + ai) for this owner, for UI tag facets."""
     from core.database import SessionLocal, KnowledgeFile
@@ -421,6 +556,7 @@ def delete(owner: Optional[str], kb_id: str) -> bool:
         rel = kf.path
         db.delete(kf)
         db.commit()
+        _remove_from_rag(kb_id)  # drop the file's vectors so deleted text can't resurface in recall
         if rel:
             try:
                 os.remove(os.path.join(_kb_files_dir(), rel))

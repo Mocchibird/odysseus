@@ -189,6 +189,10 @@ _TOOL_NAME_MAP = {
     "manage_health": "manage_health",
     "health": "manage_health",
     "habits": "manage_health",
+    "manage_knowledge": "manage_knowledge",
+    "edit_knowledge": "manage_knowledge",
+    "knowledge_edit": "manage_knowledge",
+    "kb_edit": "manage_knowledge",
 }
 
 _MISFENCED_WEB_TOOL_NAMES = {

@@ -68,3 +68,7 @@ class RAGManager:
     def add_documents_batch(self, docs: List[tuple]) -> Dict[str, Any]:
         """Add documents in batch - delegates to VectorRAG."""
         return self.vector_rag.add_documents_batch(docs)
+
+    def delete_by_kb_id(self, kb_id: str) -> int:
+        """Delete all chunks for one knowledge file - delegates to VectorRAG."""
+        return self.vector_rag.delete_by_kb_id(kb_id)

@@ -444,7 +444,7 @@ async def execute_tool_block(
         do_manage_skills, do_api_call, do_send_ping, do_manage_endpoints,
         do_manage_mcp, do_manage_webhooks, do_manage_tokens,
         do_manage_documents, do_manage_settings, do_manage_notes,
-        do_manage_health, do_search_knowledge,
+        do_manage_health, do_search_knowledge, do_manage_knowledge,
         do_manage_calendar, do_manage_books,
         do_download_model, do_serve_model, do_list_served_models, do_stop_served_model,
         do_tail_serve_output,
@@ -692,6 +692,9 @@ async def execute_tool_block(
     elif tool == "search_knowledge":
         desc = "search_knowledge"
         result = await do_search_knowledge(content, owner=owner)
+    elif tool == "manage_knowledge":
+        desc = "manage_knowledge"
+        result = await do_manage_knowledge(content, owner=owner)
     elif tool == "manage_settings":
         desc = "manage_settings"
         result = await do_manage_settings(content, owner=owner)

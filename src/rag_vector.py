@@ -599,6 +599,27 @@ class VectorRAG:
             logger.error(f"delete_by_source failed: {e}")
             return 0
 
+    def delete_by_kb_id(self, kb_id: str) -> int:
+        """Remove all chunks whose metadata['kb_id'] matches *kb_id* (one
+        knowledge file). Used to re-index after an edit and to clean up on
+        delete, so stale text never resurfaces in recall. Returns the number of
+        removed chunks."""
+        if not self.healthy or not kb_id:
+            return 0
+        try:
+            removed_ids = set()
+            for _lane_name, collection in self._collections_for_delete():
+                results = collection.get(where={"kb_id": kb_id}, include=[])
+                ids = results.get("ids", [])
+                if ids:
+                    collection.delete(ids=ids)
+                    removed_ids.update(ids)
+            logger.info(f"Deleted {len(removed_ids)} chunks for kb_id={kb_id}")
+            return len(removed_ids)
+        except Exception as e:
+            logger.error(f"delete_by_kb_id failed: {e}")
+            return 0
+
     # ------------------------------------------------------------------
     # Convenience
     # ------------------------------------------------------------------

@@ -1546,6 +1546,103 @@ async def do_search_knowledge(content: str, owner: Optional[str] = None) -> Dict
         return {"error": f"search_knowledge failed: {e}", "exit_code": 1}
 
 
+async def do_manage_knowledge(content: str, owner: Optional[str] = None) -> Dict:
+    """EDIT the user's KNOWLEDGE BASE (uploaded files): correct/replace a file's
+    text, append to it, set tags, auto-tag, or delete it. Reading/finding files is
+    search_knowledge — use that first to get the file id, then act here.
+
+    For text files (.md/.txt/…) an edit rewrites the stored file; for binaries
+    (pdf/image) it corrects only the searchable extracted text. Every content
+    change re-indexes RAG so recall stays in sync."""
+    from src import knowledge_base as _kb
+
+    try:
+        args = _parse_tool_args(content)
+    except ValueError:
+        return {"error": "Invalid JSON arguments for manage_knowledge.", "exit_code": 1}
+
+    action = (args.get("action") or "").replace("-", "_").strip().lower()
+    _aliases = {
+        "update": "edit", "replace": "edit", "set_text": "edit", "edit_text": "edit",
+        "add": "append", "tag": "retag", "set_tags": "retag", "tags": "retag",
+        "suggest_tags": "autotag", "auto_tag": "autotag", "remove": "delete",
+    }
+    action = _aliases.get(action, action)
+    if action not in {"edit", "append", "retag", "autotag", "delete"}:
+        return {"error": "manage_knowledge action must be one of: edit, append, retag, "
+                         "autotag, delete. (To read or find files, use search_knowledge.)",
+                "exit_code": 1}
+
+    try:
+        # Resolve the target file — explicit id preferred, else a unique match on
+        # query/filename (refuse ambiguous matches so we never edit the wrong file).
+        kb_id = str(args.get("id") or args.get("kb_id") or "").strip()
+        if not kb_id:
+            query = str(args.get("query") or args.get("filename") or args.get("file") or "").strip()
+            if not query:
+                return {"error": "Provide the file 'id' (from search_knowledge) or a "
+                                 "'query'/'filename' to identify the file.", "exit_code": 1}
+            matches = _kb.search(owner, q=query, limit=10)
+            exact = [m for m in matches if (m.get("filename") or "").lower() == query.lower()]
+            cands = exact or matches
+            if not cands:
+                return {"error": f"No knowledge file matched '{query}'.", "exit_code": 1}
+            if len(cands) > 1 and not exact:
+                listing = "; ".join(f"{m.get('filename')} (id {(m.get('id') or '')[:8]}…)" for m in cands[:6])
+                return {"error": f"'{query}' matched {len(cands)} files — say which by id: {listing}",
+                        "exit_code": 1}
+            kb_id = cands[0].get("id")
+
+        if action == "edit":
+            text = args.get("text")
+            if text is None:
+                return {"error": "edit requires 'text' (the new full content).", "exit_code": 1}
+            rec = _kb.update_text(owner, kb_id, str(text), filename=args.get("filename"))
+            if not rec:
+                return {"error": "Knowledge file not found.", "exit_code": 1}
+            return {"output": f"Updated '{rec.get('filename')}' ({len(str(text))} chars) and re-indexed it.",
+                    "exit_code": 0, "file": {"id": rec.get("id"), "filename": rec.get("filename")}}
+
+        if action == "append":
+            text = str(args.get("text") or "").strip()
+            if not text:
+                return {"error": "append requires 'text' to add.", "exit_code": 1}
+            rec = _kb.append_text(owner, kb_id, text)
+            if not rec:
+                return {"error": "Knowledge file not found.", "exit_code": 1}
+            return {"output": f"Appended to '{rec.get('filename')}' and re-indexed it.",
+                    "exit_code": 0, "file": {"id": rec.get("id"), "filename": rec.get("filename")}}
+
+        if action == "retag":
+            rec = _kb.set_tags(owner, kb_id, args.get("tags") or "")
+            if not rec:
+                return {"error": "Knowledge file not found.", "exit_code": 1}
+            return {"output": f"Set tags on '{rec.get('filename')}': "
+                              f"{', '.join(rec.get('tags') or []) or '(none)'}.",
+                    "exit_code": 0,
+                    "file": {"id": rec.get("id"), "filename": rec.get("filename"), "tags": rec.get("tags")}}
+
+        if action == "autotag":
+            rec = _kb.generate_ai_tags(owner, kb_id)
+            if not rec:
+                return {"error": "Knowledge file not found.", "exit_code": 1}
+            return {"output": f"AI tags for '{rec.get('filename')}': "
+                              f"{', '.join(rec.get('ai_tags') or []) or '(none generated)'}.",
+                    "exit_code": 0,
+                    "file": {"id": rec.get("id"), "filename": rec.get("filename"), "ai_tags": rec.get("ai_tags")}}
+
+        # delete
+        rec = _kb.get(owner, kb_id)
+        name = (rec or {}).get("filename") or kb_id
+        ok = _kb.delete(owner, kb_id)
+        if not ok:
+            return {"error": "Knowledge file not found.", "exit_code": 1}
+        return {"output": f"Deleted '{name}' from the knowledge base.", "exit_code": 0}
+    except Exception as e:
+        logger.error(f"manage_knowledge error: {e}")
+        return {"error": f"manage_knowledge failed: {e}", "exit_code": 1}
+
+
 # ---------------------------------------------------------------------------
 # Settings/preferences management tool
 # ---------------------------------------------------------------------------

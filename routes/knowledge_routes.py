@@ -11,7 +11,7 @@ import asyncio
 import logging
 import os
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 from fastapi.responses import FileResponse
 
 from src.auth_helpers import get_current_user
@@ -61,7 +61,7 @@ def setup_knowledge_routes(upload_handler) -> APIRouter:
         )
 
     @router.post("")
-    async def kb_add(request: Request):
+    async def kb_add(request: Request, background_tasks: BackgroundTasks):
         """Ingest an already-uploaded file into the knowledge base. Flow: upload the
         bytes via /api/upload (any type), then POST its id here to extract + index +
         tag it. The bytes stay in the uploads store and remain openable."""
@@ -76,7 +76,7 @@ def setup_knowledge_routes(upload_handler) -> APIRouter:
         # Ingest is SYNC and, for images, runs the remote vision model for OCR
         # (can take minutes). Off-thread it so a single slow upload never blocks
         # the event loop and freezes the whole app (the 504 seen during migration).
-        return await asyncio.to_thread(
+        rec = await asyncio.to_thread(
             kb.ingest,
             owner,
             file_path=info["path"],
@@ -86,6 +86,12 @@ def setup_knowledge_routes(upload_handler) -> APIRouter:
             source="upload",
             tags=body.get("tags") or "",
         )
+        # Auto-tag off the request path so the upload returns immediately and bulk
+        # uploads aren't slowed by a per-file LLM call. Skip files deduped into an
+        # already-tagged row, or with no extractable text.
+        if rec and rec.get("id") and not rec.get("ai_tags") and (rec.get("excerpt") or "").strip():
+            background_tasks.add_task(kb.generate_ai_tags, owner, rec["id"])
+        return rec
 
     @router.put("/{kb_id}/tags")
     async def kb_set_tags(request: Request, kb_id: str):
@@ -93,6 +99,32 @@ def setup_knowledge_routes(upload_handler) -> APIRouter:
         owner = get_current_user(request)
         body = await request.json()
         rec = kb.set_tags(owner, kb_id, body.get("tags") or "")
+        if not rec:
+            raise HTTPException(404, "Not found")
+        return rec
+
+    @router.put("/{kb_id}")
+    async def kb_update(request: Request, kb_id: str):
+        """Edit a file's content / searchable text (and optionally its name). For
+        text files this rewrites the stored bytes; for binaries it corrects only
+        the extracted text. Re-indexes RAG, so it's off-threaded (can be slow)."""
+        owner = get_current_user(request)
+        body = await request.json()
+        text = body.get("text")
+        filename = body.get("filename")
+        if text is None and filename is None:
+            raise HTTPException(400, "Nothing to update (send 'text' and/or 'filename')")
+        rec = await asyncio.to_thread(kb.update_text, owner, kb_id, text, filename=filename)
+        if not rec:
+            raise HTTPException(404, "Not found")
+        return rec
+
+    @router.post("/{kb_id}/autotag")
+    async def kb_autotag(request: Request, kb_id: str):
+        """Generate AI topical tags for a file from its extracted text (Utility
+        model). Off-threaded — makes an LLM call."""
+        owner = get_current_user(request)
+        rec = await asyncio.to_thread(kb.generate_ai_tags, owner, kb_id)
         if not rec:
             raise HTTPException(404, "Not found")
         return rec

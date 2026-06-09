@@ -178,10 +178,15 @@ async function _openDetail(id) {
         ${aiTags.map(t => `<span class="kb-chip ai" title="auto-tag">${_esc(t)}</span>`).join('')}
       </div>
       <input class="kb-tag-input" placeholder="Add tag + Enter">
+      <button class="kb-suggest-tags" type="button" title="AI-generate topical tags from the text">✨ Suggest tags</button>
     </div>
     <div class="kb-viewer"></div>
     <details class="kb-indexed">
       <summary>Indexed text — exactly what Iris searches (${(rec.text || '').length} chars)</summary>
+      <div class="kb-indexed-actions">
+        <button class="kb-edit-text" type="button">✎ Edit text</button>
+        <span class="kb-edit-hint">${(kind === 'md' || kind === 'text') ? 'Edits the file content.' : 'Edits the searchable text only — the original file is left unchanged.'}</span>
+      </div>
       <pre class="kb-indexed-pre">${_esc(rec.text || '(no text extracted)')}</pre>
     </details>`;
 
@@ -227,6 +232,69 @@ async function _openDetail(id) {
   view.querySelectorAll('.kb-chip-x').forEach(x => {
     x.addEventListener('click', () => _setTags(rec, userTags.filter(t => t !== x.dataset.tag)));
   });
+  view.querySelector('.kb-suggest-tags')?.addEventListener('click', (e) => _suggestTags(rec, e.currentTarget));
+  view.querySelector('.kb-edit-text')?.addEventListener('click', () => _beginEditText(view, rec));
+}
+
+// Lightweight inline edit of a file's text (NOT a second document editor — heavy
+// authoring belongs in Library/Documents). For .md/.txt this rewrites the stored
+// file; for PDFs/images it corrects the searchable extracted text.
+function _beginEditText(view, rec) {
+  const det = view.querySelector('.kb-indexed');
+  if (!det || det.querySelector('.kb-edit-wrap')) return;  // already editing
+  det.open = true;
+  const pre = det.querySelector('.kb-indexed-pre');
+  const editBtn = det.querySelector('.kb-edit-text');
+  const wrap = document.createElement('div');
+  wrap.className = 'kb-edit-wrap';
+  wrap.innerHTML = `
+    <textarea class="kb-edit-area" spellcheck="false"></textarea>
+    <div class="kb-edit-controls">
+      <button class="kb-edit-save" type="button">Save changes</button>
+      <button class="kb-edit-cancel" type="button">Cancel</button>
+    </div>`;
+  wrap.querySelector('.kb-edit-area').value = rec.text || '';
+  if (pre) pre.style.display = 'none';
+  if (editBtn) editBtn.style.display = 'none';
+  det.appendChild(wrap);
+  const ta = wrap.querySelector('.kb-edit-area');
+  ta.focus();
+  wrap.querySelector('.kb-edit-cancel').addEventListener('click', () => {
+    wrap.remove();
+    if (pre) pre.style.display = '';
+    if (editBtn) editBtn.style.display = '';
+  });
+  wrap.querySelector('.kb-edit-save').addEventListener('click', () => _saveText(rec, ta.value));
+}
+
+async function _saveText(rec, text) {
+  try {
+    const res = await fetch(`${API_BASE}/api/knowledge/${encodeURIComponent(rec.id)}`, {
+      method: 'PUT', credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text }),
+    });
+    if (!res.ok) throw new Error();
+    uiModule.showToast && uiModule.showToast('Saved + re-indexed');
+    _openDetail(rec.id);  // re-render with the updated text/preview
+  } catch (_) {
+    uiModule.showToast && uiModule.showToast('Could not save changes');
+  }
+}
+
+async function _suggestTags(rec, btn) {
+  if (btn) { btn.disabled = true; btn.textContent = 'Suggesting…'; }
+  try {
+    const res = await fetch(`${API_BASE}/api/knowledge/${encodeURIComponent(rec.id)}/autotag`, {
+      method: 'POST', credentials: 'same-origin',
+    });
+    if (!res.ok) throw new Error();
+    await _fetchTags();
+    _openDetail(rec.id);  // re-render to show the new AI tags
+  } catch (_) {
+    uiModule.showToast && uiModule.showToast('Could not suggest tags');
+    if (btn) { btn.disabled = false; btn.textContent = '✨ Suggest tags'; }
+  }
 }
 
 async function _setTags(rec, tagsArray) {
