@@ -75,7 +75,7 @@ def test_books_has_dedicated_reader_ui_hooks():
     assert "_renameBook" in notes
     assert "notes-book-pdf-frame" in notes
     assert "createPdfReader(" in notes  # continuous-scroll PDF via pdfReader.js (no native iframe)
-    assert "_viewMode === 'grid' && !isVault && !isBooks" in notes
+    assert "_viewMode === 'grid' && !isBooks" in notes
     assert "function _bookUsesContinuousScroll" in notes
     assert "function _appendNextBookChapterIfNeeded" in notes
     assert "BOOK_CONTINUOUS_MAX_RENDERED_CHAPTERS" in notes
