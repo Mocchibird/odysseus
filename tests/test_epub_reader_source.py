@@ -6,24 +6,32 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def test_epub_reader_backend_routes_and_progress_notes_exist():
     service = (ROOT / "src" / "epub_reader.py").read_text(encoding="utf-8")
-    routes = (ROOT / "routes" / "iris_vault_routes.py").read_text(encoding="utf-8")
     book_service = (ROOT / "src" / "book_reader.py").read_text(encoding="utf-8")
+    store = (ROOT / "src" / "book_store.py").read_text(encoding="utf-8")
     book_routes = (ROOT / "routes" / "book_routes.py").read_text(encoding="utf-8")
     middleware = (ROOT / "core" / "middleware.py").read_text(encoding="utf-8")
 
+    # EPUB parsing (unchanged) — now backed by the native Books store, not a vault.
     assert "zipfile.ZipFile" in service
     assert "META-INF/container.xml" in service
     assert "parse_epub_toc" in service
     assert "read_epub_chapter" in service
-    assert "30_Reading/" in service
-    assert "50_State/book_progress/" in service
-    assert "50_State/book_metadata/" in book_service
-    assert "save_progress" in service
-    assert "save_title" in book_service
-    assert "set_index_title" in book_service
+    assert "book_store" in service
+    assert "iris_vault" not in service          # vault fully decoupled
+    # book_reader is a thin facade over the native store; no vault, no MD mirrors.
+    assert "iris_vault" not in book_service
+    assert "book_store" in book_service
+    assert "def save_progress" in book_service
+    assert "def save_title" in book_service
     assert "PdfReader" in book_service
     assert "SUPPORTED_BOOK_EXTENSIONS" in book_service
     assert "def pdf_file_path" in book_service
+    # the store owns bytes (DATA_DIR/books) + DB tables + book-text RAG indexing.
+    assert "BookFile" in store and "BookProgress" in store and "BookAnnotation" in store
+    assert "BOOKS_DIR" in store
+    assert "def resolve_book_file" in store
+    assert 'RAG_KIND = "book"' in store
+    # routes unchanged (still call book_reader, still serve PDFs inline).
     assert 'prefix="/api/books"' in book_routes
     assert '"/upload"' in book_routes
     assert '"/chapter"' in book_routes
@@ -40,9 +48,6 @@ def test_epub_reader_backend_routes_and_progress_notes_exist():
     assert '"/progress"' in book_routes
     assert "BookTitleRequest" in book_routes
     assert '"/title"' in book_routes
-    assert '"/epub/upload"' in routes
-    assert '"/epub"' in routes
-    assert '"/epub/progress"' in routes
 
 
 def test_books_has_dedicated_reader_ui_hooks():

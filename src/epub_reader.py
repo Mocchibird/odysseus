@@ -1,17 +1,13 @@
-"""Small EPUB reader service backed by the Iris vault.
+"""Small EPUB reader service backed by the native Books store.
 
-The reader intentionally keeps the vault as source of truth: EPUB files live in
-the user's Obsidian folder and reading progress is mirrored into a Markdown note
-so Iris can retrieve and talk about what the user has read.
+EPUB files live in the Books store (src/book_store.py); reading progress lives in
+the database. This module only parses EPUB structure (TOC, chapters, cover).
 """
 
 from __future__ import annotations
 
-import json
-import hashlib
 import re
 import zipfile
-from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import unquote
 from xml.etree import ElementTree as ET
@@ -19,22 +15,13 @@ from xml.etree import ElementTree as ET
 from bs4 import BeautifulSoup
 from fastapi import HTTPException
 
-from src import iris_vault
+from src import book_store
 
 _NS = {
     "container": "urn:oasis:names:tc:opendocument:xmlns:container",
     "opf": "http://www.idpf.org/2007/opf",
     "dc": "http://purl.org/dc/elements/1.1/",
 }
-
-
-def _utc_now_iso() -> str:
-    return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
-
-
-def _safe_note_name(text: str, fallback: str = "book") -> str:
-    raw = re.sub(r"[^A-Za-z0-9_.@() -]+", "_", text or "").strip(" ._-")
-    return (raw or fallback)[:120]
 
 
 def _zip_read_text(zf: zipfile.ZipFile, name: str) -> str:
@@ -102,11 +89,11 @@ def _plain_text(html: str) -> str:
 
 
 def _epub_package(owner: str | None, rel_path: str) -> tuple[Path, str, str, ET.Element]:
-    owner_key = iris_vault.owner_folder_name(owner)
-    safe_path = iris_vault._safe_rel_path(rel_path)
-    path = iris_vault.resolve_owner_file(owner_key, safe_path)
+    owner_key = book_store.owner_slug(owner)
+    safe_path = book_store.safe_rel_path(rel_path)
+    path = book_store.resolve_book_file(owner_key, safe_path)
     if path.suffix.lower() != ".epub":
-        raise HTTPException(400, "Vault file is not an EPUB")
+        raise HTTPException(400, "File is not an EPUB")
     if not path.is_file():
         raise HTTPException(404, "EPUB not found")
     try:
@@ -171,7 +158,7 @@ def _epub_toc_titles(zf: zipfile.ZipFile, manifest: dict, opf_dir: str, opf: ET.
 
 
 def parse_epub_toc(owner: str | None, rel_path: str) -> dict:
-    owner_key = iris_vault.owner_folder_name(owner)
+    owner_key = book_store.owner_slug(owner)
     path, safe_path, opf_dir, opf = _epub_package(owner_key, rel_path)
     metadata = opf.find("opf:metadata", _NS)
     title = _text_or_empty(metadata.find("dc:title", _NS) if metadata is not None else None) or path.stem
@@ -207,13 +194,13 @@ def parse_epub_toc(owner: str | None, rel_path: str) -> dict:
         })
 
     return {
-        "id": _book_id(owner_key, safe_path),
+        "id": book_store.book_id(owner_key, safe_path),
         "path": safe_path,
         "title": title,
         "author": author,
         "chapter_count": len(chapters),
         "chapters": chapters,
-        "progress": get_progress(owner_key, safe_path, missing_ok=True),
+        "progress": book_store.get_progress(owner_key, safe_path, missing_ok=True),
     }
 
 
@@ -229,7 +216,7 @@ def extract_cover(owner: str | None, rel_path: str) -> tuple[bytes, str] | None:
     Tries, in order: the OPF ``<meta name="cover">`` pointer, a manifest item
     with ``properties="cover-image"``, an image whose href mentions "cover", and
     finally the first image in the manifest."""
-    owner_key = iris_vault.owner_folder_name(owner)
+    owner_key = book_store.owner_slug(owner)
     try:
         path, _safe, opf_dir, opf = _epub_package(owner_key, rel_path)
     except Exception:
@@ -285,14 +272,14 @@ def extract_cover(owner: str | None, rel_path: str) -> tuple[bytes, str] | None:
 
 
 def read_epub_chapter(owner: str | None, rel_path: str, chapter_index: int = 0) -> dict:
-    owner_key = iris_vault.owner_folder_name(owner)
+    owner_key = book_store.owner_slug(owner)
     toc = parse_epub_toc(owner_key, rel_path)
     chapters = toc.get("chapters") or []
     if not chapters:
         raise HTTPException(404, "EPUB has no readable chapters")
     idx = max(0, min(int(chapter_index or 0), len(chapters) - 1))
     chapter = chapters[idx]
-    path = iris_vault.resolve_owner_file(owner_key, toc["path"])
+    path = book_store.resolve_book_file(owner_key, toc["path"])
     with zipfile.ZipFile(path) as zf:
         raw = _zip_read_text(zf, chapter["href"])
     chapter_title, html = _chapter_html(raw)
@@ -306,20 +293,6 @@ def read_epub_chapter(owner: str | None, rel_path: str, chapter_index: int = 0) 
     }
 
 
-def _progress_path(book_id: str) -> str:
-    return f"50_State/book_progress/{book_id}.json"
-
-
-def _reading_note_path(title: str) -> str:
-    return f"30_Reading/{_safe_note_name(title, 'book')}.md"
-
-
-def _book_id(owner: str | None, rel_path: str) -> str:
-    owner_key = iris_vault.owner_folder_name(owner)
-    safe_path = iris_vault._safe_rel_path(rel_path)
-    return hashlib.sha256(f"{owner_key}/{safe_path}".encode()).hexdigest()
-
-
 def parse_epub(owner: str | None, rel_path: str) -> dict:
     book = parse_epub_toc(owner, rel_path)
     book["chapters"] = [
@@ -327,62 +300,3 @@ def parse_epub(owner: str | None, rel_path: str) -> dict:
         for idx, chapter in enumerate(book.get("chapters") or [])
     ]
     return book
-
-
-def get_progress(owner: str | None, rel_path: str, *, missing_ok: bool = False) -> dict:
-    owner_key = iris_vault.owner_folder_name(owner)
-    book_id = _book_id(owner_key, rel_path)
-    try:
-        row = iris_vault.read_file(owner_key, _progress_path(book_id))
-        data = json.loads(row.get("content") or "{}")
-        if isinstance(data, dict):
-            return data
-    except Exception:
-        if not missing_ok:
-            raise
-    return {
-        "book_id": book_id,
-        "path": iris_vault._safe_rel_path(rel_path),
-        "chapter_index": 0,
-        "scroll_percent": 0,
-        "updated_at": None,
-    }
-
-
-def save_progress(
-    owner: str | None,
-    rel_path: str,
-    *,
-    chapter_index: int,
-    scroll_percent: float = 0,
-    chapter_title: str = "",
-    title: str = "",
-    author: str = "",
-) -> dict:
-    owner_key = iris_vault.owner_folder_name(owner)
-    safe_path = iris_vault._safe_rel_path(rel_path)
-    book_id = _book_id(owner_key, safe_path)
-    progress = {
-        "book_id": book_id,
-        "path": safe_path,
-        "title": title or Path(safe_path).stem,
-        "author": author or "",
-        "chapter_index": max(0, int(chapter_index or 0)),
-        "chapter_title": chapter_title or "",
-        "scroll_percent": max(0, min(float(scroll_percent or 0), 100)),
-        "updated_at": _utc_now_iso(),
-    }
-    iris_vault.write_text_file(owner_key, _progress_path(book_id), json.dumps(progress, indent=2))
-    note = (
-        f"# {progress['title']}\n\n"
-        f"- Author: {progress['author'] or 'Unknown'}\n"
-        f"- Vault path: `{safe_path}`\n"
-        f"- Last read: chapter {progress['chapter_index'] + 1}"
-        f"{' - ' + progress['chapter_title'] if progress['chapter_title'] else ''}\n"
-        f"- Chapter progress: {progress['scroll_percent']:.1f}%\n"
-        f"- Updated: {progress['updated_at']}\n\n"
-        "This note is maintained by Iris's E-Reader so Iris can answer "
-        "questions about reading status and recently read books.\n"
-    )
-    iris_vault.write_text_file(owner_key, _reading_note_path(progress["title"]), note)
-    return progress

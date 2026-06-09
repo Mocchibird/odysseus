@@ -340,6 +340,63 @@ class KnowledgeFile(TimestampMixin, Base):
     )
 
 
+class BookFile(TimestampMixin, Base):
+    """Native Books / E-Reader store (replaces the Obsidian-vault backend).
+    The EPUB/PDF bytes live under DATA_DIR/books/<owner-slug>/<id><ext>; this row
+    is the discovery index (the Books list). `id` = sha256(owner-slug/rel_path).
+    Full text is indexed into the shared RAG store (kind="book") so Iris can
+    search inside books — no vault, no Markdown mirrors."""
+    __tablename__ = "book_files"
+
+    id         = Column(String, primary_key=True, index=True)   # book_id = sha256(owner-slug/rel_path)
+    owner      = Column(String, nullable=True, index=True)
+    rel_path   = Column(String, nullable=False, default="")     # unique per owner; the UI's `path` identifier
+    filename   = Column(String, nullable=False, default="")
+    title      = Column(String, nullable=False, default="")     # custom title (overrides parsed); "" = use parsed
+    kind       = Column(String, nullable=True)                  # "epub" | "pdf"
+    mime       = Column(String, nullable=True)
+    size       = Column(Integer, nullable=True)
+    sha256     = Column(String(64), nullable=True, index=True)
+    excerpt    = Column(Text, nullable=True, default="")
+    indexed    = Column(Boolean, default=False)                 # RAG-indexed?
+
+    __table_args__ = (
+        Index('ix_book_files_owner_path', 'owner', 'rel_path', unique=True),
+    )
+
+
+class BookProgress(TimestampMixin, Base):
+    """Per-book reading position (one row per book). id = book_id."""
+    __tablename__ = "book_progress"
+
+    id            = Column(String, primary_key=True, index=True)  # = book_id
+    owner         = Column(String, nullable=True, index=True)
+    rel_path      = Column(String, nullable=False, default="")
+    title         = Column(String, nullable=False, default="")
+    author        = Column(String, nullable=False, default="")
+    kind          = Column(String, nullable=True)
+    chapter_index = Column(Integer, default=0)
+    chapter_title = Column(String, nullable=False, default="")
+    scroll_percent = Column(Float, default=0)
+
+
+class BookAnnotation(TimestampMixin, Base):
+    """A bookmark or highlight in a book."""
+    __tablename__ = "book_annotations"
+
+    id            = Column(String, primary_key=True, index=True)  # uuid
+    owner         = Column(String, nullable=True, index=True)
+    book_id       = Column(String, nullable=False, index=True)
+    rel_path      = Column(String, nullable=False, default="")
+    type          = Column(String, nullable=False, default="bookmark")  # "bookmark" | "highlight"
+    chapter_index = Column(Integer, default=0)
+    chapter_title = Column(String, nullable=False, default="")
+    text          = Column(Text, nullable=True, default="")
+    note          = Column(String, nullable=True, default="")
+    color         = Column(String, nullable=True, default="")
+    scroll_percent = Column(Float, default=0)
+
+
 class EmailAccount(TimestampMixin, Base):
     """A configured IMAP/SMTP account. Supports multiple accounts per user —
     exactly one row per owner has is_default=True.

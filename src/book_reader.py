@@ -1,84 +1,40 @@
-"""Vault-backed Books / E-Reader service for Iris.
+"""Books / E-Reader service for Iris.
 
-Books live in the user's Iris vault and progress is mirrored into Markdown so
-the assistant can retrieve reading state through the normal vault index.
+Books live in the native Books store (src/book_store.py): bytes under
+DATA_DIR/books, with reading progress / titles / annotations in the database and
+full text indexed into the shared RAG store so Iris can search inside books.
+No Obsidian vault.
 """
 
 from __future__ import annotations
 
 import html
-import hashlib
-import json
 import re
-from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import HTTPException
 
-from src import epub_reader, iris_vault
+from src import epub_reader, book_store
 
-SUPPORTED_BOOK_EXTENSIONS = {".epub", ".pdf"}
-
-
-def _utc_now_iso() -> str:
-    return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
-
-
-def _safe_note_name(text: str, fallback: str = "book") -> str:
-    raw = re.sub(r"[^A-Za-z0-9_.@() -]+", "_", text or "").strip(" ._-")
-    return (raw or fallback)[:120]
-
-
-def _book_id(owner: str | None, rel_path: str) -> str:
-    owner_key = iris_vault.owner_folder_name(owner)
-    safe_path = iris_vault._safe_rel_path(rel_path)
-    return hashlib.sha256(f"{owner_key}/{safe_path}".encode()).hexdigest()
-
-
-def _progress_path(book_id: str) -> str:
-    return f"50_State/book_progress/{book_id}.json"
-
-
-def _metadata_path(book_id: str) -> str:
-    return f"50_State/book_metadata/{book_id}.json"
-
-
-def _reading_note_path(title: str) -> str:
-    return f"30_Reading/{_safe_note_name(title, 'book')}.md"
+SUPPORTED_BOOK_EXTENSIONS = book_store.SUPPORTED_BOOK_EXTENSIONS
 
 
 def _safe_book_path(rel_path: str) -> str:
-    safe = iris_vault._safe_rel_path(rel_path)
+    safe = book_store.safe_rel_path(rel_path)
     if Path(safe).suffix.lower() not in SUPPORTED_BOOK_EXTENSIONS:
-        raise HTTPException(400, "Vault file is not a supported book")
+        raise HTTPException(400, "File is not a supported book")
     return safe
 
 
-def _clean_book_title(title: str) -> str:
-    clean = re.sub(r"\s+", " ", title or "").strip()
-    if not clean:
-        raise HTTPException(400, "Title is required")
-    return clean[:200]
-
-
 def get_metadata(owner: str | None, rel_path: str, *, missing_ok: bool = False) -> dict:
-    owner_key = iris_vault.owner_folder_name(owner)
     safe_path = _safe_book_path(rel_path)
-    book_id = _book_id(owner_key, safe_path)
-    try:
-        row = iris_vault.read_file(owner_key, _metadata_path(book_id))
-        data = json.loads(row.get("content") or "{}")
-        if isinstance(data, dict):
-            return data
-    except Exception:
-        if not missing_ok:
-            raise
-    return {"book_id": book_id, "path": safe_path, "title": ""}
+    row = book_store.get_book(owner, safe_path)
+    title = (row or {}).get("custom_title") or ""
+    return {"book_id": book_store.book_id(owner, safe_path), "path": safe_path, "title": title}
 
 
 def _apply_metadata(owner: str | None, safe_path: str, book: dict) -> dict:
-    data = get_metadata(owner, safe_path, missing_ok=True)
-    title = (data.get("title") or "").strip()
+    title = get_metadata(owner, safe_path, missing_ok=True).get("title") or ""
     if title:
         book["title"] = title
         book["custom_title"] = title
@@ -98,32 +54,24 @@ def _book_metadata_from_file(owner: str | None, rel_path: str) -> dict:
 
 
 def list_books(owner: str | None, query: str = "", limit: int = 50) -> list[dict]:
-    fetch_limit = max(10, min(int(limit or 50) * 4, 100))
+    cap = max(1, int(limit or 50))
     needle = (query or "").strip().lower()
-    rows = iris_vault.search(owner, query, fetch_limit)
-    if needle:
-        seen = {row.get("path") for row in rows}
-        for row in iris_vault.search(owner, "", 100):
-            if row.get("path") not in seen:
-                rows.append(row)
-                seen.add(row.get("path"))
+    candidates = book_store.query_books(owner, "", 200 if needle else cap)
     books: list[dict] = []
-    for row in rows:
-        ext = Path(row.get("path") or "").suffix.lower()
+    for item in candidates:
+        ext = Path(item.get("path") or "").suffix.lower()
         if ext not in SUPPORTED_BOOK_EXTENSIONS:
             continue
-        item = dict(row)
-        item["kind"] = ext.lstrip(".")
+        custom = item.get("custom_title") or ""
         file_meta = _book_metadata_from_file(owner, item["path"])
-        if file_meta.get("title"):
+        if not custom and file_meta.get("title"):
             item["title"] = file_meta["title"]
         if file_meta.get("author"):
             item["author"] = file_meta["author"]
         if file_meta.get("chapter_count") is not None:
             item["chapter_count"] = file_meta.get("chapter_count")
-        item = _apply_metadata(owner, item["path"], item)
         try:
-            item["progress"] = get_progress(owner, item["path"], missing_ok=True)
+            item["progress"] = book_store.get_progress(owner, item["path"], missing_ok=True)
         except Exception:
             item["progress"] = None
         if needle:
@@ -131,62 +79,41 @@ def list_books(owner: str | None, query: str = "", limit: int = 50) -> list[dict
                 item.get("title") or "",
                 item.get("path") or "",
                 item.get("excerpt") or "",
-                (item.get("progress") or {}).get("title") or "",
-                (item.get("progress") or {}).get("author") or "",
+                item.get("author") or "",
             ]).lower()
             if needle not in haystack:
                 continue
         books.append(item)
-        if len(books) >= int(limit or 50):
+        if len(books) >= cap:
             break
     return books
 
 
-def save_uploaded_book(
-    owner: str | None,
-    filename: str,
-    content: bytes,
-    *,
-    mime: str = "",
-    index_content: bool = True,
-) -> dict:
+def save_uploaded_book(owner: str | None, filename: str, content: bytes, *, mime: str = "",
+                       index_content: bool = True) -> dict:
     ext = Path(filename or "").suffix.lower()
     if ext not in SUPPORTED_BOOK_EXTENSIONS:
         raise HTTPException(400, "Upload must be an .epub or .pdf file")
-    row = iris_vault.save_uploaded_file(
-        owner,
-        filename or f"book{ext}",
-        content,
-        rel_path=iris_vault.book_upload_rel_path(filename or f"book{ext}", mime),
-        mime=mime,
-        index_content=index_content,
-    )
-    return iris_vault.row_to_dict(row)
+    return book_store.upsert_book(owner, filename or f"book{ext}", content, mime=mime)
 
 
 def index_book(owner: str | None, rel_path: str) -> dict:
-    safe_path = _safe_book_path(rel_path)
-    path = iris_vault.resolve_owner_file(owner, safe_path)
-    row = iris_vault.index_file(owner, path, index_content=True)
-    return iris_vault.row_to_dict(row)
+    return book_store.index_book(owner, _safe_book_path(rel_path))
 
 
 def open_book(owner: str | None, rel_path: str) -> dict:
     safe_path = _safe_book_path(rel_path)
     ext = Path(safe_path).suffix.lower()
-    # Register the book in the vault index on open (lightweight, no content
-    # parse) so a book opened straight from the vault browser also shows up in
-    # the Books list — list_books() reads the index.
+    # Register the book in the index on open (lightweight, no content parse) so a
+    # book opened by path also appears in the Books list.
     try:
-        path = iris_vault.resolve_owner_file(owner, safe_path)
-        if path.is_file():
-            iris_vault.index_file(owner, path, index_content=False)
+        book_store.register_book(owner, safe_path)
     except Exception:
         pass
     if ext == ".epub":
         book = epub_reader.parse_epub_toc(owner, safe_path)
         book["kind"] = "epub"
-        book["progress"] = get_progress(owner, safe_path, missing_ok=True)
+        book["progress"] = book_store.get_progress(owner, safe_path, missing_ok=True)
         return _apply_metadata(owner, safe_path, book)
     if ext == ".pdf":
         return _apply_metadata(owner, safe_path, parse_pdf(owner, safe_path, include_pages=False))
@@ -198,7 +125,7 @@ def pdf_file_path(owner: str | None, rel_path: str) -> Path:
     safe_path = _safe_book_path(rel_path)
     if Path(safe_path).suffix.lower() != ".pdf":
         raise HTTPException(400, "Book is not a PDF")
-    path = iris_vault.resolve_owner_file(owner, safe_path)
+    path = book_store.resolve_book_file(owner, safe_path)
     if not path.is_file():
         raise HTTPException(404, "PDF not found")
     return path
@@ -212,9 +139,8 @@ def _metadata_text(value) -> str:
 
 
 def parse_pdf(owner: str | None, rel_path: str, *, include_pages: bool = True) -> dict:
-    owner_key = iris_vault.owner_folder_name(owner)
     safe_path = _safe_book_path(rel_path)
-    path = iris_vault.resolve_owner_file(owner_key, safe_path)
+    path = book_store.resolve_book_file(owner, safe_path)
     if not path.is_file():
         raise HTTPException(404, "PDF not found")
 
@@ -258,28 +184,27 @@ def parse_pdf(owner: str | None, rel_path: str, *, include_pages: bool = True) -
         })
 
     return {
-        "id": _book_id(owner_key, safe_path),
+        "id": book_store.book_id(owner, safe_path),
         "kind": "pdf",
         "path": safe_path,
         "title": title,
         "author": author,
         "chapter_count": len(chapters),
         "chapters": chapters,
-        "progress": get_progress(owner_key, safe_path, missing_ok=True),
+        "progress": book_store.get_progress(owner, safe_path, missing_ok=True),
     }
 
 
 def read_book_chapter(owner: str | None, rel_path: str, chapter_index: int = 0) -> dict:
-    owner_key = iris_vault.owner_folder_name(owner)
     safe_path = _safe_book_path(rel_path)
     ext = Path(safe_path).suffix.lower()
     idx = max(0, int(chapter_index or 0))
     if ext == ".epub":
-        return epub_reader.read_epub_chapter(owner_key, safe_path, idx)
+        return epub_reader.read_epub_chapter(owner, safe_path, idx)
     if ext != ".pdf":
         raise HTTPException(400, "Unsupported book type")
 
-    path = iris_vault.resolve_owner_file(owner_key, safe_path)
+    path = book_store.resolve_book_file(owner, safe_path)
     if not path.is_file():
         raise HTTPException(404, "PDF not found")
     try:
@@ -311,115 +236,20 @@ def read_book_chapter(owner: str | None, rel_path: str, chapter_index: int = 0) 
 
 
 def get_progress(owner: str | None, rel_path: str, *, missing_ok: bool = False) -> dict:
-    owner_key = iris_vault.owner_folder_name(owner)
-    safe_path = _safe_book_path(rel_path)
-    book_id = _book_id(owner_key, safe_path)
-    try:
-        row = iris_vault.read_file(owner_key, _progress_path(book_id))
-        data = json.loads(row.get("content") or "{}")
-        if isinstance(data, dict):
-            return data
-    except Exception:
-        if not missing_ok:
-            raise
-    return {
-        "book_id": book_id,
-        "path": safe_path,
-        "chapter_index": 0,
-        "scroll_percent": 0,
-        "updated_at": None,
-    }
+    return book_store.get_progress(owner, _safe_book_path(rel_path), missing_ok=missing_ok)
 
 
-def save_progress(
-    owner: str | None,
-    rel_path: str,
-    *,
-    chapter_index: int,
-    scroll_percent: float = 0,
-    chapter_title: str = "",
-    title: str = "",
-    author: str = "",
-    kind: str = "",
-) -> dict:
-    owner_key = iris_vault.owner_folder_name(owner)
-    safe_path = _safe_book_path(rel_path)
-    book_id = _book_id(owner_key, safe_path)
-    ext_kind = kind or Path(safe_path).suffix.lower().lstrip(".")
-    location_label = "page" if ext_kind == "pdf" else "chapter"
-    display_title = title or get_metadata(owner_key, safe_path, missing_ok=True).get("title") or Path(safe_path).stem
-    progress = {
-        "book_id": book_id,
-        "kind": ext_kind,
-        "path": safe_path,
-        "title": display_title,
-        "author": author or "",
-        "chapter_index": max(0, int(chapter_index or 0)),
-        "chapter_title": chapter_title or "",
-        "scroll_percent": max(0, min(float(scroll_percent or 0), 100)),
-        "updated_at": _utc_now_iso(),
-    }
-    iris_vault.write_text_file(owner_key, _progress_path(book_id), json.dumps(progress, indent=2))
-    note = (
-        f"# {progress['title']}\n\n"
-        f"- Type: {ext_kind.upper()}\n"
-        f"- Author: {progress['author'] or 'Unknown'}\n"
-        f"- Vault path: `{safe_path}`\n"
-        f"- Last read: {location_label} {progress['chapter_index'] + 1}"
-        f"{' - ' + progress['chapter_title'] if progress['chapter_title'] else ''}\n"
-        f"- Location progress: {progress['scroll_percent']:.1f}%\n"
-        f"- Updated: {progress['updated_at']}\n\n"
-        "This note is maintained by Iris's E-Reader so Iris can answer "
-        "questions about reading status and recently read books.\n"
+def save_progress(owner: str | None, rel_path: str, *, chapter_index: int, scroll_percent: float = 0,
+                  chapter_title: str = "", title: str = "", author: str = "", kind: str = "") -> dict:
+    return book_store.save_progress(
+        owner, _safe_book_path(rel_path),
+        chapter_index=chapter_index, scroll_percent=scroll_percent,
+        chapter_title=chapter_title, title=title, author=author, kind=kind,
     )
-    iris_vault.write_text_file(owner_key, _reading_note_path(progress["title"]), note)
-    return progress
 
 
 def save_title(owner: str | None, rel_path: str, title: str) -> dict:
-    owner_key = iris_vault.owner_folder_name(owner)
-    safe_path = _safe_book_path(rel_path)
-    path = iris_vault.resolve_owner_file(owner_key, safe_path)
-    if not path.is_file():
-        raise HTTPException(404, "Book not found")
-    clean_title = _clean_book_title(title)
-    book_id = _book_id(owner_key, safe_path)
-    kind = Path(safe_path).suffix.lower().lstrip(".")
-    metadata = {
-        "book_id": book_id,
-        "path": safe_path,
-        "kind": kind,
-        "title": clean_title,
-        "updated_at": _utc_now_iso(),
-    }
-    iris_vault.write_text_file(owner_key, _metadata_path(book_id), json.dumps(metadata, indent=2))
-    try:
-        iris_vault.set_index_title(owner_key, safe_path, clean_title)
-    except Exception:
-        pass
-
-    progress = get_progress(owner_key, safe_path, missing_ok=True)
-    progress["title"] = clean_title
-    progress["kind"] = progress.get("kind") or kind
-    iris_vault.write_text_file(owner_key, _progress_path(book_id), json.dumps(progress, indent=2))
-    if progress.get("updated_at"):
-        location_label = "page" if kind == "pdf" else "chapter"
-        last_read = f"{location_label} {int(progress.get('chapter_index') or 0) + 1}"
-        if progress.get("chapter_title"):
-            last_read += f" - {progress['chapter_title']}"
-    else:
-        last_read = "Not started"
-    note = (
-        f"# {clean_title}\n\n"
-        f"- Type: {kind.upper()}\n"
-        f"- Vault path: `{safe_path}`\n"
-        f"- Last read: {last_read}\n"
-        f"- Updated: {metadata['updated_at']}\n\n"
-        "This note is maintained by Iris's E-Reader so Iris can answer "
-        "questions about reading status and book titles.\n"
-    )
-    iris_vault.write_text_file(owner_key, _reading_note_path(clean_title), note)
-    return metadata
+    return book_store.set_title(owner, _safe_book_path(rel_path), title)
 
 
 def read_book_location(owner: str | None, rel_path: str, chapter_index: int = 0) -> dict:
@@ -435,17 +265,10 @@ def read_book_location(owner: str | None, rel_path: str, chapter_index: int = 0)
 # Full-text search within a single book                                       #
 # --------------------------------------------------------------------------- #
 
-def search_book_text(
-    owner: str | None,
-    rel_path: str,
-    query: str,
-    *,
-    max_results: int = 120,
-    radius: int = 70,
-) -> dict:
-    """Search the full text of one book and return located matches with
-    snippets, so the reader can jump straight to the chapter/page."""
-    owner_key = iris_vault.owner_folder_name(owner)
+def search_book_text(owner: str | None, rel_path: str, query: str, *, max_results: int = 120,
+                     radius: int = 70) -> dict:
+    """Search the full text of one book and return located matches with snippets,
+    so the reader can jump straight to the chapter/page."""
     safe_path = _safe_book_path(rel_path)
     ext = Path(safe_path).suffix.lower()
     q = (query or "").strip()
@@ -479,18 +302,18 @@ def search_book_text(
             start = pos + len(needle)
 
     if ext == ".epub":
-        toc = epub_reader.parse_epub_toc(owner_key, safe_path)
+        toc = epub_reader.parse_epub_toc(owner, safe_path)
         for ch in (toc.get("chapters") or []):
             if len(matches) >= max_results:
                 break
             try:
-                chapter = epub_reader.read_epub_chapter(owner_key, safe_path, ch.get("index", 0))
+                chapter = epub_reader.read_epub_chapter(owner, safe_path, ch.get("index", 0))
             except Exception:
                 continue
             text = epub_reader._plain_text(chapter.get("html") or "")
             _scan(int(ch.get("index", 0)), chapter.get("title") or ch.get("title") or "", text)
     elif ext == ".pdf":
-        path = iris_vault.resolve_owner_file(owner_key, safe_path)
+        path = book_store.resolve_book_file(owner, safe_path)
         try:
             from pypdf import PdfReader
             reader = PdfReader(str(path))
@@ -515,11 +338,8 @@ def search_book_text(
 # --------------------------------------------------------------------------- #
 
 def get_cover(owner: str | None, rel_path: str) -> tuple[bytes, str] | None:
-    """Return (image_bytes, content_type) for a book cover, or None.
-
-    EPUB covers are extracted from the archive. PDF first-page rendering needs a
-    rasterizer that isn't bundled, so PDFs return None (the UI falls back to an
-    icon)."""
+    """Return (image_bytes, content_type) for a book cover, or None. EPUB covers
+    are extracted from the archive; PDFs return None (the UI falls back to an icon)."""
     safe_path = _safe_book_path(rel_path)
     if Path(safe_path).suffix.lower() == ".epub":
         return epub_reader.extract_cover(owner, safe_path)
@@ -527,118 +347,25 @@ def get_cover(owner: str | None, rel_path: str) -> tuple[bytes, str] | None:
 
 
 # --------------------------------------------------------------------------- #
-# Bookmarks & highlights (mirrored to a Markdown note for Obsidian)           #
+# Bookmarks & highlights                                                       #
 # --------------------------------------------------------------------------- #
 
-def _annotations_path(book_id: str) -> str:
-    return f"50_State/book_annotations/{book_id}.json"
-
-
-def _annotations_note_path(title: str) -> str:
-    return f"30_Reading/{_safe_note_name(title, 'book')} - Annotations.md"
-
-
 def list_annotations(owner: str | None, rel_path: str) -> dict:
-    owner_key = iris_vault.owner_folder_name(owner)
-    safe_path = _safe_book_path(rel_path)
-    book_id = _book_id(owner_key, safe_path)
-    try:
-        row = iris_vault.read_file(owner_key, _annotations_path(book_id))
-        data = json.loads(row.get("content") or "{}")
-        if isinstance(data, dict) and isinstance(data.get("items"), list):
-            data.setdefault("book_id", book_id)
-            data.setdefault("path", safe_path)
-            return data
-    except Exception:
-        pass
-    return {"book_id": book_id, "path": safe_path, "items": []}
+    return book_store.list_annotations(owner, _safe_book_path(rel_path))
 
 
-def _write_annotations(owner_key: str | None, safe_path: str, data: dict) -> None:
-    book_id = data["book_id"]
-    iris_vault.write_text_file(owner_key, _annotations_path(book_id), json.dumps(data, indent=2))
-    # Align the annotations note with the reading-progress note's title when we
-    # have one (rename → metadata; opened book → progress), else the file stem.
-    title = (
-        get_metadata(owner_key, safe_path, missing_ok=True).get("title")
-        or get_progress(owner_key, safe_path, missing_ok=True).get("title")
-        or Path(safe_path).stem
+def add_annotation(owner: str | None, rel_path: str, *, type: str = "bookmark", chapter_index: int = 0,
+                   chapter_title: str = "", text: str = "", note: str = "", color: str = "",
+                   scroll_percent: float = 0) -> dict:
+    return book_store.add_annotation(
+        owner, _safe_book_path(rel_path),
+        type=type, chapter_index=chapter_index, chapter_title=chapter_title,
+        text=text, note=note, color=color, scroll_percent=scroll_percent,
     )
-    items = data.get("items") or []
-    label = "page" if safe_path.lower().endswith(".pdf") else "chapter"
-    bookmarks = [a for a in items if a.get("type") == "bookmark"]
-    highlights = [a for a in items if a.get("type") == "highlight"]
-    lines = [
-        f"# {title} — Annotations", "",
-        f"- Vault path: `{safe_path}`",
-        f"- Bookmarks: {len(bookmarks)} · Highlights: {len(highlights)}", "",
-    ]
-    if bookmarks:
-        lines += ["## Bookmarks", ""]
-        for a in bookmarks:
-            loc = f"{label} {int(a.get('chapter_index', 0)) + 1}"
-            extra = f" — {a['chapter_title']}" if a.get("chapter_title") else ""
-            note = f" · {a['note']}" if a.get("note") else ""
-            lines.append(f"- {loc}{extra}{note}")
-        lines.append("")
-    if highlights:
-        lines += ["## Highlights", ""]
-        for a in highlights:
-            loc = f"{label} {int(a.get('chapter_index', 0)) + 1}"
-            extra = f" — {a['chapter_title']}" if a.get("chapter_title") else ""
-            note = f" · {a['note']}" if a.get("note") else ""
-            lines.append(f"> {(a.get('text') or '').strip()}")
-            lines.append(f"  — {loc}{extra}{note}")
-            lines.append("")
-    iris_vault.write_text_file(owner_key, _annotations_note_path(title), "\n".join(lines) + "\n")
-
-
-def add_annotation(
-    owner: str | None,
-    rel_path: str,
-    *,
-    type: str = "bookmark",
-    chapter_index: int = 0,
-    chapter_title: str = "",
-    text: str = "",
-    note: str = "",
-    color: str = "",
-    scroll_percent: float = 0,
-) -> dict:
-    import uuid
-    owner_key = iris_vault.owner_folder_name(owner)
-    safe_path = _safe_book_path(rel_path)
-    if type not in ("bookmark", "highlight"):
-        raise HTTPException(400, "type must be 'bookmark' or 'highlight'")
-    if type == "highlight" and not (text or "").strip():
-        raise HTTPException(400, "A highlight needs selected text")
-    data = list_annotations(owner_key, safe_path)
-    item = {
-        "id": uuid.uuid4().hex[:12],
-        "type": type,
-        "chapter_index": max(0, int(chapter_index or 0)),
-        "chapter_title": (chapter_title or "")[:200],
-        "text": (text or "")[:2000],
-        "note": (note or "")[:1000],
-        "color": (color or "")[:24],
-        "scroll_percent": max(0, min(float(scroll_percent or 0), 100)),
-        "created_at": _utc_now_iso(),
-    }
-    data["items"].append(item)
-    _write_annotations(owner_key, safe_path, data)
-    return item
 
 
 def delete_annotation(owner: str | None, rel_path: str, ann_id: str) -> bool:
-    owner_key = iris_vault.owner_folder_name(owner)
-    safe_path = _safe_book_path(rel_path)
-    data = list_annotations(owner_key, safe_path)
-    before = len(data["items"])
-    data["items"] = [a for a in data["items"] if a.get("id") != ann_id]
-    if len(data["items"]) == before:
-        return False
-    _write_annotations(owner_key, safe_path, data)
-    return True
+    return book_store.delete_annotation(owner, _safe_book_path(rel_path), ann_id)
 
 
 # --------------------------------------------------------------------------- #
