@@ -58,50 +58,61 @@ def test_books_has_dedicated_reader_ui_hooks():
     css = (ROOT / "static" / "style.css").read_text(encoding="utf-8")
     sw = (ROOT / "static" / "sw.js").read_text(encoding="utf-8")
 
-    assert "Compatibility shim" in books
+    # Books is now its OWN standalone tool window (books.js), no longer a mode
+    # inside the Notes pane. It uses the same modal lifecycle as knowledge.js /
+    # health.js, and the reader was moved out of notes.js into here.
+    assert "Compatibility shim" not in books          # the shim is gone — this is the real module
     assert "openBooksPanel" in books
     assert "books-modal" in books
+    assert "Modals.register('books-modal'" in books
+    assert "makeToolModalDraggable" in books
+    # The reader logic (PDF continuous-scroll + EPUB chapter streaming) lives here.
+    assert "/api/books/open?path=" in books
+    assert "/api/books/chapter?path=" in books
+    assert "/api/books/progress" in books
+    assert "/api/books/upload" in books
+    assert "/api/books/title" in books
+    assert "/api/books/file?path=" in books
+    assert "_renameBook" in books
+    assert "notes-book-pdf-frame" in books
+    assert "createPdfReader(" in books  # continuous-scroll PDF via pdfReader.js (no native iframe)
+    assert "function _bookUsesContinuousScroll" in books
+    assert "function _appendNextBookChapterIfNeeded" in books
+    assert "BOOK_CONTINUOUS_MAX_RENDERED_CHAPTERS" in books
+    assert "function _trimBookContinuousStream" in books
+    assert "delete _bookOpenBook.chapters[idx].html" in books
+    assert "notes-book-chapter-section" in books
+    assert "notes-book-page" in books
+    assert "XMLHttpRequest" in books
+    assert "xhr.upload.onprogress" in books
+    assert "accept = '.epub,.pdf" in books
+    assert "bookToolsModule" in books  # bookmarks/highlights/in-book search/read-aloud
+
+    # notes.js is Notes-only now — every Books hook has been removed.
+    assert "openBooksPanel" not in notes
+    assert "_notesMode" not in notes
+    assert "notes-books-toggle" not in notes
+    assert "_fetchBooks" not in notes
+    assert "createPdfReader" not in notes
+    assert "_bookOpenBook" not in notes
+    assert "_removeLegacyBooksModal" not in notes
+
+    # Buttons stay in index.html; books.js is loaded via app.js (not a direct
+    # <script> in index), so a stale cached index can't import it twice.
     assert "tool-books-btn" in index
     assert "rail-books" in index
     assert "/static/js/books.js" not in index
-    assert "notes-books-toggle" in notes
-    assert "openBooksPanel" in notes
-    assert "/api/books/open?path=" in notes
-    assert "/api/books/chapter?path=" in notes
-    assert "/api/books/progress" in notes
-    assert "/api/books/upload" in notes
-    assert "/api/books/title" in notes
-    assert "/api/books/file?path=" in notes
-    assert "_renameBook" in notes
-    assert "notes-book-pdf-frame" in notes
-    assert "createPdfReader(" in notes  # continuous-scroll PDF via pdfReader.js (no native iframe)
-    assert "_viewMode === 'grid' && !isBooks" in notes
-    assert "function _bookUsesContinuousScroll" in notes
-    assert "function _appendNextBookChapterIfNeeded" in notes
-    assert "BOOK_CONTINUOUS_MAX_RENDERED_CHAPTERS" in notes
-    assert "function _trimBookContinuousStream" in notes
-    assert "delete _bookOpenBook.chapters[idx].html" in notes
-    assert "notes-book-chapter-section" in notes
-    assert "_setBookChapter(_bookChapterIndex + 1).finally" not in notes
-    assert "notes-header-spacer" in notes
-    assert "archiveToggle" in notes
-    assert "viewToggle" in notes
-    assert "pane?.classList.remove('notes-pane-archive')" in notes
-    assert "notes-book-page" in notes
-    assert "XMLHttpRequest" in notes
-    assert "xhr.upload.onprogress" in notes
-    assert "accept = '.epub,.pdf" in notes
-    assert "notesModule.openBooksPanel" in app
-    assert "_removeLegacyBooksModal" in app
-    assert "_removeLegacyBooksModal" in notes
+
+    # app.js opens the standalone window via booksModule — no legacy-modal shim.
+    assert "booksModule" in app
+    assert "booksModule.openBooksPanel" in app
+    assert "_removeLegacyBooksModal" not in app
+
+    # CSS: the standalone window shell + the reader classes it reuses.
     assert "#books-modal" in css
-    assert "display: none !important" in css
-    # Cache is versioned (the exact number bumps every release — don't pin it).
-    assert "odysseus-v" in sw
-    assert "/static/style.css?v=" in index
-    assert "/static/app.js?v=" in index
-    assert "./js/notes.js?v=" in app
-    assert ".notes-pane-books" in css
+    assert ".books-modal-content" in css
+    assert ".books-modal-body" in css
+    assert ".books-reader-view" in css
     assert ".notes-book-content" in css
     assert ".notes-book-controls-row" in css
     assert ".notes-book-page" in css
@@ -113,8 +124,13 @@ def test_books_has_dedicated_reader_ui_hooks():
     assert ".notes-book-controls-row-pdf" in css
     assert ".notes-book-content-continuous" in css
     assert ".notes-book-chapter-section" in css
-    assert ".notes-pane-header .doc-action-icon-btn.notes-header-spacer" in css
-    assert "visibility: hidden" in css
+
+    # Cache is versioned (the exact number bumps every release — don't pin it).
+    assert "odysseus-v" in sw
+    assert "/static/style.css?v=" in index
+    assert "/static/app.js?v=" in index
+    assert "./js/books.js?v=" in app
+    assert "./js/notes.js?v=" in app
 
 
 def test_agent_tool_registration_for_books():

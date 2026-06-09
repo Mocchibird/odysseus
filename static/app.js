@@ -23,7 +23,8 @@ import censorModule from './js/censor.js';
 import galleryModule from './js/gallery.js';
 import tasksModule from './js/tasks.js';
 import calendarModule from './js/calendar.js';
-import notesModule from './js/notes.js?v=385';
+import notesModule from './js/notes.js?v=387';
+import booksModule from './js/books.js?v=387';
 import healthModule from './js/health.js?v=386';
 import pingsModule from './js/pings.js?v=370';
 import knowledgeModule from './js/knowledge.js?v=383';
@@ -71,12 +72,7 @@ window.fetch = async function(...args) {
 
 const el = uiModule.el;
 
-function _removeLegacyBooksModal() {
-  try {
-    document.querySelectorAll('#books-modal, .books-modal').forEach(node => node.remove());
-  } catch (_) {}
-}
-_removeLegacyBooksModal();
+window.booksModule = booksModule;
 
 // Default chat config — refreshed on every new-chat action so settings
 // changes take effect immediately (previously cached once at page load and
@@ -894,12 +890,13 @@ function initializeEventListeners() {
     });
   }
 
-  // Books / E-Reader tool button
+  // Books / E-Reader tool button — its own standalone window now (booksModule),
+  // no longer a mode inside the Notes pane. Toggle like the other tool windows.
   const toolBooksBtn = el('tool-books-btn');
   if (toolBooksBtn) {
     toolBooksBtn.addEventListener('click', () => {
-      _removeLegacyBooksModal();
-      if (notesModule?.openBooksPanel) notesModule.openBooksPanel();
+      if (!booksModule) return;
+      booksModule.isBooksOpen() ? booksModule.closeBooks() : booksModule.openBooksPanel();
     });
   }
 
@@ -1078,10 +1075,7 @@ function initializeEventListeners() {
         setTimeout(_go, 200);
       }
     },
-    '/books':    () => {
-      _removeLegacyBooksModal();
-      return notesModule?.openBooksPanel && notesModule.openBooksPanel();
-    },
+    '/books':    () => booksModule?.openBooksPanel && booksModule.openBooksPanel(),
     '/calendar': () => calendarModule && calendarModule.openCalendar(),
     '/cookbook': () => document.getElementById('tool-cookbook-btn')?.click(),
     '/email':    () => {

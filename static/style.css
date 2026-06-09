@@ -37849,341 +37849,96 @@ body.theme-frosted .modal {
 .ask-user-other-send { flex-shrink: 0; white-space: nowrap; min-height: 39px; }
 .ask-user-other-send:disabled { opacity: 0.5; cursor: default; }
 
-/* Legacy guard: Books now lives inside the Notes pane. If a browser still has
-   cached standalone Books code, do not let its old modal surface render. */
-#books-modal,
-.books-modal {
-  display: none !important;
-}
-
-/* Books / E-Reader */
-.books-modal {
-  align-items: center;
-  justify-content: center;
-}
-
+/* ── Books / E-Reader — its own standalone tool window (books.js). A "book" IS a
+   PDF/EPUB in the Knowledge base; this window is the reading view. The reader
+   reuses the global .notes-book-* / .notes-vault-* classes, so only the window
+   shell + the two inner views are styled here. These #books-modal rules mirror
+   the .notes-pane-books scoped rules that wrapped the reader when Books was a
+   mode inside the Notes pane. ── */
 .books-modal-content {
-  width: min(1180px, calc(100vw - 64px));
-  height: min(820px, calc(100vh - 56px));
-  min-height: 520px;
+  width: min(1040px, 96vw);
+  max-width: 1040px;
+  height: min(88vh, 1000px);
+  min-height: 0;
   display: flex;
   flex-direction: column;
 }
-
-.books-modal .modal-header h2 {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+/* Header tint — matches the old Books pane header. */
+#books-modal .modal-header {
+  background: color-mix(in srgb, var(--accent-primary, var(--red)) 6%, var(--panel));
 }
-
 .books-modal-body {
-  flex: 1;
+  flex: 1 1 auto;
   min-height: 0;
-  display: grid;
-  grid-template-columns: minmax(230px, 300px) minmax(0, 1fr);
-  border-top: 1px solid var(--border);
-}
-
-.books-sidebar {
-  min-width: 0;
-  border-right: 1px solid var(--border);
-  padding: 12px;
+  overflow: hidden;          /* the two inner views own their scroll */
+  padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  background: color-mix(in srgb, var(--bg) 94%, var(--fg) 6%);
 }
-
-.books-search {
-  width: 100%;
-  height: 34px;
-  border: 1px solid var(--border);
-  background: var(--input-bg, var(--bg));
-  color: var(--fg);
-  border-radius: 6px;
-  padding: 0 10px;
-  font: inherit;
-}
-
-.books-upload {
-  height: 34px;
-  border: 1px dashed var(--border);
-  border-radius: 6px;
-  display: grid;
-  place-items: center;
-  cursor: pointer;
-  color: color-mix(in srgb, var(--fg) 78%, transparent);
-  font-size: 0.82rem;
-}
-
-.books-upload input {
-  display: none;
-}
-
-.books-upload-progress {
-  display: grid;
-  gap: 5px;
-  padding: 8px;
-  border: 1px solid color-mix(in srgb, var(--border) 82%, transparent);
-  border-radius: 6px;
-  background: color-mix(in srgb, var(--fg) 4%, transparent);
-  font-size: 0.74rem;
-}
-
-.books-upload-progress-top {
+/* List view: fixed toolbar + upload slot, then a scrolling library list. */
+.books-list-view {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1 1 auto;
+}
+.books-toolbar {
+  display: flex;
   gap: 8px;
+  align-items: center;
+  flex-shrink: 0;
+  padding: 10px 12px 8px;
 }
-
-.books-upload-progress-top span:first-child {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.books-upload-track {
-  position: relative;
-  height: 6px;
-  overflow: hidden;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--fg) 10%, transparent);
-}
-
-.books-upload-track span {
-  display: block;
-  height: 100%;
-  border-radius: inherit;
-  background: var(--accent-primary, var(--red));
-  transition: width 0.12s ease;
-}
-
-.books-upload-progress.indeterminate .books-upload-track span {
-  width: 34% !important;
-  animation: books-upload-indeterminate 1.1s ease-in-out infinite;
-}
-
-.books-upload-progress.error {
-  border-color: color-mix(in srgb, var(--red) 45%, var(--border));
-}
-
-.books-upload-detail {
-  color: color-mix(in srgb, var(--fg) 60%, transparent);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-@keyframes books-upload-indeterminate {
-  0% { transform: translateX(-110%); }
-  100% { transform: translateX(310%); }
-}
-
-.books-list {
+.books-toolbar .books-search { flex: 1 1 auto; min-width: 0; }
+.books-upload-slot:not(:empty) { padding: 0 12px 8px; flex-shrink: 0; }
+.books-list-scroll {
+  flex: 1 1 auto;
   min-height: 0;
-  overflow: auto;
+  overflow-y: auto;
+  padding: 0 12px 12px;
+  scrollbar-width: thin;
+}
+/* Reader view: for EPUBs this IS the continuous scroller the chapter-streaming
+   logic drives (the role the notes-pane body played when Books lived in Notes). */
+.books-reader-view {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
+  align-items: stretch;
   gap: 6px;
-}
-
-.books-list-item {
-  width: 100%;
-  display: grid;
-  grid-template-columns: 42px minmax(0, 1fr);
-  gap: 8px;
-  align-items: center;
-  text-align: left;
-  border: 1px solid transparent;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--fg);
   padding: 8px;
-  cursor: pointer;
+  scrollbar-width: thin;
 }
-
-.books-list-item:hover {
-  background: color-mix(in srgb, var(--fg) 7%, transparent);
-  border-color: color-mix(in srgb, var(--border) 70%, transparent);
+/* Library list spacing + the book-row grid (was .notes-pane-books .notes-vault-list
+   / .notes-vault-file.notes-book-file). */
+#books-modal .notes-vault-list { gap: 8px; }
+#books-modal .notes-vault-file.notes-book-file {
+  grid-template-columns: 44px minmax(0, 1fr) 32px;
+  min-height: 88px;
+  max-height: none;
+  align-items: start;
+  padding: 10px;
+  gap: 10px;
 }
-
-.books-list-kind {
-  font-size: 0.66rem;
-  line-height: 1;
-  padding: 5px 4px;
-  text-align: center;
-  border-radius: 4px;
-  border: 1px solid var(--border);
-  color: color-mix(in srgb, var(--fg) 72%, transparent);
-}
-
-.books-list-main {
-  min-width: 0;
-  display: grid;
-  gap: 3px;
-}
-
-.books-list-title {
-  font-size: 0.86rem;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.books-list-meta {
-  font-size: 0.7rem;
-  color: color-mix(in srgb, var(--fg) 58%, transparent);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.books-empty {
-  padding: 18px 8px;
-  color: color-mix(in srgb, var(--fg) 58%, transparent);
-  font-size: 0.84rem;
-}
-
-.books-reader {
-  min-width: 0;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  background: var(--bg);
-}
-
-.books-reader-empty {
-  display: grid;
-  place-items: center;
-  color: color-mix(in srgb, var(--fg) 58%, transparent);
-}
-
-.books-reader-header {
-  flex: 0 0 auto;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 16px;
-  align-items: end;
-  padding: 14px 18px 10px;
-  border-bottom: 1px solid var(--border);
-}
-
-.books-title-wrap {
-  min-width: 0;
-}
-
-.books-reader-kind {
-  font-size: 0.68rem;
-  color: color-mix(in srgb, var(--fg) 55%, transparent);
-  letter-spacing: 0;
-  margin-bottom: 3px;
-}
-
-.books-reader h3 {
-  margin: 0;
-  font-size: 1.04rem;
-  line-height: 1.25;
-  overflow-wrap: anywhere;
-}
-
-.books-author {
-  margin-top: 3px;
-  font-size: 0.78rem;
-  color: color-mix(in srgb, var(--fg) 62%, transparent);
-}
-
-.books-reader-actions {
-  display: grid;
-  grid-template-columns: 64px minmax(160px, 260px) 64px;
-  gap: 8px;
-  align-items: center;
-}
-
-.books-nav-btn,
-.books-chapter-select {
-  height: 32px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--input-bg, var(--bg));
-  color: var(--fg);
-  font: inherit;
-  font-size: 0.8rem;
-}
-
-.books-nav-btn {
-  cursor: pointer;
-}
-
-.books-nav-btn:disabled {
-  opacity: 0.4;
-  cursor: default;
-}
-
-.books-progress-line {
-  flex: 0 0 auto;
-  padding: 8px 18px;
-  font-size: 0.74rem;
-  color: color-mix(in srgb, var(--fg) 62%, transparent);
-  border-bottom: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
-}
-
-.books-reader-body {
-  flex: 1;
-  min-height: 0;
-  overflow: auto;
-  padding: 28px min(7vw, 72px) 56px;
-  color: color-mix(in srgb, var(--fg) 92%, transparent);
-  font-size: 1rem;
-  line-height: 1.68;
-}
-
-.books-reader-body h1,
-.books-reader-body h2,
-.books-reader-body h3 {
-  line-height: 1.25;
-}
-
-.books-reader-body p {
-  margin: 0 0 1em;
-}
-
-.books-empty-page {
-  color: color-mix(in srgb, var(--fg) 58%, transparent);
-  font-style: italic;
-}
-
 @media (max-width: 760px) {
   .books-modal-content {
     width: 100vw;
-    height: 100vh;
+    max-width: 100vw;
+    height: 100%;
     min-height: 0;
     border-radius: 0;
   }
-
-  .books-modal-body {
-    grid-template-columns: 1fr;
-    grid-template-rows: auto minmax(0, 1fr);
-  }
-
-  .books-sidebar {
-    border-right: 0;
-    border-bottom: 1px solid var(--border);
-    max-height: 220px;
-  }
-
-  .books-reader-header {
-    grid-template-columns: 1fr;
-    align-items: start;
-  }
-
-  .books-reader-actions {
-    grid-template-columns: 58px minmax(0, 1fr) 58px;
-  }
-
-  .books-reader-body {
-    padding: 22px 18px 44px;
+  /* Full-width reader/list children on narrow screens (mirrors the old mobile
+     .notes-pane-books rules). */
+  #books-modal .notes-book-reader,
+  #books-modal .notes-vault-list,
+  #books-modal .notes-empty-msg,
+  #books-modal .notes-skeleton {
+    width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
   }
 }
 
