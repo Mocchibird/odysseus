@@ -23,8 +23,10 @@ def test_compose_wires_iris_vault_and_mcp_defaults():
 
     assert "ODYSSEUS_OBSIDIAN_VAULT_DIR" in compose
     assert "${ODYSSEUS_OBSIDIAN_VAULT_DIR:?Set ODYSSEUS_OBSIDIAN_VAULT_DIR" in compose
-    assert "${ODYSSEUS_IRIS_MCP_REPO_DIR:-../obsidian-iris-mcp}:/opt/obsidian-iris-mcp:ro" in compose
-    assert "ODYSSEUS_OBSIDIAN_MCP_SCRIPT=${ODYSSEUS_OBSIDIAN_MCP_SCRIPT:-/opt/obsidian-iris-mcp/obsidian_memory_mcp.py}" in compose
+    # Iris MCP is now VENDORED (vendor/iris-mcp, baked into the image at /app) —
+    # no external obsidian-iris-mcp bind-mount; the script defaults to the
+    # vendored path so a sibling checkout is no longer required.
+    assert "ODYSSEUS_OBSIDIAN_MCP_SCRIPT=${ODYSSEUS_OBSIDIAN_MCP_SCRIPT:-/app/vendor/iris-mcp/obsidian_memory_mcp.py}" in compose
     assert "ODYSSEUS_OBSIDIAN_VAULT_ROOT=${ODYSSEUS_OBSIDIAN_VAULT_ROOT:-/vault}" in compose
     assert "IRIS_VAULT_ROOT=${IRIS_VAULT_ROOT:-/vault}" in compose
     assert "INSTALL_IRIS_MCP_DEPS: ${INSTALL_IRIS_MCP_DEPS:-true}" in compose

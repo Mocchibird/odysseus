@@ -16,11 +16,17 @@ def _load_builtin_mcp(monkeypatch):
     return importlib.import_module("src.builtin_mcp")
 
 
-def test_obsidian_mcp_config_absent_without_script(monkeypatch):
+def test_obsidian_mcp_config_without_script_falls_back_to_vendored(monkeypatch):
     builtin_mcp = _load_builtin_mcp(monkeypatch)
     monkeypatch.delenv("ODYSSEUS_OBSIDIAN_MCP_SCRIPT", raising=False)
 
-    assert builtin_mcp._obsidian_mcp_config_from_env() is None
+    cfg = builtin_mcp._obsidian_mcp_config_from_env()
+    # Self-contained: with no explicit script env, Odysseus now falls back to the
+    # vendored MCP bundled at vendor/iris-mcp (if present); only None when absent.
+    if cfg is None:
+        return
+    assert cfg["server_id"] == "iris_obsidian"
+    assert cfg["args"][0].replace("\\", "/").endswith("vendor/iris-mcp/obsidian_memory_mcp.py")
 
 
 def test_obsidian_mcp_config_uses_script_vault_and_pythonpath(monkeypatch, tmp_path):

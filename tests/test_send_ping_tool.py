@@ -34,7 +34,8 @@ def test_send_ping_registered_everywhere():
 def test_send_ping_uses_ntfy_integration_and_settings_topic():
     source = (ROOT / "src" / "tool_implementations.py").read_text()
     assert "async def do_send_ping" in source
-    assert "find_ntfy_integration(load_integrations())" in source
+    assert "resolve_ntfy_integration(" in source
+    assert "load_integrations()" in source
     assert "get_user_setting(\"reminder_ntfy_topic\"" in source
     assert "settings.get(\"reminder_ntfy_topic\")" in source
     assert "send_ntfy_notification(" in source
@@ -47,7 +48,7 @@ def test_send_ping_uses_ntfy_integration_and_settings_topic():
 
     notes_source = (ROOT / "routes" / "note_routes.py").read_text()
     assert "send_ntfy_notification(" in notes_source
-    assert "find_ntfy_integration(load_integrations())" in notes_source
+    assert "resolve_ntfy_integration(" in notes_source
     assert "get_user_setting" in notes_source
     assert "_setting(\"reminder_ntfy_topic\"" in notes_source
 

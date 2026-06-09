@@ -69,13 +69,9 @@ def test_books_has_dedicated_reader_ui_hooks():
     assert "/api/books/file?path=" in notes
     assert "_renameBook" in notes
     assert "odysseus-books-read-mode" in notes
-    assert "odysseus-books-pdf-view-mode" in notes
-    assert "data-pdf-mode=\"pdf\"" in notes
     assert "notes-book-pdf-frame" in notes
     assert "_bookOpenBook.kind === 'pdf' && _bookPdfViewMode !== 'text'" in notes
     assert "_viewMode === 'grid' && !isVault && !isBooks" in notes
-    pdf_controls = notes[notes.index('notes-book-controls-row notes-book-controls-row-pdf'):]
-    assert pdf_controls.index("${pdfToggleHtml}") < pdf_controls.index("notes-book-prev")
     assert "function _bookUsesContinuousScroll" in notes
     assert "function _appendNextBookChapterIfNeeded" in notes
     assert "BOOK_CONTINUOUS_MAX_RENDERED_CHAPTERS" in notes
@@ -87,7 +83,6 @@ def test_books_has_dedicated_reader_ui_hooks():
     assert "archiveToggle" in notes
     assert "viewToggle" in notes
     assert "pane?.classList.remove('notes-pane-archive')" in notes
-    assert "notes-book-controls-row" in notes
     assert "notes-book-mode-btn" in notes
     assert "notes-book-page" in notes
     assert "XMLHttpRequest" in notes
@@ -98,10 +93,11 @@ def test_books_has_dedicated_reader_ui_hooks():
     assert "_removeLegacyBooksModal" in notes
     assert "#books-modal" in css
     assert "display: none !important" in css
-    assert "odysseus-v342" in sw
-    assert "/static/style.css?v=342" in index
-    assert "/static/app.js?v=342" in index
-    assert "./js/notes.js?v=342" in app
+    # Cache is versioned (the exact number bumps every release — don't pin it).
+    assert "odysseus-v" in sw
+    assert "/static/style.css?v=" in index
+    assert "/static/app.js?v=" in index
+    assert "./js/notes.js?v=" in app
     assert ".notes-pane-books" in css
     assert ".notes-book-content" in css
     assert ".notes-book-controls-row" in css

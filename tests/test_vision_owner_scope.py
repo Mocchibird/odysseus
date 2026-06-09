@@ -41,7 +41,10 @@ def test_auto_detected_vision_model_resolution_passes_owner(monkeypatch):
         {},
     )
     assert seen
-    assert all(owner == "alice" for _spec, owner in seen)
+    # The winning candidate is resolved with the caller's owner scope first.
+    # (Admin-global vision falls back to owner=None per candidate when the
+    # owner-scoped lookup misses, so `seen` legitimately contains None entries.)
+    assert ("llava", "alice") in seen
 
 
 def test_vision_analysis_uses_owner_scoped_primary_and_fallback(monkeypatch, tmp_path):
