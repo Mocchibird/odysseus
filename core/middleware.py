@@ -131,7 +131,11 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
                 f"script-src 'self' 'nonce-{nonce}' https://cdn.jsdelivr.net; "
                 "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
                 "font-src 'self' https://cdn.jsdelivr.net; "
-                "img-src 'self' data: blob:; "
+                # Allow remote https images so HTML emails render their CDN
+                # logos/photos (and any other remote <img>). Images can't execute
+                # script; the residual risk is open-tracking / IP-leak from remote
+                # pixels, which is acceptable for a self-hosted client.
+                "img-src 'self' data: blob: https:; "
                 "media-src 'self' blob:; "
                 # PDF.js (book reader) spawns its render worker from a same-origin
                 # .mjs and may also use a blob: worker — allow both.
