@@ -2833,7 +2833,7 @@ async def do_manage_calendar(content: str, owner: Optional[str] = None) -> Dict:
 
 
 # ---------------------------------------------------------------------------
-# Books tool — vault-backed EPUB/PDF reading state
+# Books tool — EPUB/PDF reading state (over the Knowledge base)
 # ---------------------------------------------------------------------------
 
 async def do_manage_books(content: str, owner: Optional[str] = None) -> Dict:
@@ -2856,7 +2856,7 @@ async def do_manage_books(content: str, owner: Optional[str] = None) -> Dict:
             query = str(args.get("query") or args.get("search") or "")
             rows = book_reader.list_books(owner, query, int(args.get("limit") or 20))
             if not rows:
-                return {"response": "No EPUB/PDF books found in the Iris vault.", "books": [], "exit_code": 0}
+                return {"response": "No EPUB/PDF books found.", "books": [], "exit_code": 0}
             lines = [f"Found {len(rows)} book(s):"]
             for row in rows:
                 progress = row.get("progress") or {}

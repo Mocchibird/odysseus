@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 
-from fastapi import APIRouter, BackgroundTasks, File, HTTPException, Request, Response, UploadFile
+from fastapi import APIRouter, File, HTTPException, Request, Response, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
@@ -59,21 +60,18 @@ def setup_book_routes() -> APIRouter:
         return {"ok": True, "books": book_reader.list_books(_owner(request), q, limit)}
 
     @router.post("/upload")
-    async def upload_book(request: Request, background_tasks: BackgroundTasks, file: UploadFile = File(...)):
+    async def upload_book(request: Request, file: UploadFile = File(...)):
         filename = file.filename or "book"
         content = await file.read(MAX_BOOK_UPLOAD_BYTES + 1)
         if len(content) > MAX_BOOK_UPLOAD_BYTES:
             raise HTTPException(413, "Book upload exceeds size limit")
         owner = _owner(request)
-        file_row = book_reader.save_uploaded_book(
-            owner,
-            filename,
-            content,
-            mime=file.content_type or "",
-            index_content=False,
+        # A book is just a PDF/EPUB in the Knowledge base — ingest it there
+        # (text-extract + index) off-thread so a large book doesn't block the loop.
+        file_row = await asyncio.to_thread(
+            book_reader.save_uploaded_book, owner, filename, content, mime=file.content_type or "",
         )
-        background_tasks.add_task(book_reader.index_book, owner, file_row["path"])
-        return {"ok": True, "file": file_row, "indexing": True}
+        return {"ok": True, "file": file_row, "indexing": False}
 
     @router.get("/open")
     async def open_book(request: Request, path: str):

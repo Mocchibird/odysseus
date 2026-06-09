@@ -26,11 +26,13 @@ def test_epub_reader_backend_routes_and_progress_notes_exist():
     assert "PdfReader" in book_service
     assert "SUPPORTED_BOOK_EXTENSIONS" in book_service
     assert "def pdf_file_path" in book_service
-    # the store owns bytes (DATA_DIR/books) + DB tables + book-text RAG indexing.
-    assert "BookFile" in store and "BookProgress" in store and "BookAnnotation" in store
-    assert "BOOKS_DIR" in store
+    # the store is a reading VIEW over the Knowledge base — a book IS a KB pdf/epub
+    # file (so Books + Knowledge stay in sync); only reading state lives here.
+    assert "knowledge_base" in store
+    assert "BookProgress" in store and "BookAnnotation" in store  # reading state only
     assert "def resolve_book_file" in store
-    assert 'RAG_KIND = "book"' in store
+    assert "kb.ingest" in store      # adding a book ingests it into Knowledge
+    assert "kb.file_abspath" in store  # book bytes come from the KB-owned store
     # routes unchanged (still call book_reader, still serve PDFs inline).
     assert 'prefix="/api/books"' in book_routes
     assert '"/upload"' in book_routes
@@ -41,9 +43,7 @@ def test_epub_reader_backend_routes_and_progress_notes_exist():
     assert 'path == "/api/books/file"' in middleware
     assert 'response.headers["X-Frame-Options"] = "SAMEORIGIN"' in middleware
     assert "frame-ancestors 'self'" in middleware
-    assert "BackgroundTasks" in book_routes
-    assert "index_content=False" in book_routes
-    assert "background_tasks.add_task" in book_routes
+    assert "asyncio.to_thread" in book_routes  # ingest into the KB off the event loop
     assert '"/open"' in book_routes
     assert '"/progress"' in book_routes
     assert "BookTitleRequest" in book_routes

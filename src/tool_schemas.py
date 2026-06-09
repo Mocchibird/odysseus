@@ -823,7 +823,7 @@ FUNCTION_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "manage_books",
-            "description": "List/read EPUB and PDF books stored in the user's Iris vault, and save reading progress. Use this when the user asks about books, EPUBs, PDFs, reading status, or what they have read.",
+            "description": "List/read the user's EPUB and PDF books (PDF/EPUB files in their Knowledge base) and save reading progress. Use this when the user asks about books, EPUBs, PDFs, reading status, or what they have read.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -1483,7 +1483,7 @@ def function_call_to_tool_block(name: str, arguments: str) -> Optional[ToolBlock
     elif tool_type in ("manage_tasks", "manage_skills", "api_call", "send_ping",
                         "manage_endpoints", "manage_mcp", "manage_webhooks",
                         "manage_tokens", "manage_documents", "manage_settings",
-                        "manage_iris_vault", "manage_books"):
+                        "manage_books"):
         content = json.dumps(args)
     elif tool_type == "ask_teacher":
         content = args.get("model", "auto") + "\n" + args.get("problem", "")

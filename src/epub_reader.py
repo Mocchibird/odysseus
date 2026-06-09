@@ -88,10 +88,8 @@ def _plain_text(html: str) -> str:
     return BeautifulSoup(html or "", "html.parser").get_text("\n", strip=True)
 
 
-def _epub_package(owner: str | None, rel_path: str) -> tuple[Path, str, str, ET.Element]:
-    owner_key = book_store.owner_slug(owner)
-    safe_path = book_store.safe_rel_path(rel_path)
-    path = book_store.resolve_book_file(owner_key, safe_path)
+def _epub_package(owner: str | None, kb_id: str) -> tuple[Path, str, str, ET.Element]:
+    path = book_store.resolve_book_file(owner, kb_id)
     if path.suffix.lower() != ".epub":
         raise HTTPException(400, "File is not an EPUB")
     if not path.is_file():
@@ -113,7 +111,7 @@ def _epub_package(owner: str | None, rel_path: str) -> tuple[Path, str, str, ET.
     opf_dir = str(Path(opf_path).parent)
     if opf_dir == ".":
         opf_dir = ""
-    return path, safe_path, opf_dir, opf
+    return path, kb_id, opf_dir, opf
 
 
 def _epub_toc_titles(zf: zipfile.ZipFile, manifest: dict, opf_dir: str, opf: ET.Element) -> dict[str, str]:
@@ -157,9 +155,8 @@ def _epub_toc_titles(zf: zipfile.ZipFile, manifest: dict, opf_dir: str, opf: ET.
     return titles
 
 
-def parse_epub_toc(owner: str | None, rel_path: str) -> dict:
-    owner_key = book_store.owner_slug(owner)
-    path, safe_path, opf_dir, opf = _epub_package(owner_key, rel_path)
+def parse_epub_toc(owner: str | None, kb_id: str) -> dict:
+    path, _kb, opf_dir, opf = _epub_package(owner, kb_id)
     metadata = opf.find("opf:metadata", _NS)
     title = _text_or_empty(metadata.find("dc:title", _NS) if metadata is not None else None) or path.stem
     author = _text_or_empty(metadata.find("dc:creator", _NS) if metadata is not None else None)
@@ -194,13 +191,13 @@ def parse_epub_toc(owner: str | None, rel_path: str) -> dict:
         })
 
     return {
-        "id": book_store.book_id(owner_key, safe_path),
-        "path": safe_path,
+        "id": kb_id,
+        "path": kb_id,
         "title": title,
         "author": author,
         "chapter_count": len(chapters),
         "chapters": chapters,
-        "progress": book_store.get_progress(owner_key, safe_path, missing_ok=True),
+        "progress": book_store.get_progress(owner, kb_id, missing_ok=True),
     }
 
 
@@ -210,15 +207,14 @@ _COVER_CONTENT_TYPES = {
 }
 
 
-def extract_cover(owner: str | None, rel_path: str) -> tuple[bytes, str] | None:
+def extract_cover(owner: str | None, kb_id: str) -> tuple[bytes, str] | None:
     """Return (image_bytes, content_type) for the EPUB's cover image, or None.
 
     Tries, in order: the OPF ``<meta name="cover">`` pointer, a manifest item
     with ``properties="cover-image"``, an image whose href mentions "cover", and
     finally the first image in the manifest."""
-    owner_key = book_store.owner_slug(owner)
     try:
-        path, _safe, opf_dir, opf = _epub_package(owner_key, rel_path)
+        path, _kb, opf_dir, opf = _epub_package(owner, kb_id)
     except Exception:
         return None
 
@@ -271,15 +267,14 @@ def extract_cover(owner: str | None, rel_path: str) -> tuple[bytes, str] | None:
     return data, content_type
 
 
-def read_epub_chapter(owner: str | None, rel_path: str, chapter_index: int = 0) -> dict:
-    owner_key = book_store.owner_slug(owner)
-    toc = parse_epub_toc(owner_key, rel_path)
+def read_epub_chapter(owner: str | None, kb_id: str, chapter_index: int = 0) -> dict:
+    toc = parse_epub_toc(owner, kb_id)
     chapters = toc.get("chapters") or []
     if not chapters:
         raise HTTPException(404, "EPUB has no readable chapters")
     idx = max(0, min(int(chapter_index or 0), len(chapters) - 1))
     chapter = chapters[idx]
-    path = book_store.resolve_book_file(owner_key, toc["path"])
+    path = book_store.resolve_book_file(owner, kb_id)
     with zipfile.ZipFile(path) as zf:
         raw = _zip_read_text(zf, chapter["href"])
     chapter_title, html = _chapter_html(raw)

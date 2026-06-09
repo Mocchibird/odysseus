@@ -1,108 +1,107 @@
-"""Functional tests for the native Books store (src/book_store.py) and the
-book_reader facade — the vault-free EPUB/PDF backend.
+"""Functional tests for the unified Books store (src/book_store.py).
 
-Covers upsert + unique naming, owner-scoped listing/search, reading-progress
-roundtrip, custom title, annotations, delete (row + bytes + child rows), and
-path-safety. RAG is stubbed (no ChromaDB). No Obsidian vault involved.
+A "book" IS a PDF/EPUB in the Knowledge base, so Books and Knowledge stay in
+sync. Covers add→list, the Knowledge⇄Books sync (KB pdf/epubs show as books,
+other files don't), reading-progress, rename (renames the underlying KB file),
+annotations, delete (removes from both), and owner-scoping. RAG is stubbed and
+the KB file store is redirected to a temp dir.
 """
+import os
+import tempfile
+
 import pytest
 
 pytest.importorskip("sqlalchemy")
 
 from core.database import Base, engine  # noqa: E402
-from src import book_store, book_reader  # noqa: E402
+from src import book_store, knowledge_base as kb  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
 def _tables_and_tmp(monkeypatch, tmp_path):
     Base.metadata.create_all(bind=engine)
-    monkeypatch.setattr("src.book_store.BOOKS_DIR", str(tmp_path / "books"))
+    monkeypatch.setattr("src.knowledge_base._data_dir", lambda: str(tmp_path / "data"))
     monkeypatch.setattr("src.rag_singleton.get_rag_manager", lambda: None)
     yield
 
 
-def test_upsert_stores_bytes_and_lists(tmp_path):
-    rec = book_store.upsert_book("alice", "Dune.pdf", b"%PDF-1.4 fake", mime="application/pdf")
-    assert rec["filename"] == "Dune.pdf"
-    assert rec["kind"] == "pdf"
-    assert rec["path"] == "Dune.pdf"
-    # bytes physically stored + openable
-    p = book_store.resolve_book_file("alice", "Dune.pdf")
-    assert p.is_file() and p.read_bytes() == b"%PDF-1.4 fake"
-    # discoverable, owner-scoped
-    assert [b["filename"] for b in book_store.query_books("alice")] == ["Dune.pdf"]
-    assert book_store.query_books("bob") == []
+def _kb_ingest(owner, name, content, mime=""):
+    """Add a file straight to the Knowledge base (simulating the Knowledge panel)."""
+    p = os.path.join(tempfile.gettempdir(), f"bookstore-test-{name}")
+    with open(p, "wb") as f:
+        f.write(content)
+    try:
+        return kb.ingest(owner, file_path=p, filename=name, mime=mime, source="upload")
+    finally:
+        try:
+            os.remove(p)
+        except OSError:
+            pass
 
 
-def test_unique_rel_path_no_clobber():
-    book_store.upsert_book("u", "Book.epub", b"PK\x03\x04 one")
-    rec2 = book_store.upsert_book("u", "Book.epub", b"PK\x03\x04 two")
-    assert rec2["path"] == "Book 2.epub"
-    assert len(book_store.query_books("u")) == 2
+def test_add_book_appears_in_books_and_knowledge():
+    rec = book_store.add_book("alice", "Dune.pdf", b"%PDF-1.4 alice dune", mime="application/pdf")
+    assert rec["kind"] == "pdf" and rec["title"] == "Dune" and rec["path"] == rec["id"]
+    kid = rec["id"]
+    assert [b["id"] for b in book_store.list_books("alice")] == [kid]
+    # a book IS a knowledge file — same id, present in the KB (synced)
+    assert kb.get("alice", kid)["filename"] == "Dune.pdf"
+    assert book_store.list_books("bob") == []  # owner-scoped
 
 
-def test_search_matches_filename_and_title():
-    book_store.upsert_book("s", "huawei-ascend.pdf", b"x")
-    book_store.upsert_book("s", "apple.pdf", b"y")
-    assert {b["filename"] for b in book_store.query_books("s", "huawei")} == {"huawei-ascend.pdf"}
+def test_knowledge_pdf_epub_show_as_books_others_dont():
+    pdf = _kb_ingest("u", "paper.pdf", b"%PDF-1.4 paper", "application/pdf")
+    epub = _kb_ingest("u", "novel.epub", b"PK\x03\x04 novel")
+    note = _kb_ingest("u", "memo.txt", b"just a note")  # not a book
+    ids = {b["id"] for b in book_store.list_books("u")}
+    assert pdf["id"] in ids and epub["id"] in ids
+    assert note["id"] not in ids
+    assert {b["kind"] for b in book_store.list_books("u")} == {"pdf", "epub"}
 
 
-def test_progress_roundtrip_owner_scoped():
-    book_store.upsert_book("p", "novel.pdf", b"x")
-    saved = book_store.save_progress("p", "novel.pdf", chapter_index=4, scroll_percent=42.5, kind="pdf")
-    assert saved["chapter_index"] == 4 and round(saved["scroll_percent"]) == 42
-    got = book_store.get_progress("p", "novel.pdf")
-    assert got["chapter_index"] == 4
-    # a different owner sees no progress for the same name
-    assert book_store.get_progress("other", "novel.pdf", missing_ok=True)["chapter_index"] == 0
+def test_resolve_book_file_returns_bytes_owner_scoped():
+    rec = book_store.add_book("r", "x.pdf", b"%PDF real bytes", mime="application/pdf")
+    p = book_store.resolve_book_file("r", rec["id"])
+    assert p.is_file() and p.read_bytes() == b"%PDF real bytes"
+    assert book_store.get_book("intruder", rec["id"]) is None
 
 
-def test_custom_title_overrides_and_persists():
-    book_store.upsert_book("t", "raw-name.epub", b"x")
-    book_store.set_title("t", "raw-name.epub", "A Lovely Title")
-    assert book_store.get_book("t", "raw-name.epub")["custom_title"] == "A Lovely Title"
-    assert book_store.query_books("t", "Lovely")[0]["title"] == "A Lovely Title"
+def test_progress_roundtrip_and_in_list():
+    rec = book_store.add_book("p", "b.pdf", b"%PDF p", mime="application/pdf")
+    book_store.save_progress("p", rec["id"], chapter_index=3, scroll_percent=40.0, kind="pdf")
+    got = book_store.get_progress("p", rec["id"])
+    assert got["chapter_index"] == 3 and round(got["scroll_percent"]) == 40
+    assert book_store.list_books("p")[0]["progress"]["chapter_index"] == 3
+
+
+def test_rename_renames_the_underlying_knowledge_file():
+    rec = book_store.add_book("t", "raw.epub", b"PK raw bytes")
+    book_store.set_title("t", rec["id"], "A Lovely Title")
+    # renames the KB file, so it shows renamed in BOTH Books and Knowledge
+    assert kb.get("t", rec["id"])["filename"] == "A Lovely Title.epub"
+    assert book_store.get_book("t", rec["id"])["title"] == "A Lovely Title"
 
 
 def test_annotations_add_list_delete():
-    book_store.upsert_book("a", "b.pdf", b"x")
-    bm = book_store.add_annotation("a", "b.pdf", type="bookmark", chapter_index=2)
-    hl = book_store.add_annotation("a", "b.pdf", type="highlight", text="quote", chapter_index=3)
-    items = book_store.list_annotations("a", "b.pdf")["items"]
-    assert {i["type"] for i in items} == {"bookmark", "highlight"}
+    rec = book_store.add_book("a", "b.pdf", b"%PDF a", mime="application/pdf")
+    kid = rec["id"]
+    bm = book_store.add_annotation("a", kid, type="bookmark", chapter_index=1)
+    book_store.add_annotation("a", kid, type="highlight", text="quote", chapter_index=2)
+    assert {i["type"] for i in book_store.list_annotations("a", kid)["items"]} == {"bookmark", "highlight"}
     with pytest.raises(Exception):
-        book_store.add_annotation("a", "b.pdf", type="highlight", text="")  # highlight needs text
-    assert book_store.delete_annotation("a", "b.pdf", bm["id"]) is True
-    assert len(book_store.list_annotations("a", "b.pdf")["items"]) == 1
+        book_store.add_annotation("a", kid, type="highlight", text="")  # highlight needs text
+    assert book_store.delete_annotation("a", kid, bm["id"]) is True
+    assert len(book_store.list_annotations("a", kid)["items"]) == 1
 
 
-def test_delete_removes_row_bytes_and_children():
-    book_store.upsert_book("d", "gone.pdf", b"x")
-    book_store.save_progress("d", "gone.pdf", chapter_index=1)
-    book_store.add_annotation("d", "gone.pdf", type="bookmark")
-    p = book_store.resolve_book_file("d", "gone.pdf")
-    assert p.is_file()
-    assert book_store.delete_book("d", "gone.pdf") is True
-    assert not p.is_file()
-    assert book_store.get_book("d", "gone.pdf") is None
-    assert book_store.list_annotations("d", "gone.pdf")["items"] == []
-    assert book_store.delete_book("d", "gone.pdf") is False  # already gone
-
-
-def test_two_owners_same_name_dont_collide():
-    book_store.upsert_book("o1", "same.pdf", b"one")
-    book_store.upsert_book("o2", "same.pdf", b"two")
-    assert book_store.resolve_book_file("o1", "same.pdf").read_bytes() == b"one"
-    assert book_store.resolve_book_file("o2", "same.pdf").read_bytes() == b"two"
-
-
-def test_book_reader_facade_uploads_and_lists():
-    rec = book_reader.save_uploaded_book("f", "Reader.pdf", b"%PDF fake", mime="application/pdf")
-    assert rec["path"] == "Reader.pdf"
-    # index_book is best-effort (RAG stubbed) and must not raise
-    book_reader.index_book("f", "Reader.pdf")
-    names = [b["filename"] for b in book_reader.list_books("f")]
-    assert "Reader.pdf" in names
-    # rejects unsupported types
-    with pytest.raises(Exception):
-        book_reader.save_uploaded_book("f", "notabook.txt", b"x")
+def test_delete_book_removes_from_knowledge_and_clears_state():
+    rec = book_store.add_book("d", "gone.pdf", b"%PDF gone", mime="application/pdf")
+    kid = rec["id"]
+    book_store.save_progress("d", kid, chapter_index=1)
+    book_store.add_annotation("d", kid, type="bookmark")
+    assert book_store.delete_book("d", kid) is True
+    assert kb.get("d", kid) is None  # gone from Knowledge too (one store)
+    assert book_store.get_book("d", kid) is None
+    assert book_store.list_annotations("d", kid)["items"] == []
+    assert book_store.get_progress("d", kid, missing_ok=True)["chapter_index"] == 0
+    assert book_store.delete_book("d", kid) is False  # already gone

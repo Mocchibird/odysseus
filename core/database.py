@@ -320,36 +320,13 @@ class KnowledgeFile(TimestampMixin, Base):
     )
 
 
-class BookFile(TimestampMixin, Base):
-    """Native Books / E-Reader store (replaces the Obsidian-vault backend).
-    The EPUB/PDF bytes live under DATA_DIR/books/<owner-slug>/<id><ext>; this row
-    is the discovery index (the Books list). `id` = sha256(owner-slug/rel_path).
-    Full text is indexed into the shared RAG store (kind="book") so Iris can
-    search inside books — no vault, no Markdown mirrors."""
-    __tablename__ = "book_files"
-
-    id         = Column(String, primary_key=True, index=True)   # book_id = sha256(owner-slug/rel_path)
-    owner      = Column(String, nullable=True, index=True)
-    rel_path   = Column(String, nullable=False, default="")     # unique per owner; the UI's `path` identifier
-    filename   = Column(String, nullable=False, default="")
-    title      = Column(String, nullable=False, default="")     # custom title (overrides parsed); "" = use parsed
-    kind       = Column(String, nullable=True)                  # "epub" | "pdf"
-    mime       = Column(String, nullable=True)
-    size       = Column(Integer, nullable=True)
-    sha256     = Column(String(64), nullable=True, index=True)
-    excerpt    = Column(Text, nullable=True, default="")
-    indexed    = Column(Boolean, default=False)                 # RAG-indexed?
-
-    __table_args__ = (
-        Index('ix_book_files_owner_path', 'owner', 'rel_path', unique=True),
-    )
-
-
 class BookProgress(TimestampMixin, Base):
-    """Per-book reading position (one row per book). id = book_id."""
+    """Per-book reading position (one row per book). A "book" is a PDF/EPUB in the
+    Knowledge base, so `id` = the KnowledgeFile id (Books is a reading view over
+    those files; this just adds the reading state)."""
     __tablename__ = "book_progress"
 
-    id            = Column(String, primary_key=True, index=True)  # = book_id
+    id            = Column(String, primary_key=True, index=True)  # = KnowledgeFile id
     owner         = Column(String, nullable=True, index=True)
     rel_path      = Column(String, nullable=False, default="")
     title         = Column(String, nullable=False, default="")

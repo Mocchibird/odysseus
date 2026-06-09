@@ -368,6 +368,29 @@ def set_tags(owner: Optional[str], kb_id: str, tags) -> Optional[dict]:
         db.close()
 
 
+def rename(owner: Optional[str], kb_id: str, new_filename: str) -> Optional[dict]:
+    """Rename a file's display filename (owner-scoped). The stored bytes stay put
+    (their path is keyed by id, not name), so this is a cheap field update — and
+    because Books is a view over these rows, a book rename shows up in both
+    Books AND Knowledge. Returns the updated row or None."""
+    from core.database import SessionLocal, KnowledgeFile
+
+    new_filename = (new_filename or "").strip()
+    if not new_filename:
+        return None
+    db = SessionLocal()
+    try:
+        kf = db.query(KnowledgeFile).filter(KnowledgeFile.id == kb_id).first()
+        if not kf or (owner is not None and kf.owner != owner):
+            return None
+        kf.filename = new_filename[:255]
+        db.commit()
+        db.refresh(kf)
+        return _to_dict(kf)
+    finally:
+        db.close()
+
+
 def list_tags(owner: Optional[str]) -> List[str]:
     """All distinct tags (user + ai) for this owner, for UI tag facets."""
     from core.database import SessionLocal, KnowledgeFile
