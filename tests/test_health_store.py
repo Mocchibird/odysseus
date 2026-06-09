@@ -49,27 +49,44 @@ def test_owner_isolation():
 
 def test_meals_and_daily_calories():
     owner = "alice-meals"
-    hs.log_meal(owner, "Oatmeal", 350, protein_g=12)
-    hs.log_meal(owner, "Salad", 450, protein_g=20)
-    cal = hs.daily_calories(owner)
+    # Pin meals to today at a safe hour and query that same local day so the
+    # rollup is deterministic at any server UTC offset: the day window must share
+    # eaten_at's frame (see _now_iso). Bare-now defaults are covered separately
+    # by test_now_iso_is_local_frame_for_day_bucketing.
+    today = date.today().isoformat()
+    hs.log_meal(owner, "Oatmeal", 350, protein_g=12, eaten_at=f"{today}T08:00:00")
+    hs.log_meal(owner, "Salad", 450, protein_g=20, eaten_at=f"{today}T12:30:00")
+    cal = hs.daily_calories(owner, day=today)
     assert cal["total_kcal"] == 800
     assert cal["meal_count"] == 2
     assert cal["protein_g"] == 32.0
     series = hs.calorie_series(owner, days=7)
     assert len(series) == 7
-    assert series[-1]["kcal"] == 800
+    assert series[-1]["kcal"] == 800  # today's bucket
+
+
+def test_now_iso_is_local_frame_for_day_bucketing():
+    """Regression: a meal/weight/training logged "now" must bucket into today's
+    LOCAL day. _now_iso() therefore shares date.today()'s wall-clock frame — a
+    UTC timestamp here mis-bucketed entries logged near midnight and made the
+    meal-rollup tests flake when the suite ran between UTC and local midnight."""
+    assert hs._now_iso()[:10] == date.today().isoformat()
+    owner = "alice-now-frame"
+    hs.log_meal(owner, "Now", 500)  # default eaten_at = now
+    assert hs.daily_calories(owner)["total_kcal"] == 500  # default day = today
 
 
 def test_update_meal_edits_fields_and_clears_macros():
     owner = "alice-edit"
-    m = hs.log_meal(owner, "Lnch", 600, protein_g=20, carbs_g=50)
+    today = date.today().isoformat()
+    m = hs.log_meal(owner, "Lnch", 600, protein_g=20, carbs_g=50, eaten_at=f"{today}T12:00:00")
     mid = m["id"]
     upd = hs.update_meal(owner, mid, description="Lunch", kcal=550, protein_g=30, carbs_g=None)
     assert upd is not None
     assert upd["description"] == "Lunch" and upd["kcal"] == 550
     assert upd["protein_g"] == 30
     assert upd["carbs_g"] is None  # passing the key with None clears it (edit form blanks a macro)
-    assert hs.daily_calories(owner)["total_kcal"] == 550  # totals reflect the edit
+    assert hs.daily_calories(owner, day=today)["total_kcal"] == 550  # totals reflect the edit
     # owner-scoped + missing
     assert hs.update_meal("someone-else", mid, kcal=1) is None
     assert hs.update_meal(owner, 999999, kcal=1) is None
@@ -100,10 +117,12 @@ def test_manage_health_tool_update_and_delete_meal():
     from src.tool_implementations import do_manage_health
 
     owner = "tool-edit"
+    today = date.today().isoformat()
     logged = asyncio.run(do_manage_health(json.dumps({"action": "log_meal", "description": "Pizza", "kcal": 800}), owner=owner))
     mid = logged["meal"]["id"]
-    # calories enumerates the meal WITH its id (so Iris can target it)
-    cals = asyncio.run(do_manage_health(json.dumps({"action": "calories"}), owner=owner))
+    # calories enumerates the meal WITH its id (so Iris can target it). Pass the
+    # local day so the lookup is robust to the server's UTC offset.
+    cals = asyncio.run(do_manage_health(json.dumps({"action": "calories", "day": today}), owner=owner))
     assert f"#{mid}" in cals["output"]
     # update
     upd = asyncio.run(do_manage_health(json.dumps({"action": "update_meal", "meal_id": mid, "kcal": 700}), owner=owner))
@@ -112,7 +131,7 @@ def test_manage_health_tool_update_and_delete_meal():
     assert asyncio.run(do_manage_health(json.dumps({"action": "update_meal"}), owner=owner))["exit_code"] == 1
     # delete
     assert asyncio.run(do_manage_health(json.dumps({"action": "delete_meal", "meal_id": mid}), owner=owner))["exit_code"] == 0
-    assert hs.daily_calories(owner)["total_kcal"] == 0
+    assert hs.daily_calories(owner, day=today)["total_kcal"] == 0
 
 
 def test_weight_trend():

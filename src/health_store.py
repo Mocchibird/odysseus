@@ -7,7 +7,10 @@ read and write exactly the same rows. Everything is keyed by the username string
 
 Dates are plain ``YYYY-MM-DD`` strings; callers that care about "today" should
 pass the client's local date so habit check-ins land on the right day regardless
-of server timezone.
+of server timezone. Event timestamps logged "now" (meal ``eaten_at``, weight
+``measured_at``, training ``session_at`` via ``_now_iso``) are stored in
+**local wall-clock** time, not UTC, so their date prefix buckets into the same
+day as ``date.today()`` and the client's local ``day`` (see ``_now_iso``).
 """
 from __future__ import annotations
 
@@ -15,7 +18,7 @@ import csv
 import io
 import os
 from contextlib import contextmanager
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import (
@@ -62,7 +65,13 @@ def _today(day: Optional[str] = None) -> str:
 
 
 def _now_iso() -> str:
-    return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+    # Local wall-clock time, NOT UTC. Meals/weights/training are bucketed into a
+    # day by comparing this timestamp's date prefix against date.today() (server-
+    # local) and the client's local `day` (the UI sends its _todayLocal()). A UTC
+    # timestamp here put entries logged near midnight into the wrong day — e.g. a
+    # meal eaten at 21:00 local (already next-day in UTC) vanished from "today"'s
+    # calories. Storing local keeps eaten_at in the same frame as the day window.
+    return datetime.now().replace(microsecond=0).isoformat()
 
 
 # ── Habits ──────────────────────────────────────────────────────────────────
