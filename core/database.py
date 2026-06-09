@@ -310,6 +310,35 @@ class GalleryImage(TimestampMixin, Base):
     )
 
 
+class KnowledgeFile(TimestampMixin, Base):
+    """Native knowledge base: any uploaded file (pdf / image / md / docx / …)
+    indexed for keyword + RAG search, replacing the Obsidian-vault file index.
+    The bytes live in the uploads store (referenced by upload_id, served via
+    /api/upload/{id}); this row holds the extracted text, tags, and RAG state so
+    Iris can recall it AND the user can search/tag/browse it — no Obsidian/iris-mcp.
+    Tag pattern mirrors GalleryImage: `tags` (user) + `ai_tags` (LLM)."""
+    __tablename__ = "knowledge_files"
+
+    id         = Column(String, primary_key=True, index=True)
+    owner      = Column(String, nullable=True, index=True)
+    upload_id  = Column(String, nullable=True, index=True)      # uploads.json id (canonical bytes)
+    filename   = Column(String, nullable=False, default="")
+    mime       = Column(String, nullable=True)
+    file_size  = Column(Integer, nullable=True)                 # bytes
+    sha256     = Column(String(64), nullable=True, index=True)  # dedupe within an owner
+    text       = Column(Text, nullable=True, default="")        # extracted text (search + preview)
+    tags       = Column(String, nullable=True, default="")      # user tags (comma-separated)
+    ai_tags    = Column(Text, nullable=True, default="")        # LLM-generated tags (comma-separated)
+    source     = Column(String, nullable=True, default="upload")  # upload | vault-migration | …
+    indexed    = Column(Boolean, default=False)                 # RAG-indexed?
+
+    __table_args__ = (
+        Index('ix_knowledge_files_owner_created', 'owner', 'created_at'),
+        Index('ix_knowledge_files_owner_sha', 'owner', 'sha256'),
+        Index('ix_knowledge_files_tags', 'tags'),
+    )
+
+
 class EmailAccount(TimestampMixin, Base):
     """A configured IMAP/SMTP account. Supports multiple accounts per user —
     exactly one row per owner has is_default=True.

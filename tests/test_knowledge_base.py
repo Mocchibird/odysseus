@@ -1,0 +1,82 @@
+"""Functional tests for the native knowledge base (src/knowledge_base.py).
+
+Covers ingest + text extraction, content-hash dedupe, keyword + tag search,
+owner-scoping, tag editing, and delete — against the conftest in-memory SQLite.
+RAG indexing is stubbed (no ChromaDB needed); the ingest path must record + be
+searchable regardless of RAG availability.
+"""
+import pytest
+
+pytest.importorskip("sqlalchemy")
+
+from core.database import Base, engine  # noqa: E402
+from src import knowledge_base as kb  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _tables_and_no_rag(monkeypatch):
+    Base.metadata.create_all(bind=engine)
+    # Don't touch a real vector store in unit tests.
+    monkeypatch.setattr("src.rag_singleton.get_rag_manager", lambda: None)
+    yield
+
+
+def _write(tmp_path, name, content):
+    p = tmp_path / name
+    p.write_text(content, encoding="utf-8")
+    return str(p)
+
+
+def test_ingest_extracts_text_and_records(tmp_path):
+    path = _write(tmp_path, "huawei.md", "# Huawei Ascend\nThe Ascend P7 specs and notes.")
+    rec = kb.ingest("kb-ingest", file_path=path, filename="huawei.md", mime="text/markdown")
+    assert rec["filename"] == "huawei.md"
+    assert rec["owner"] == "kb-ingest"
+    assert rec["sha256"]
+    assert "Ascend" in rec["excerpt"]
+    assert rec["source"] == "upload"
+    assert rec["indexed"] is False  # RAG stubbed out -> not indexed, but still recorded
+
+
+def test_ingest_dedupes_by_content_hash(tmp_path):
+    p1 = _write(tmp_path, "a.md", "same content here")
+    r1 = kb.ingest("kb-dedupe", file_path=p1, filename="a.md")
+    # identical bytes under a different name -> same row, no duplicate
+    p2 = _write(tmp_path, "b.md", "same content here")
+    r2 = kb.ingest("kb-dedupe", file_path=p2, filename="b.md")
+    assert r1["id"] == r2["id"]
+    assert len(kb.search("kb-dedupe", q="same content")) == 1
+
+
+def test_search_by_query_and_tags_is_owner_scoped(tmp_path):
+    p1 = _write(tmp_path, "huawei.md", "Huawei Ascend phone review")
+    p2 = _write(tmp_path, "apple.md", "Apple iPhone review")
+    kb.ingest("kb-search-a", file_path=p1, filename="huawei.md", tags="phones, china")
+    kb.ingest("kb-search-a", file_path=p2, filename="apple.md", tags="phones, usa")
+    kb.ingest("kb-search-b", file_path=p1, filename="huawei.md")  # another owner's copy
+
+    # q matches extracted text (case-insensitive)
+    assert {h["filename"] for h in kb.search("kb-search-a", q="ascend")} == {"huawei.md"}
+    # tag filter narrows results
+    assert {h["filename"] for h in kb.search("kb-search-a", tags=["china"])} == {"huawei.md"}
+    # both match "review"; owner-scoped (the other owner's copy is excluded)
+    hits = kb.search("kb-search-a", q="review")
+    assert {h["filename"] for h in hits} == {"huawei.md", "apple.md"}
+    assert all(h["owner"] == "kb-search-a" for h in hits)
+
+
+def test_set_and_list_tags_owner_scoped(tmp_path):
+    path = _write(tmp_path, "x.md", "content x")
+    rec = kb.ingest("kb-tags", file_path=path, filename="x.md", tags="a, b")
+    updated = kb.set_tags("kb-tags", rec["id"], "c, d, c")  # dedupes
+    assert updated["tags"] == ["c", "d"]
+    assert kb.set_tags("kb-other", rec["id"], "hacked") is None  # can't tag another owner's file
+    assert set(kb.list_tags("kb-tags")) >= {"c", "d"}
+
+
+def test_delete_is_owner_scoped(tmp_path):
+    path = _write(tmp_path, "x.md", "deletable content")
+    rec = kb.ingest("kb-del", file_path=path, filename="x.md")
+    assert kb.delete("kb-other", rec["id"]) is False
+    assert kb.delete("kb-del", rec["id"]) is True
+    assert kb.search("kb-del", q="deletable") == []
