@@ -31877,6 +31877,7 @@ body.notes-mobile-mode.notes-drag-mode .note-card-pin.active {
   display: flex;
   flex-direction: column;
   align-items: stretch;
+  min-height: 0;
   padding: 8px;
 }
 .notes-pane-vault .notes-pane-header,
@@ -32444,32 +32445,6 @@ body.notes-mobile-mode.notes-drag-mode .note-card-pin.active {
   min-width: 0;
   max-width: none;
 }
-.notes-book-mode-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  padding: 2px;
-  border: 1px solid var(--border);
-  border-radius: 7px;
-  background: color-mix(in srgb, var(--fg) 4%, transparent);
-}
-.notes-book-mode-btn {
-  min-height: 26px;
-  border: 0;
-  border-radius: 5px;
-  padding: 0 8px;
-  background: transparent;
-  color: color-mix(in srgb, var(--fg) 66%, transparent);
-  font: inherit;
-  font-size: 11px;
-  font-weight: 700;
-  cursor: pointer;
-}
-.notes-book-mode-btn.active {
-  color: var(--fg);
-  background: color-mix(in srgb, var(--accent-primary, var(--red)) 17%, transparent);
-}
-
 /* ---- Reader tools: search / bookmark / annotations / read-aloud ---- */
 .notes-book-tools { display: inline-flex; gap: 2px; align-items: center; }
 .notes-book-tool {
@@ -32723,19 +32698,39 @@ body.notes-mobile-mode.notes-drag-mode .note-card-pin.active {
   opacity: 0.58;
 }
 .notes-book-reader-pdf {
-  min-height: min(940px, calc(100vh - 150px));
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
 }
-/* Native PDF viewer (browser's built-in) — shows the PDF as-is in an iframe.
-   Give it most of the window height for a larger reading view (#8). */
+.notes-book-content-pdf {
+  /* Override the centered reading column — the PDF viewer fills the width and is
+     its own scroll container. */
+  max-width: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+/* Continuous-scroll PDF: pdfReader.js renders PDF.js canvases into this div and
+   drives it via scrollTop + an IntersectionObserver rooted on it, so it MUST be a
+   bounded overflow scroller (NOT overflow:hidden). The flex chain bounds it to the
+   available height; max-height is a viewport fallback so it always scrolls. */
 .notes-book-pdf-viewer {
   width: 100%;
   min-width: 0;
   flex: 1 1 auto;
-  min-height: min(900px, calc(100vh - 200px));
+  min-height: 0;
+  max-height: calc(100dvh - 110px);
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
   border: 1px solid var(--border);
   border-radius: 8px;
-  overflow: hidden;
   background: color-mix(in srgb, var(--fg) 3%, transparent);
+  padding: 12px 10px;
+  box-sizing: border-box;
 }
 .notes-book-pdf-frame {
   display: block;
@@ -32841,13 +32836,6 @@ body.notes-mobile-mode.notes-drag-mode .note-card-pin.active {
     grid-column: 1 / -1;
     order: -1;
   }
-  .notes-book-mode-toggle {
-    grid-column: 1 / -1;
-    justify-self: stretch;
-  }
-  .notes-book-mode-btn {
-    flex: 1;
-  }
   .notes-book-content {
     padding: 12px 2px 34px;
     font-size: 15px;
@@ -32858,15 +32846,18 @@ body.notes-mobile-mode.notes-drag-mode .note-card-pin.active {
     padding: 2px 8px 22px;
   }
   /* Bigger reader area on mobile — less chrome, more page (#8). dvh tracks the
-     browser's collapsing toolbars better than svh/vh. */
-  .notes-book-reader-pdf {
-    min-height: calc(100dvh - 170px);
-  }
+     browser's collapsing toolbars better than svh/vh. The PDF viewer is a
+     bounded scroll container (continuous-scroll PDF.js), so cap it to the
+     viewport and let overflow-y scroll it. */
   .notes-book-pdf-viewer {
-    min-height: calc(100dvh - 230px);
+    max-height: calc(100dvh - 96px);
+    padding: 8px 4px;
   }
   .notes-book-content {
     padding: 10px 2px 28px;
+  }
+  .notes-book-content-pdf {
+    padding: 0;
   }
 }
 .notes-epub-reader {

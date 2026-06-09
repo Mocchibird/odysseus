@@ -11,6 +11,7 @@ import { makeWindowDraggable } from './windowDrag.js';
 import { snapModalToZone } from './tileManager.js';
 import { applyEdgeDock, clearDockSide } from './modalSnap.js';
 import bookToolsModule from './bookTools.js?v=370';
+import { createPdfReader } from './pdfReader.js?v=381';
 
 const API_BASE = window.location.origin;
 let _open = false;
@@ -46,7 +47,7 @@ let _bookSaveTimer = null;
 let _bookChapterLoading = false;
 let _bookAutoAdvancing = false;
 let _bookKeyHandler = null;
-let _bookReadMode = (typeof localStorage !== 'undefined' && localStorage.getItem('odysseus-books-read-mode')) || 'scroll'; // 'scroll' | 'page'
+let _bookReadMode = 'scroll'; // page-turning removed — books are always continuous-scroll (EPUB + PDF) for parity
 // PDFs always render as the native PDF (the text extraction still exists on the
 // backend for chat/search — there's just no in-reader Text toggle anymore).
 const _bookPdfViewMode = 'pdf';
@@ -720,7 +721,9 @@ function _currentBookChapter() {
 }
 
 function _bookUsesContinuousScroll() {
-  return _bookOpenBook?.kind === 'epub' && _bookReadMode === 'scroll';
+  // EPUBs always render as one continuous scroll now (page mode removed for
+  // parity with PDFs, which scroll via pdfReader.js).
+  return _bookOpenBook?.kind === 'epub';
 }
 
 function _renderBookChapterSection(chapter, index, label) {
@@ -941,15 +944,6 @@ function _scheduleBookProgressSave(scrollPercent = null) {
   _bookSaveTimer = setTimeout(() => _saveBookProgressNow(scrollPercent), 700);
 }
 
-function _setBookReadMode(mode) {
-  const next = mode === 'page' ? 'page' : 'scroll';
-  if (_bookReadMode === next) return;
-  _saveBookProgressNow();
-  _bookReadMode = next;
-  try { localStorage.setItem('odysseus-books-read-mode', next); } catch {}
-  _renderNotes();
-}
-
 async function _turnBookPage(direction = 1) {
   if (!_bookOpenBook?.chapters?.length) return;
   const dir = Number(direction || 0) < 0 ? -1 : 1;
@@ -984,9 +978,15 @@ async function _turnBookPage(direction = 1) {
 async function _setBookChapter(index, restoreProgress = false) {
   if (!_bookOpenBook?.chapters?.length) return;
   _bookChapterIndex = Math.min(Math.max(Number(index || 0), 0), _bookOpenBook.chapters.length - 1);
-  if (_bookOpenBook.kind === 'pdf' && _bookPdfViewMode !== 'text') {
-    _renderNotes();
-    requestAnimationFrame(() => _saveBookProgressNow(0));
+  if (_bookOpenBook.kind === 'pdf') {
+    // Jump within the live continuous-scroll PDF (no full re-render — keeps the
+    // already-rasterized canvases). Falls back to a rebuild if not ready yet.
+    if (_bookPdfReader) {
+      _bookPdfReader.goToPage(_bookChapterIndex + 1, { behavior: 'smooth' });
+      _scheduleBookProgressSave();
+    } else {
+      _renderNotes();
+    }
     return;
   }
   _renderNotes();
@@ -3140,15 +3140,10 @@ function _renderBookReader(body, baseHtml) {
   const navToggleHtml = hasNav ? `<button type="button" class="notes-book-tool notes-book-nav-toggle${navOpen ? ' active' : ''}" title="${label}s" aria-label="${label} navigation" aria-expanded="${navOpen}">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
         </button>` : '';
-  const modeToggleHtml = isPdf ? '' : `<div class="notes-book-mode-toggle" role="group" aria-label="Reading mode">
-          <button type="button" class="notes-book-mode-btn${_bookReadMode === 'scroll' ? ' active' : ''}" data-mode="scroll">Scroll</button>
-          <button type="button" class="notes-book-mode-btn${_bookReadMode === 'page' ? ' active' : ''}" data-mode="page">Pages</button>
-        </div>`;
+  // Page-turning removed: EPUB + PDF both render as continuous scroll — no
+  // scroll/page mode toggle and no Prev/Next buttons, just the chapter/page jump.
   const navRowHtml = hasNav ? `<div class="notes-book-nav-row">
-        <button type="button" class="notes-select-trigger notes-book-prev" ${idx <= 0 ? 'disabled' : ''}>Prev</button>
         <select class="notes-select-trigger notes-book-select" aria-label="Jump to ${label.toLowerCase()}">${options}</select>
-        <button type="button" class="notes-select-trigger notes-book-next" ${idx >= chapters.length - 1 ? 'disabled' : ''}>Next</button>
-        ${modeToggleHtml}
       </div>` : '';
   const openLinkHtml = isPdf ? `<a class="notes-book-tool notes-book-pdf-open" href="${_attrEsc(`${API_BASE}/api/books/file?path=${encodeURIComponent(book?.path || '')}`)}" target="_blank" rel="noopener" title="Open the PDF in a new tab" aria-label="Open in a new tab">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
@@ -3175,17 +3170,52 @@ function _renderBookReader(body, baseHtml) {
     </div>
     ${navRowHtml}`;
   if (isPdf) {
-    // The PDF shows as-is in the browser's native viewer; you scroll it directly.
+    // Continuous-scroll PDF via pdfReader.js (PDF.js → canvas), so multi-page
+    // PDFs scroll consistently on desktop AND mobile — the native <iframe> viewer
+    // was unreliable on mobile. Same chrome + chapter/page jump as EPUBs.
     const fileUrl = `${API_BASE}/api/books/file?path=${encodeURIComponent(book?.path || '')}`;
-    const pdfUrl = `${fileUrl}#view=FitH&page=${Math.max(1, idx + 1)}`;
+    const startPct = Math.max(0, Math.min(progressPct, 100));
     body.innerHTML = baseHtml + `<div class="notes-book-reader notes-book-reader-pdf${navOpen ? ' notes-book-nav-open' : ''}">
       ${headHtml}
-      <div class="notes-book-pdf-viewer">
-        <iframe class="notes-book-pdf-frame" src="${_attrEsc(pdfUrl)}" title="${_attrEsc(book?.title || 'PDF')}"></iframe>
-      </div>
+      <article class="notes-book-content notes-book-content-pdf">
+        <div class="notes-epub-progress-line"><span style="width:${startPct}%"></span></div>
+        <div class="notes-book-pdf-viewer"></div>
+      </article>
     </div>`;
     _wireBookReaderHead(body);
     _wireBookTools(body, { supportsSelection: false });
+    const pdfContainer = body.querySelector('.notes-book-pdf-viewer');
+    const wantPath = book?.path || '';
+    if (pdfContainer) {
+      createPdfReader(pdfContainer, {
+        url: fileUrl,
+        initialPage: (_bookChapterIndex || 0) + 1,
+        onPageChange: (p) => {
+          _bookChapterIndex = Math.max(0, p - 1);
+          const sel = body.querySelector('.notes-book-select');
+          if (sel && String(sel.value) !== String(_bookChapterIndex)) sel.value = String(_bookChapterIndex);
+        },
+        onProgress: (pct) => {
+          const line = body.querySelector('.notes-epub-progress-line span');
+          if (line) line.style.width = `${Math.max(0, Math.min(pct, 100))}%`;
+          _scheduleBookProgressSave(pct);
+        },
+      }).then((reader) => {
+        // If the user navigated away (or switched books) before PDF.js loaded,
+        // discard this reader instead of leaking it.
+        if (!document.body.contains(pdfContainer) || _bookOpenBook?.path !== wantPath) {
+          try { reader.destroy(); } catch (_) {}
+          return;
+        }
+        _bookPdfReader = reader;
+      }).catch((err) => {
+        // PDF.js failed to load/parse — fall back to the browser's native viewer
+        // so the PDF is at least openable.
+        if (!document.body.contains(pdfContainer)) return;
+        console.warn('pdfReader failed; falling back to native iframe:', err);
+        pdfContainer.innerHTML = `<iframe class="notes-book-pdf-frame" src="${_attrEsc(fileUrl + '#view=FitH')}" title="${_attrEsc(book?.title || 'PDF')}"></iframe>`;
+      });
+    }
     return;
   }
   body.innerHTML = baseHtml + `<div class="notes-book-reader notes-book-reader-${_attrEsc(_bookReadMode)}${navOpen ? ' notes-book-nav-open' : ''}">
@@ -3280,10 +3310,7 @@ function _wireBookReaderHead(body) {
     e.currentTarget.classList.toggle('active', _bookNavOpen);
     e.currentTarget.setAttribute('aria-expanded', String(_bookNavOpen));
   });
-  body.querySelector('.notes-book-prev')?.addEventListener('click', () => _setBookChapter((_bookChapterIndex || 0) - 1));
-  body.querySelector('.notes-book-next')?.addEventListener('click', () => _setBookChapter((_bookChapterIndex || 0) + 1));
   body.querySelector('.notes-book-select')?.addEventListener('change', (e) => _setBookChapter(e.target.value));
-  body.querySelectorAll('.notes-book-mode-btn[data-mode]').forEach((btn) => btn.addEventListener('click', () => _setBookReadMode(btn.dataset.mode || 'scroll')));
 }
 
 function _renderBooksFiles() {

@@ -68,9 +68,8 @@ def test_books_has_dedicated_reader_ui_hooks():
     assert "/api/books/title" in notes
     assert "/api/books/file?path=" in notes
     assert "_renameBook" in notes
-    assert "odysseus-books-read-mode" in notes
     assert "notes-book-pdf-frame" in notes
-    assert "_bookOpenBook.kind === 'pdf' && _bookPdfViewMode !== 'text'" in notes
+    assert "createPdfReader(" in notes  # continuous-scroll PDF via pdfReader.js (no native iframe)
     assert "_viewMode === 'grid' && !isVault && !isBooks" in notes
     assert "function _bookUsesContinuousScroll" in notes
     assert "function _appendNextBookChapterIfNeeded" in notes
@@ -83,7 +82,6 @@ def test_books_has_dedicated_reader_ui_hooks():
     assert "archiveToggle" in notes
     assert "viewToggle" in notes
     assert "pane?.classList.remove('notes-pane-archive')" in notes
-    assert "notes-book-mode-btn" in notes
     assert "notes-book-page" in notes
     assert "XMLHttpRequest" in notes
     assert "xhr.upload.onprogress" in notes
@@ -101,7 +99,6 @@ def test_books_has_dedicated_reader_ui_hooks():
     assert ".notes-pane-books" in css
     assert ".notes-book-content" in css
     assert ".notes-book-controls-row" in css
-    assert ".notes-book-mode-btn" in css
     assert ".notes-book-page" in css
     assert ".notes-book-upload-track" in css
     assert ".notes-book-row-title" in css
