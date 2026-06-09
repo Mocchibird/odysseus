@@ -183,3 +183,14 @@ def test_migrate_from_vault(tmp_path, monkeypatch):
     # idempotent: re-running adds nothing (content-hash dedupe)
     res2 = kb.migrate_from_vault(owner)
     assert res2["total"] == 2
+
+
+def test_ingest_audio_is_stored_without_text(tmp_path):
+    p = tmp_path / "voice.ogg"
+    p.write_bytes(b"OggS fake audio bytes")
+    rec = kb.ingest("kb-audio", file_path=str(p), filename="voice.ogg", mime="audio/ogg", tags="voicemail")
+    assert rec["filename"] == "voice.ogg"
+    assert rec["excerpt"] == ""        # no text extracted (no noisy markitdown attempt)
+    assert rec["has_file"] is True     # still stored + openable
+    # still findable by filename + tag (the deterministic path)
+    assert {h["filename"] for h in kb.search("kb-audio", tags=["voicemail"])} == {"voice.ogg"}

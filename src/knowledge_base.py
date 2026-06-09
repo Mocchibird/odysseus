@@ -30,6 +30,15 @@ _PDF_EXTS = {".pdf"}
 _OFFICE_EXTS = {".docx", ".pptx", ".xlsx", ".xls", ".epub"}
 _TEXT_EXTS = {".txt", ".md", ".markdown", ".json", ".csv", ".log",
               ".html", ".htm", ".rst", ".yaml", ".yml", ".tsv"}
+# Binary types markitdown can't turn into text — skip extraction (the file is
+# still stored + taggable, just has no searchable text) to avoid noisy
+# "filetype not supported" warnings and wasted conversion attempts.
+_SKIP_EXTS = {
+    ".ogg", ".mp3", ".wav", ".m4a", ".flac", ".aac", ".opus", ".wma",  # audio
+    ".mp4", ".mov", ".mkv", ".avi", ".webm", ".m4v", ".flv",           # video
+    ".zip", ".tar", ".gz", ".tgz", ".7z", ".rar", ".bz2",              # archives
+    ".bin", ".exe", ".dmg", ".iso", ".so", ".dll",                     # binaries
+}
 
 RAG_KIND = "knowledge"  # metadata tag so RAG recall can be scoped to the KB
 
@@ -103,6 +112,8 @@ def extract_text(file_path: str, filename: str = "", mime: str = "",
     stored + taggable)."""
     ext = os.path.splitext(filename or file_path)[1].lower()
     mime = (mime or "").lower()
+    if ext in _SKIP_EXTS or mime.startswith(("audio/", "video/")):
+        return ""  # binary/media — stored + taggable, but no text to extract
     try:
         if ext in _PDF_EXTS or mime == "application/pdf":
             from src.personal_docs import extract_pdf_text

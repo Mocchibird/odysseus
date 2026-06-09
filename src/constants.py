@@ -7,7 +7,10 @@ APP_VERSION = "1.0.0"
 # Base paths
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__))) + "/"
 STATIC_DIR = os.path.join(BASE_DIR, "static")
-DATA_DIR = os.getenv("ODYSSEUS_DATA_DIR", os.path.join(BASE_DIR, "data"))
+# `or` (not getenv's default) so an env var passed EMPTY (e.g. docker-compose
+# `${VAR:-}`) falls back to the default instead of becoming "" — an empty path
+# then crashes os.makedirs("") with "[Errno 2] No such file or directory: ''".
+DATA_DIR = os.getenv("ODYSSEUS_DATA_DIR") or os.path.join(BASE_DIR, "data")
 
 # Data file paths
 # Single source of truth: every persisted file/dir lives under DATA_DIR, which
@@ -54,8 +57,11 @@ GALLERY_UPLOADS_DIR = os.path.join(DATA_DIR, "gallery_uploads")
 MEMORY_VECTORS_DIR = os.path.join(DATA_DIR, "memory_vectors")
 
 # Paths with an intentional dedicated env override, defaulting under DATA_DIR.
-MAIL_ATTACHMENTS_DIR = os.getenv("ODYSSEUS_MAIL_ATTACHMENTS_DIR", os.path.join(DATA_DIR, "mail-attachments"))
-FASTEMBED_CACHE_DIR = os.getenv("FASTEMBED_CACHE_PATH", os.path.join(DATA_DIR, "fastembed_cache"))
+MAIL_ATTACHMENTS_DIR = os.getenv("ODYSSEUS_MAIL_ATTACHMENTS_DIR") or os.path.join(DATA_DIR, "mail-attachments")
+# docker-compose passes `FASTEMBED_CACHE_PATH=${FASTEMBED_CACHE_PATH:-}` → empty in
+# the container; `or` falls back to the default so it's never "" (which crashed
+# FastEmbed init with `os.makedirs('')` → "No such file or directory: ''").
+FASTEMBED_CACHE_DIR = os.getenv("FASTEMBED_CACHE_PATH") or os.path.join(DATA_DIR, "fastembed_cache")
 
 # Agent tool output limits (single source of truth — imported by tool_execution.py,
 # tool_implementations.py, agent_tools.py, and any other module that needs them)
