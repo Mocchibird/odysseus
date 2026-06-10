@@ -2202,6 +2202,10 @@ function initAccount() {
           body: JSON.stringify({ value: langSel.value }),
         });
       } catch (_) {}
+      // The UI language layer (js/i18n.js) reads this mirror at boot;
+      // reload so the whole interface re-renders in the new language.
+      try { localStorage.setItem('odysseus-ui-lang', langSel.value); } catch (_) {}
+      window.location.reload();
     });
   }
 

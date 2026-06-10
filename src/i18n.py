@@ -19,6 +19,7 @@ from typing import Any
 SUPPORTED_LANGUAGES = {
     "en": "English",
     "ko": "한국어",
+    "de": "Deutsch",
 }
 
 DEFAULT_LANGUAGE = "en"
@@ -50,6 +51,10 @@ _DIRECTIVES = {
         "Respond in Korean (한국어) by default. If the user writes in a "
         "different language, follow the user's language instead."
     ),
+    "de": (
+        "Respond in German (Deutsch) by default. If the user writes in a "
+        "different language, follow the user's language instead."
+    ),
 }
 
 # Email drafts should match the thread being replied to, not blindly switch.
@@ -58,6 +63,11 @@ _EMAIL_HINTS = {
         "The user's preferred language is Korean (한국어). Match the language "
         "of the email you are replying to; when the thread's language is "
         "unclear, write in Korean."
+    ),
+    "de": (
+        "The user's preferred language is German (Deutsch). Match the "
+        "language of the email you are replying to; when the thread's "
+        "language is unclear, write in German."
     ),
 }
 
@@ -199,6 +209,66 @@ _STRINGS: dict[str, dict[str, str]] = {
             "사고 과정이나 설명 없이 제목만 출력하세요."
         ),
     },
+    "de": {
+        "note_reminder_title": "Notiz-Erinnerung",
+        "reminder_fallback_title": "Erinnerung",
+        "reminder_prefix": "Erinnerung: {title}",
+        "pending_header": "Offen ({n}):",
+        "pending_header_plain": "Offen:",
+        "more_items": "...und {n} weitere",
+        "items_count": "{n} Eintrag",
+        "items_count_plural": "{n} Einträge",
+        "btn_done": "Erledigt",
+        "btn_snooze_1h": "1 Std. später",
+        "btn_tomorrow_9": "Morgen 9 Uhr",
+        "ack_dismissed": "Erinnerung verworfen.",
+        "ack_snoozed_1h": "Um 1 Stunde verschoben.",
+        "ack_snoozed_tomorrow": "Auf morgen 9:00 verschoben.",
+        "ack_title_dismissed": "Erinnerung verworfen",
+        "ack_title_snoozed": "Erinnerung verschoben",
+        "note_fallback": "Notiz",
+        "email_reminder_subject": "Erinnerung (Odysseus): {title}",
+        "urgent_email_title_one": "Dringende E-Mail",
+        "urgent_email_title_many": "{n} dringende E-Mails",
+        "urgent_email_lead_one": "1 E-Mail braucht eine dringende Antwort:",
+        "urgent_email_lead": "{n} E-Mails brauchen eine dringende Antwort:",
+        "open_email": "E-Mail öffnen:",
+        "and_n_more": "...und {n} weitere.",
+        "no_subject": "(kein Betreff)",
+        "brief_title": "Tagesbriefing — {date}",
+        "brief_calendar": "Kalender:",
+        "brief_calendar_empty": "Kalender: heute keine Termine.",
+        "brief_all_day": "ganztägig",
+        "brief_email_unread": "E-Mail: {n} ungelesen",
+        "brief_todos": "To-dos:",
+        "brief_todos_empty": "To-dos: keine offenen.",
+        "wrapup_title": "Tagesabschluss — {date}",
+        "wrapup_events": "Heute hattest du {n} Termin(e).",
+        "wrapup_still_open": "Noch offen ({n}):",
+        "wrapup_no_todos": "Keine offenen To-dos. Alles erledigt.",
+        "wrapup_tomorrow": "Morgen:",
+        "wrapup_tomorrow_empty": "Morgen: noch nichts geplant.",
+        "habits_line": "Gewohnheiten: {done}/{total} erledigt",
+        "habits_pending": " · offen: {names}",
+        "habits_all_done": " · alle erledigt",
+        "checklist_fallback": "Checkliste",
+        "untitled": "(ohne Titel)",
+        "cf_none": "Keine überfälligen Erinnerungen zum Verschieben.",
+        "cf_carried": "{n} überfällige Erinnerung(en) auf heute 09:00 verschoben:",
+        "cf_more": "  ...und {n} weitere",
+        "reminder_synthesis_prompt": (
+            "Du bist ein Erinnerungs-Assistent. Schreibe einen einzigen "
+            "kurzen, warmen, motivierenden Satz (max. 25 Wörter) auf Deutsch, "
+            "der den Nutzer an die folgende Notiz erinnert. Keine Begrüßung, "
+            "keine Einleitung, keine Hashtags. Gib nur den Satz aus."
+        ),
+        "session_title_prompt": (
+            "Erzeuge einen kurzen Titel (3-6 Wörter, ohne Anführungszeichen) "
+            "auf Deutsch für ein Gespräch, das mit dieser Nachricht beginnt. "
+            "Antworte NUR mit dem Titel, sonst nichts. Kein Denken, keine "
+            "Begründung, keine Erklärung — nur der Titel."
+        ),
+    },
 }
 
 
@@ -220,12 +290,19 @@ def count_items(n: int, lang: str = DEFAULT_LANGUAGE) -> str:
 
 
 _KO_WEEKDAYS = ["월요일", "화요일", "수요일", "목요일", "금요일", "토요일", "일요일"]
+_DE_WEEKDAYS = ["Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag", "Sonntag"]
+_DE_MONTHS = ["Januar", "Februar", "März", "April", "Mai", "Juni",
+              "Juli", "August", "September", "Oktober", "November", "Dezember"]
 
 
 def format_date(d: Any, lang: str = DEFAULT_LANGUAGE) -> str:
-    """Human date for briefs. en: 'Tuesday, June 10, 2026'; ko: '2026년 6월 10일 화요일'."""
-    if normalize_language(lang) == "ko":
+    """Human date for briefs. en 'Tuesday, June 10, 2026' · ko '2026년 6월 10일 화요일'
+    · de 'Mittwoch, 10. Juni 2026'."""
+    code = normalize_language(lang)
+    if code == "ko":
         return f"{d.year}년 {d.month}월 {d.day}일 {_KO_WEEKDAYS[d.weekday()]}"
+    if code == "de":
+        return f"{_DE_WEEKDAYS[d.weekday()]}, {d.day}. {_DE_MONTHS[d.month - 1]} {d.year}"
     return d.strftime(f"%A, %B {d.day}, %Y")
 
 

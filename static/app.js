@@ -2,6 +2,8 @@
 // Odysseus UI — Main Application Orchestrator
 // ES6 module — entry point, no exports (wires all modules together)
 // ============================================
+// UI language layer first — its observer must be live before modules render.
+import './js/i18n.js?v=400';
 import Storage from './js/storage.js';
 import uiModule from './js/ui.js';
 import fileHandlerModule from './js/fileHandler.js';
@@ -30,7 +32,7 @@ import pingsModule from './js/pings.js?v=395';
 import knowledgeModule from './js/knowledge.js?v=397';
 import todayModule from './js/today.js?v=395';
 import adminModule from './js/admin.js?v=392';
-import settingsModule from './js/settings.js?v=399';
+import settingsModule from './js/settings.js?v=400';
 // Eagerly bind unified minimize/restore behavior across all tool modals.
 import './js/modalManager.js';
 // Desktop window tiling — drag a modal near an edge/corner to snap.

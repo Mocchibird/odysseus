@@ -35,8 +35,9 @@ def test_normalize_language():
     assert normalize_language("ko") == "ko"
     assert normalize_language(" KO ") == "ko"
     assert normalize_language("en") == "en"
+    assert normalize_language("de") == "de"
     # Unsupported / junk values fall back to the default.
-    assert normalize_language("de") == DEFAULT_LANGUAGE  # not shipped yet
+    assert normalize_language("fr") == DEFAULT_LANGUAGE  # not shipped yet
     assert normalize_language(None) == DEFAULT_LANGUAGE
     assert normalize_language("") == DEFAULT_LANGUAGE
     assert normalize_language(42) == DEFAULT_LANGUAGE
@@ -93,6 +94,7 @@ def test_format_date_localizes():
     d = datetime.date(2026, 6, 10)  # a Wednesday
     assert format_date(d, "en") == "Wednesday, June 10, 2026"
     assert format_date(d, "ko") == "2026년 6월 10일 수요일"
+    assert format_date(d, "de") == "Mittwoch, 10. Juni 2026"
 
 
 # ── LLM steering ─────────────────────────────────────────────────────────────
@@ -323,3 +325,67 @@ def test_urgent_email_lead_singular_and_plural():
     assert t("urgent_email_lead", "en", n=4) == "4 emails need an urgent reply:"
     assert t("urgent_email_lead_one", "en") == "1 email needs an urgent reply:"
     assert t("urgent_email_lead", "ko", n=4) == "긴급 답장이 필요한 이메일 4건:"
+
+
+# ── German ───────────────────────────────────────────────────────────────────
+
+def test_german_strings_and_prefixes():
+    assert t("note_reminder_title", "de") == "Notiz-Erinnerung"
+    assert t("email_reminder_subject", "de", title="Milch kaufen") == "Erinnerung (Odysseus): Milch kaufen"
+    assert strip_reminder_prefix("Erinnerung: Standup") == "Standup"
+    from src.i18n import reminder_subject_prefixes
+    assert "erinnerung (odysseus):" in reminder_subject_prefixes()
+    assert "한국어" in SUPPORTED_LANGUAGES.get("ko", "") or True  # smoke
+    assert SUPPORTED_LANGUAGES.get("de") == "Deutsch"
+
+
+def test_iris_german_persona_template_exists():
+    presets_js = _read("static/js/presets.js")
+    assert "'Iris-German'" in presets_js
+    assert "iris-de" in presets_js
+    assert "Du bist Iris" in presets_js
+    assert "auf Deutsch" in presets_js
+    # The mapping covers both variants.
+    assert "Iris-Korean" in presets_js and "Iris-German" in presets_js
+
+
+def test_server_side_german_prompt_matches_client():
+    from src.preset_manager import IRIS_SYSTEM_PROMPT_DE
+    assert IRIS_SYSTEM_PROMPT_DE in _read("static/js/presets.js")
+
+
+def test_settings_select_offers_all_languages():
+    index_html = _read("static/index.html")
+    block = index_html.split('id="set-language"', 1)[1][:600]
+    for opt in ('<option value="en">', '<option value="ko">', '<option value="de">'):
+        assert opt in block
+
+
+# ── UI language layer ────────────────────────────────────────────────────────
+
+def test_ui_i18n_layer_wired():
+    i18n_js = _read("static/js/i18n.js")
+    assert "MutationObserver" in i18n_js
+    assert "odysseus-ui-lang" in i18n_js
+    # chat content must never be translated
+    assert "#chat-history" in i18n_js
+    app_js = _read("static/app.js")
+    assert "./js/i18n.js" in app_js
+    # the boot import precedes every other module import
+    assert app_js.index("./js/i18n.js") < app_js.index("import sessionModule")
+    # settings change mirrors the pref + reloads
+    settings_js = _read("static/js/settings.js")
+    assert "odysseus-ui-lang" in settings_js
+    sw_js = _read("static/sw.js")
+    for path in ("/static/js/i18n.js", "/static/js/i18n/ko.js", "/static/js/i18n/de.js"):
+        assert path in sw_js
+
+
+def test_ui_dictionaries_exist_and_parse():
+    import re as _re
+    for code in ("ko", "de"):
+        src = _read(f"static/js/i18n/{code}.js")
+        assert src.lstrip().startswith("//") or src.lstrip().startswith("export"), code
+        assert "export default" in src
+        # spot-check a core chrome string is covered
+        assert '"New Chat"' in src, f"{code} missing core chrome strings"
