@@ -2101,6 +2101,7 @@ async def do_manage_health(content: str, owner: Optional[str] = None) -> Dict:
                 protein_g=args.get("protein_g"), carbs_g=args.get("carbs_g"),
                 fat_g=args.get("fat_g"), sugar_g=args.get("sugar_g"),
                 notes=args.get("notes") or "", source="agent",
+                photo_upload_id=args.get("photo_upload_id"),
             )
             day = hs.daily_calories(ow)
             tgt = f" (today: {day['total_kcal']} kcal{', target ' + str(day['target_kcal']) if day.get('target_kcal') else ''})"
@@ -2116,7 +2117,7 @@ async def do_manage_health(content: str, owner: Optional[str] = None) -> Dict:
             if action == "delete_meal":
                 ok = hs.delete_meal(ow, mid)
                 return {"output": ("Deleted meal." if ok else "Meal not found."), "exit_code": 0 if ok else 1}
-            fields = {k: args.get(k) for k in ("description", "kcal", "protein_g", "carbs_g", "fat_g", "sugar_g", "notes")
+            fields = {k: args.get(k) for k in ("description", "kcal", "protein_g", "carbs_g", "fat_g", "sugar_g", "notes", "photo_upload_id")
                       if args.get(k) is not None}
             if not fields:
                 return {"error": "Nothing to update — pass description/kcal/protein_g/carbs_g/fat_g/sugar_g/notes.", "exit_code": 1}

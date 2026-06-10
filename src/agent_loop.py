@@ -2681,6 +2681,10 @@ async def stream_agent_loop(
             for k in ("image_url", "image_prompt", "image_model", "image_size", "image_quality"):
                 if k in result:
                     tool_output_data[k] = result[k]
+            # Forward the logged meal so the chat route can associate an attached
+            # food photo with it (manage_health log_meal returns {"meal": {...}}).
+            if block.tool_type == "manage_health" and isinstance(result.get("meal"), dict):
+                tool_output_data["meal"] = result["meal"]
             # Forward screenshots from browser tools (base64 images)
             if result.get("images"):
                 img = result["images"][0]

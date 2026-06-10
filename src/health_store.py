@@ -292,6 +292,7 @@ def _meal_dict(m: Meal) -> Dict[str, Any]:
         "sugar_g": m.sugar_g,
         "source": m.source or "manual",
         "notes": m.notes or "",
+        "photo_upload_id": m.photo_upload_id or None,
     }
 
 
@@ -309,6 +310,7 @@ def log_meal(owner: str, description: str, kcal: int, **fields) -> Dict[str, Any
             sugar_g=fields.get("sugar_g"),
             source=fields.get("source") or "manual",
             notes=(fields.get("notes") or "").strip(),
+            photo_upload_id=(fields.get("photo_upload_id") or None),
         )
         db.add(m)
         db.flush()
@@ -356,6 +358,9 @@ def update_meal(owner: str, meal_id: int, **fields) -> Optional[Dict[str, Any]]:
             m.eaten_at = fields["eaten_at"]
         if fields.get("notes") is not None:
             m.notes = str(fields["notes"]).strip()
+        if "photo_upload_id" in fields:  # truthy sets it, "" / None clears it
+            pid = fields["photo_upload_id"]
+            m.photo_upload_id = (str(pid).strip() or None) if pid else None
         db.flush()
         return _meal_dict(m)
 
@@ -489,6 +494,24 @@ def delete_weight(owner: str, entry_id: int) -> bool:
             return False
         db.delete(w)
         return True
+
+
+def update_weight(owner: str, entry_id: int, **fields) -> Optional[Dict[str, Any]]:
+    """Edit a weight entry (owner-scoped). Only the provided, non-None fields
+    change. Returns the updated dict, or None if the entry isn't found."""
+    owner = _owner(owner)
+    with _session() as db:
+        w = db.query(WeightEntry).filter(WeightEntry.owner == owner, WeightEntry.id == entry_id).first()
+        if not w:
+            return None
+        if fields.get("kg") is not None:
+            w.kg = float(fields["kg"])
+        if fields.get("measured_at"):
+            w.measured_at = fields["measured_at"]
+        if fields.get("notes") is not None:
+            w.notes = str(fields["notes"]).strip()
+        db.flush()
+        return _weight_dict(w)
 
 
 def _linfit_slope(xs: List[float], ys: List[float]) -> Optional[float]:
@@ -699,6 +722,30 @@ def delete_training(owner: str, session_id: int) -> bool:
             return False
         db.delete(t)
         return True
+
+
+def update_training(owner: str, session_id: int, **fields) -> Optional[Dict[str, Any]]:
+    """Edit a training session (owner-scoped). String fields change only when
+    provided non-None; duration_min/rpe/kcal_burned use key-presence so the edit
+    form can blank a number to clear it. Returns the dict, or None if not found."""
+    owner = _owner(owner)
+    with _session() as db:
+        t = db.query(TrainingSession).filter(
+            TrainingSession.owner == owner, TrainingSession.id == session_id
+        ).first()
+        if not t:
+            return None
+        if fields.get("kind") is not None:
+            t.kind = str(fields["kind"]).strip()
+        for k in ("duration_min", "rpe", "kcal_burned"):
+            if k in fields:  # explicit None clears it (the edit form sends all numbers)
+                setattr(t, k, fields[k])
+        if fields.get("summary") is not None:
+            t.summary = str(fields["summary"]).strip()
+        if fields.get("session_at"):
+            t.session_at = fields["session_at"]
+        db.flush()
+        return _training_dict(t)
 
 
 # ── CSV export / import ───────────────────────────────────────────────────────

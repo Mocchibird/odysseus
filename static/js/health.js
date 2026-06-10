@@ -31,15 +31,21 @@ function _macroLine(m) {
 // A meal row: click to expand its macros; ✎ to edit; ✕ to delete.
 function _mealRowHtml(m) {
   const v = (x) => (x == null ? '' : x);
-  return `<div class="health-meal" data-meal-id="${m.id}">
+  const pid = m.photo_upload_id;
+  const thumb = pid ? `<img class="health-meal-thumb" src="${API_BASE}/api/upload/${pid}?thumb=1" alt="" loading="lazy">` : '';
+  return `<div class="health-meal${pid ? ' has-photo' : ''}" data-meal-id="${m.id}">
     <div class="health-row health-meal-head" role="button" tabindex="0" data-expand-meal="${m.id}" aria-expanded="false">
-      <span class="health-meal-desc"><span class="health-meal-caret">▸</span>${esc(m.description)}</span>
+      <span class="health-meal-desc">${thumb}<span class="health-meal-caret">▸</span>${esc(m.description)}</span>
       <span class="health-meal-right">${m.kcal} kcal
         <button class="health-icon-btn" data-edit-meal="${m.id}" title="Edit entry" aria-label="Edit meal">✎</button>
         <button class="health-icon-btn" data-del-meal="${m.id}" title="Delete entry" aria-label="Delete meal">✕</button>
       </span>
     </div>
     <div class="health-meal-detail" hidden>
+      ${pid ? `<div class="health-meal-photo">
+        <a href="${API_BASE}/api/upload/${pid}" target="_blank" rel="noopener" title="Open full photo"><img src="${API_BASE}/api/upload/${pid}?thumb=1" alt="Meal photo" loading="lazy"></a>
+        <button type="button" class="health-btn-sub" data-remove-meal-photo="${m.id}">Remove photo</button>
+      </div>` : ''}
       <div class="health-meal-macros">${_macroLine(m)}${m.notes ? ` — ${esc(m.notes)}` : ''}</div>
       <form class="health-inline-form health-meal-edit" data-edit-meal-form="${m.id}" hidden>
         <input name="description" class="health-input" value="${esc(m.description)}" placeholder="Meal" aria-label="Description">
@@ -49,9 +55,76 @@ function _mealRowHtml(m) {
         <input name="fat_g" type="number" step="0.1" min="0" class="health-input health-input-sm" value="${v(m.fat_g)}" placeholder="fat g" aria-label="fat">
         <input name="sugar_g" type="number" step="0.1" min="0" class="health-input health-input-sm" value="${v(m.sugar_g)}" placeholder="sugar g" aria-label="sugar">
         <button class="health-btn" type="submit">Save</button>
-        <button type="button" class="health-btn-sub" data-cancel-edit-meal="${m.id}" style="cursor:pointer;padding:6px 12px;">Cancel</button>
+        <button type="button" class="health-btn-sub" data-cancel-edit-meal="${m.id}">Cancel</button>
       </form>
     </div>
+  </div>`;
+}
+
+// Past-days meal history (today is shown in its own card), grouped by local day.
+function _mealsHistoryHtml(meals, todayStr) {
+  const byDay = {};
+  (meals || []).forEach((m) => {
+    const d = (m.eaten_at || '').slice(0, 10);
+    if (!d || d === todayStr) return;
+    (byDay[d] = byDay[d] || []).push(m);
+  });
+  const days = Object.keys(byDay).sort().reverse();
+  if (!days.length) return '<div class="health-empty">No earlier meals logged.</div>';
+  return days.map((d) => {
+    const rows = byDay[d];
+    const tot = rows.reduce((s, m) => s + (Number(m.kcal) || 0), 0);
+    const label = new Date(d + 'T00:00:00').toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
+    return `<div class="health-day-group">
+      <div class="health-day-head"><span>${label}</span><span class="health-muted">${tot} kcal · ${rows.length} meal${rows.length === 1 ? '' : 's'}</span></div>
+      ${rows.map(_mealRowHtml).join('')}
+    </div>`;
+  }).join('');
+}
+
+// Editable weight entry (PUT/DELETE /weights/{id}).
+function _weightRowHtml(w) {
+  const d = (w.measured_at || '').slice(0, 10);
+  return `<div class="health-entry" data-weight-id="${w.id}">
+    <div class="health-row">
+      <span>${d} · <strong>${w.kg} kg</strong>${w.notes ? ` — ${esc(w.notes)}` : ''}</span>
+      <span class="health-meal-right">
+        <button class="health-icon-btn" data-edit-weight="${w.id}" title="Edit entry" aria-label="Edit weight">✎</button>
+        <button class="health-icon-btn" data-del-weight="${w.id}" title="Delete entry" aria-label="Delete weight">✕</button>
+      </span>
+    </div>
+    <form class="health-inline-form health-entry-edit" data-edit-weight-form="${w.id}" data-orig-date="${d}" hidden>
+      <input name="kg" type="number" step="0.1" min="0" class="health-input health-input-sm" value="${w.kg ?? ''}" placeholder="kg" required aria-label="kg">
+      <input name="measured_at" type="date" class="health-input" value="${d}" aria-label="date">
+      <input name="notes" class="health-input" value="${esc(w.notes || '')}" placeholder="notes" aria-label="notes">
+      <button class="health-btn" type="submit">Save</button>
+      <button type="button" class="health-btn-sub" data-cancel-edit-weight="${w.id}">Cancel</button>
+    </form>
+  </div>`;
+}
+
+// Editable training session (PUT/DELETE /training/{id}).
+function _trainingRowHtml(s) {
+  const v = (x) => (x == null ? '' : x);
+  const d = (s.session_at || '').slice(0, 10);
+  const line = `${d} · ${esc(s.kind || 'Session')}${s.duration_min ? ' · ' + s.duration_min + 'm' : ''}${s.rpe ? ' · RPE ' + s.rpe : ''}${s.kcal_burned ? ' · 🔥' + s.kcal_burned : ''}${s.summary ? ' — ' + esc(s.summary) : ''}`;
+  return `<div class="health-entry" data-train-id="${s.id}">
+    <div class="health-row">
+      <span>${line}</span>
+      <span class="health-meal-right">
+        <button class="health-icon-btn" data-edit-train="${s.id}" title="Edit entry" aria-label="Edit session">✎</button>
+        <button class="health-icon-btn" data-del-train="${s.id}" title="Delete entry" aria-label="Delete session">✕</button>
+      </span>
+    </div>
+    <form class="health-inline-form health-entry-edit" data-edit-train-form="${s.id}" hidden>
+      <input name="kind" class="health-input" value="${esc(s.kind || '')}" placeholder="Type" required aria-label="kind">
+      <input name="duration_min" type="number" min="0" class="health-input health-input-sm" value="${v(s.duration_min)}" placeholder="min" aria-label="min">
+      <input name="rpe" type="number" min="1" max="10" class="health-input health-input-sm" value="${v(s.rpe)}" placeholder="RPE" aria-label="RPE">
+      <input name="kcal_burned" type="number" min="0" class="health-input health-input-sm" value="${v(s.kcal_burned)}" placeholder="kcal 🔥" aria-label="kcal">
+      <input name="summary" class="health-input" value="${esc(s.summary || '')}" placeholder="notes" aria-label="notes">
+      <button class="health-btn" type="submit">Save</button>
+      <button type="button" class="health-btn-sub" data-cancel-edit-train="${s.id}">Cancel</button>
+    </form>
   </div>`;
 }
 
@@ -288,9 +361,10 @@ async function _renderHabits() {
 
 async function _renderWeight() {
   const b = _body(); if (!b) return;
-  let trend, profile;
-  try { [trend, profile] = await Promise.all([_api('/weights/trend?days=180'), _api('/profile')]); }
+  let trend, profile, wResp;
+  try { [trend, profile, wResp] = await Promise.all([_api('/weights/trend?days=180'), _api('/profile'), _api('/weights?days=180')]); }
   catch (e) { b.innerHTML = `<div class="health-error">${esc(e.message)}</div>`; return; }
+  const entries = wResp?.weights || [];
   const target = profile.profile?.target_kg ?? null;
   const last = trend.last_kg;
   const delta = trend.delta_kg;
@@ -321,8 +395,8 @@ async function _renderWeight() {
         <button class="health-btn" type="submit">Log weight</button>
       </form>
     </div>
-    ${(trend.series || []).length ? `<div class="health-card"><div class="health-card-head"><strong>History</strong></div>
-      <div class="health-list">${(trend.series || []).slice().reverse().slice(0, 30).map((w) => `<div class="health-row"><span>${w.day}</span><span>${w.kg} kg</span></div>`).join('')}</div></div>` : ''}`;
+    ${entries.length ? `<div class="health-card"><div class="health-card-head"><strong>History</strong> <span class="health-muted">tap ✎ to edit</span></div>
+      <div class="health-list">${entries.slice().reverse().map(_weightRowHtml).join('')}</div></div>` : ''}`;
   b.querySelector('#health-log-weight')?.addEventListener('submit', async (e) => {
     e.preventDefault();
     const kg = parseFloat(new FormData(e.target).get('kg'));
@@ -330,18 +404,44 @@ async function _renderWeight() {
     try { await _api('/weights', { method: 'POST', body: JSON.stringify({ kg }) }); _renderWeight(); }
     catch (err) { uiModule.showError?.(err.message); }
   });
+  b.querySelectorAll('[data-edit-weight]').forEach((btn) => btn.addEventListener('click', () => {
+    const item = btn.closest('.health-entry');
+    const form = item?.querySelector('.health-entry-edit');
+    if (form) { form.removeAttribute('hidden'); item.classList.add('editing'); form.querySelector('[name="kg"]')?.focus(); }
+  }));
+  b.querySelectorAll('[data-cancel-edit-weight]').forEach((btn) => btn.addEventListener('click', () => {
+    const item = btn.closest('.health-entry'); item?.classList.remove('editing');
+    item?.querySelector('.health-entry-edit')?.setAttribute('hidden', '');
+  }));
+  b.querySelectorAll('[data-del-weight]').forEach((btn) => btn.addEventListener('click', async () => {
+    try { await _api(`/weights/${btn.dataset.delWeight}`, { method: 'DELETE' }); _renderWeight(); }
+    catch (err) { uiModule.showError?.(err.message); }
+  }));
+  b.querySelectorAll('[data-edit-weight-form]').forEach((form) => form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const fd = new FormData(form);
+    const kg = parseFloat(fd.get('kg'));
+    if (!Number.isFinite(kg)) return;
+    const payload = { kg, notes: (fd.get('notes') || '').toString().trim() };
+    const newDate = (fd.get('measured_at') || '').toString();
+    if (newDate && newDate !== form.dataset.origDate) payload.measured_at = newDate;
+    try { await _api(`/weights/${form.dataset.editWeightForm}`, { method: 'PUT', body: JSON.stringify(payload) }); _renderWeight(); }
+    catch (err) { uiModule.showError?.(err.message); }
+  }));
 }
 
 async function _renderCalories() {
   const b = _body(); if (!b) return;
-  let day, series, profile;
+  let day, series, profile, histResp;
   try {
-    [day, series, profile] = await Promise.all([
+    [day, series, profile, histResp] = await Promise.all([
       _api(`/calories?date=${_todayLocal()}`),
       _api('/calories/series?days=14'),
       _api('/profile'),
+      _api('/meals?days=14'),
     ]);
   } catch (e) { b.innerHTML = `<div class="health-error">${esc(e.message)}</div>`; return; }
+  const history = histResp?.meals || [];
   const target = day.target_kcal;
   // Exercise earns back part of the burn (TRAINING_BURN_CREDIT, default 50%);
   // the budget the user eats against is the adjusted target.
@@ -388,6 +488,10 @@ async function _renderCalories() {
       ${_barChartSVG(series.series || [], { target })}
     </div>
     <div class="health-card">
+      <div class="health-card-head"><strong>History</strong> <span class="health-muted">earlier days — tap a meal to edit</span></div>
+      <div class="health-list health-meal-list">${_mealsHistoryHtml(history, _todayLocal())}</div>
+    </div>
+    <div class="health-card">
       <div class="health-card-head"><strong>Data (CSV)</strong> <span class="health-muted">export / import meals, weights, training</span></div>
       <div class="health-inline-form">
         <select id="health-csv-kind" class="health-input"><option value="meals">Meals</option><option value="weights">Weights</option><option value="training">Training</option></select>
@@ -411,6 +515,7 @@ async function _renderCalories() {
       </form>
     </details>`;
   let _pendingMacros = null;  // macros from a photo estimate, sent on the next Add
+  let _pendingPhotoId = null; // upload id of the estimated photo, associated on the next Add
   b.querySelector('#health-log-meal')?.addEventListener('submit', async (e) => {
     e.preventDefault();
     const fd = new FormData(e.target);
@@ -423,6 +528,7 @@ async function _renderCalories() {
       if (Number.isFinite(v)) payload[k] = v;
     });
     if (_pendingMacros) Object.assign(payload, _pendingMacros, { source: 'photo' });
+    if (_pendingPhotoId) payload.photo_upload_id = _pendingPhotoId;
     try { await _api('/meals', { method: 'POST', body: JSON.stringify(payload) }); _renderCalories(); }
     catch (err) { uiModule.showError?.(err.message); }
   });
@@ -444,6 +550,7 @@ async function _renderCalories() {
       if (kcalIn) kcalIn.value = est.kcal || '';
       _pendingMacros = {};
       ['protein_g', 'carbs_g', 'fat_g', 'sugar_g'].forEach((k) => { if (est[k] != null) _pendingMacros[k] = est[k]; });
+      _pendingPhotoId = data.photo_upload_id || null;
       if (note) note.textContent = `Estimated: ${est.kcal || 0} kcal${est.protein_g != null ? ` · P${Math.round(est.protein_g)} C${Math.round(est.carbs_g || 0)} F${Math.round(est.fat_g || 0)}` : ''} — review and press Add.`;
     } catch (err) {
       if (note) note.textContent = `Couldn’t estimate: ${err.message}`;
@@ -502,6 +609,11 @@ async function _renderCalories() {
     try { await _api(`/meals/${id}`, { method: 'PUT', body: JSON.stringify(payload) }); _renderCalories(); }
     catch (err) { uiModule.showError?.(err.message); }
   }));
+  b.querySelectorAll('[data-remove-meal-photo]').forEach((btn) => btn.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    try { await _api(`/meals/${btn.dataset.removeMealPhoto}`, { method: 'PUT', body: JSON.stringify({ photo_upload_id: '' }) }); _renderCalories(); }
+    catch (err) { uiModule.showError?.(err.message); }
+  }));
   // CSV export/import
   const csvKind = () => (document.getElementById('health-csv-kind')?.value || 'meals');
   b.querySelector('#health-csv-export')?.addEventListener('click', () => {
@@ -557,8 +669,8 @@ async function _renderTraining() {
       </form>
       <input name="summary" id="health-train-summary" class="health-input" placeholder="Notes (optional)" form="health-log-train" style="margin-top:6px">
     </div>
-    <div class="health-card"><div class="health-card-head"><strong>Recent sessions</strong></div>
-      <div class="health-list">${sessions.length ? sessions.map((s) => `<div class="health-row"><span>${(s.session_at || '').slice(0, 10)} · ${esc(s.kind || 'Session')}${s.duration_min ? ' · ' + s.duration_min + 'm' : ''}${s.rpe ? ' · RPE ' + s.rpe : ''}${s.kcal_burned ? ' · 🔥' + s.kcal_burned : ''}${s.summary ? ' — ' + esc(s.summary) : ''}</span><button class="health-icon-btn" data-del-train="${s.id}" aria-label="Delete">✕</button></div>`).join('') : '<div class="health-empty">No sessions logged.</div>'}</div>
+    <div class="health-card"><div class="health-card-head"><strong>Recent sessions</strong> <span class="health-muted">tap ✎ to edit</span></div>
+      <div class="health-list">${sessions.length ? sessions.map(_trainingRowHtml).join('') : '<div class="health-empty">No sessions logged.</div>'}</div>
     </div>`;
   b.querySelector('#health-log-train')?.addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -573,6 +685,25 @@ async function _renderTraining() {
   });
   b.querySelectorAll('[data-del-train]').forEach((btn) => btn.addEventListener('click', async () => {
     try { await _api(`/training/${btn.dataset.delTrain}`, { method: 'DELETE' }); _renderTraining(); }
+    catch (err) { uiModule.showError?.(err.message); }
+  }));
+  b.querySelectorAll('[data-edit-train]').forEach((btn) => btn.addEventListener('click', () => {
+    const item = btn.closest('.health-entry');
+    const form = item?.querySelector('.health-entry-edit');
+    if (form) { form.removeAttribute('hidden'); item.classList.add('editing'); form.querySelector('[name="kind"]')?.focus(); }
+  }));
+  b.querySelectorAll('[data-cancel-edit-train]').forEach((btn) => btn.addEventListener('click', () => {
+    const item = btn.closest('.health-entry'); item?.classList.remove('editing');
+    item?.querySelector('.health-entry-edit')?.setAttribute('hidden', '');
+  }));
+  b.querySelectorAll('[data-edit-train-form]').forEach((form) => form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const fd = new FormData(form);
+    const kind = (fd.get('kind') || '').toString().trim();
+    if (!kind) return;
+    const numOrNull = (k) => { const raw = (fd.get(k) ?? '').toString().trim(); const n = Number(raw); return raw === '' || !Number.isFinite(n) ? null : n; };
+    const payload = { kind, duration_min: numOrNull('duration_min'), rpe: numOrNull('rpe'), kcal_burned: numOrNull('kcal_burned'), summary: (fd.get('summary') || '').toString().trim() };
+    try { await _api(`/training/${form.dataset.editTrainForm}`, { method: 'PUT', body: JSON.stringify(payload) }); _renderTraining(); }
     catch (err) { uiModule.showError?.(err.message); }
   }));
 }

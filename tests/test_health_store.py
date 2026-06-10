@@ -202,3 +202,67 @@ def test_csv_export_import():
     n = hs.import_csv(owner, "weights", "measured_at,kg,notes\n2026-01-01T08:00:00,79.5,morning\n")
     assert n == 1
     assert any(w["kg"] == 79.5 for w in hs.list_weights(owner, days=4000))
+
+
+def test_meal_photo_upload_id_roundtrip_and_clear():
+    """A food photo (an upload id) is stored on the meal, survives re-reads, and
+    update_meal can set/replace it or clear it ("" → None) without touching it
+    when the key is omitted."""
+    owner = "alice-photo"
+    today = date.today().isoformat()
+    m = hs.log_meal(owner, "Burger", 700, eaten_at=f"{today}T12:00:00", photo_upload_id="abc123")
+    assert m["photo_upload_id"] == "abc123"
+    assert hs.list_meals(owner, day=today)[0]["photo_upload_id"] == "abc123"  # survives re-read
+    assert hs.update_meal(owner, m["id"], photo_upload_id="def456")["photo_upload_id"] == "def456"
+    assert hs.update_meal(owner, m["id"], photo_upload_id="")["photo_upload_id"] is None  # cleared
+    hs.update_meal(owner, m["id"], photo_upload_id="ghi789")
+    assert hs.update_meal(owner, m["id"], kcal=650)["photo_upload_id"] == "ghi789"  # omitted → untouched
+
+
+def test_update_weight_edits_fields_and_owner_scope():
+    owner = "alice-wedit"
+    w = hs.log_weight(owner, 80.0, measured_at=date.today().isoformat() + "T08:00:00", notes="am")
+    upd = hs.update_weight(owner, w["id"], kg=79.5, notes="after run")
+    assert upd is not None and upd["kg"] == 79.5 and upd["notes"] == "after run"
+    assert hs.update_weight(owner, w["id"], kg=79.0)["notes"] == "after run"  # omitted notes untouched
+    assert hs.update_weight("someone-else", w["id"], kg=1) is None  # owner-scoped
+    assert hs.update_weight(owner, 999999, kg=1) is None  # missing
+
+
+def test_update_training_edits_and_clears_numbers():
+    owner = "alice-tedit"
+    s = hs.log_training(owner, "Run", duration_min=30, rpe=7, kcal_burned=300, summary="easy")
+    upd = hs.update_training(owner, s["id"], kind="Tempo Run", rpe=8)
+    assert upd["kind"] == "Tempo Run" and upd["rpe"] == 8
+    assert upd["duration_min"] == 30  # omitted → untouched
+    assert hs.update_training(owner, s["id"], kcal_burned=None)["kcal_burned"] is None  # blanked → cleared
+    assert hs.update_training("someone-else", s["id"], kind="x") is None  # owner-scoped
+    assert hs.update_training(owner, 123456, kind="x") is None  # missing
+
+
+def test_link_meal_photo_helper():
+    """The chat-route helper links an attached food photo to a just-logged meal
+    only when EXACTLY ONE image is attached and the meal has no photo yet."""
+    from routes.chat_routes import _link_meal_photo
+
+    class _FakeUploads:
+        def __init__(self, image_ids):
+            self._imgs = set(image_ids)
+        def resolve_upload(self, att_id, owner=None):
+            is_img = att_id in self._imgs
+            return {"id": att_id, "name": f"{att_id}.jpg" if is_img else f"{att_id}.pdf",
+                    "mime": "image/jpeg" if is_img else "application/pdf"}
+        def is_image_file(self, name, mime=None):
+            return str(name).lower().endswith((".png", ".jpg", ".jpeg", ".webp", ".gif"))
+
+    owner = "alice-link"
+    today = date.today().isoformat()
+    m = hs.log_meal(owner, "Curry", 600, eaten_at=f"{today}T12:00:00")
+    assert _link_meal_photo(owner, m, ["img1"], _FakeUploads(["img1"])) == "img1"  # one image → links
+    assert hs.list_meals(owner, day=today)[0]["photo_upload_id"] == "img1"
+    m2 = hs.log_meal(owner, "Toast", 200, eaten_at=f"{today}T08:00:00")
+    assert _link_meal_photo(owner, m2, ["doc1"], _FakeUploads([])) is None  # no image → skip
+    m3 = hs.log_meal(owner, "Wrap", 400, eaten_at=f"{today}T13:00:00")
+    assert _link_meal_photo(owner, m3, ["img1", "img2"], _FakeUploads(["img1", "img2"])) is None  # ambiguous → skip
+    m4 = hs.log_meal(owner, "Soup", 300, eaten_at=f"{today}T19:00:00", photo_upload_id="existing")
+    assert _link_meal_photo(owner, m4, ["img9"], _FakeUploads(["img9"])) is None  # already has photo → untouched

@@ -52,7 +52,7 @@ def _parse_meal_json(text: str):
     }
 
 
-def setup_health_routes():
+def setup_health_routes(upload_handler=None):
     router = APIRouter(prefix="/api/health", tags=["health"])
 
     def _owner(request: Request) -> str:
@@ -159,7 +159,20 @@ def setup_health_routes():
         est = _parse_meal_json(text)
         if not est:
             raise HTTPException(422, "Couldn't read an estimate from the photo — try a clearer shot or log it manually.")
-        return {"ok": True, "estimate": est, "model": res.get("model", "")}
+        # Persist the photo so it can be associated with the meal when the user
+        # confirms (the UI sends this id back in POST /meals). Best-effort: a save
+        # failure must not lose the estimate the user is waiting on.
+        photo_upload_id = None
+        if upload_handler is not None:
+            try:
+                file.file.seek(0)
+                meta = upload_handler.save_upload(
+                    file, getattr(request.client, "host", "") or "", owner=owner, source="health",
+                )
+                photo_upload_id = meta.get("id")
+            except Exception:
+                photo_upload_id = None
+        return {"ok": True, "estimate": est, "model": res.get("model", ""), "photo_upload_id": photo_upload_id}
 
     @router.post("/meals")
     async def log_meal(request: Request):
@@ -167,7 +180,7 @@ def setup_health_routes():
         body = await request.json()
         meal = hs.log_meal(
             owner, body.get("description", ""), body.get("kcal", 0),
-            **{k: body.get(k) for k in ("eaten_at", "protein_g", "carbs_g", "fat_g", "sugar_g", "source", "notes")},
+            **{k: body.get(k) for k in ("eaten_at", "protein_g", "carbs_g", "fat_g", "sugar_g", "source", "notes", "photo_upload_id")},
         )
         return {"ok": True, "meal": meal}
 
@@ -177,7 +190,7 @@ def setup_health_routes():
         body = await request.json()
         meal = hs.update_meal(
             owner, meal_id,
-            **{k: body[k] for k in ("description", "kcal", "protein_g", "carbs_g", "fat_g", "sugar_g", "eaten_at", "notes") if k in body},
+            **{k: body[k] for k in ("description", "kcal", "protein_g", "carbs_g", "fat_g", "sugar_g", "eaten_at", "notes", "photo_upload_id") if k in body},
         )
         if meal is None:
             raise HTTPException(404, "Meal not found")
@@ -206,6 +219,18 @@ def setup_health_routes():
             entry = hs.log_weight(owner, body.get("kg"), measured_at=body.get("measured_at"), notes=body.get("notes", ""))
         except (ValueError, TypeError) as e:
             raise HTTPException(400, str(e) or "kg is required")
+        return {"ok": True, "weight": entry}
+
+    @router.put("/weights/{entry_id}")
+    async def update_weight(entry_id: int, request: Request):
+        owner = _owner(request)
+        body = await request.json()
+        entry = hs.update_weight(
+            owner, entry_id,
+            **{k: body[k] for k in ("kg", "measured_at", "notes") if k in body},
+        )
+        if entry is None:
+            raise HTTPException(404, "Weight entry not found")
         return {"ok": True, "weight": entry}
 
     @router.delete("/weights/{entry_id}")
@@ -239,6 +264,18 @@ def setup_health_routes():
         session = hs.log_training(owner, body.get("kind", ""), **{
             k: body.get(k) for k in ("session_at", "duration_min", "rpe", "kcal_burned", "summary")
         })
+        return {"ok": True, "session": session}
+
+    @router.put("/training/{session_id}")
+    async def update_training(session_id: int, request: Request):
+        owner = _owner(request)
+        body = await request.json()
+        session = hs.update_training(
+            owner, session_id,
+            **{k: body[k] for k in ("kind", "duration_min", "rpe", "kcal_burned", "summary", "session_at") if k in body},
+        )
+        if session is None:
+            raise HTTPException(404, "Training session not found")
         return {"ok": True, "session": session}
 
     @router.delete("/training/{session_id}")

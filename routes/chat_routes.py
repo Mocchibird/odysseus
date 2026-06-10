@@ -297,6 +297,40 @@ def _set_user_time_from_request(request: Request) -> None:
         pass
 
 
+def _link_meal_photo(owner, meal, att_ids, upload_handler):
+    """Associate a just-logged meal with the food photo the user attached.
+
+    Called when Iris logs a meal in a chat turn that carried image attachment(s).
+    The image is already a durable upload (att_ids), and the manage_health tool
+    returns the new meal — so we link them after the fact. To avoid mis-linking an
+    unrelated image, we only link when EXACTLY ONE image is attached and the meal
+    has no photo yet. Returns the linked upload id, or None. Best-effort.
+    """
+    try:
+        if not meal or not att_ids or meal.get("photo_upload_id"):
+            return None
+        meal_id = meal.get("id")
+        if not meal_id or upload_handler is None:
+            return None
+        image_ids = []
+        for att_id in att_ids:
+            try:
+                info = upload_handler.resolve_upload(att_id, owner=owner)
+            except Exception:
+                info = None
+            if info and upload_handler.is_image_file(info.get("name") or "", info.get("mime")):
+                image_ids.append(info.get("id") or att_id)
+        if len(image_ids) != 1:  # 0 or ambiguous → skip; user can attach via the panel
+            return None
+        from src import health_store as hs
+        if hs.update_meal(owner, int(meal_id), photo_upload_id=image_ids[0]):
+            return image_ids[0]
+        return None
+    except Exception:
+        logger.exception("Failed to link meal photo")
+        return None
+
+
 def setup_chat_routes(
     session_manager,
     chat_handler,
@@ -1136,6 +1170,7 @@ def setup_chat_routes(
                         _agent_url, _agent_model, _agent_headers = sess.endpoint_url, sess.model, sess.headers
                         _agent_fallbacks = _fallback_candidates
 
+                    _meal_photo_linked = False  # link an attached food photo to the first meal Iris logs this turn
                     async for chunk in stream_agent_loop(
                         _agent_url,
                         _agent_model,
@@ -1182,6 +1217,10 @@ def setup_chat_routes(
                                         _agent_rounds = max(_agent_rounds, data.get("round", 1))
                                     elif data.get("type") == "tool_start":
                                         _agent_tool_calls += 1
+                                    elif (data.get("type") == "tool_output" and data.get("tool") == "manage_health"
+                                          and data.get("meal") and att_ids and not _meal_photo_linked):
+                                        if _link_meal_photo(_user, data["meal"], att_ids, upload_handler):
+                                            _meal_photo_linked = True
                                     yield chunk
                                 elif data.get("type") == "fallback":
                                     # Selected model failed; a fallback answered.

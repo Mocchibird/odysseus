@@ -821,6 +821,25 @@ def _migrate_add_knowledge_favorite_column():
         logging.getLogger(__name__).warning(f"knowledge_files.favorite migration failed: {e}")
 
 
+def _migrate_add_meal_photo_column():
+    """Add `photo_upload_id` to meals (links an attached food photo). Guarded + idempotent."""
+    import sqlite3
+    db_path = DATABASE_URL.replace("sqlite:///", "")
+    if not os.path.exists(db_path):
+        return
+    try:
+        conn = sqlite3.connect(db_path)
+        cursor = conn.execute("PRAGMA table_info(meals)")
+        columns = [row[1] for row in cursor.fetchall()]
+        if columns and "photo_upload_id" not in columns:
+            conn.execute("ALTER TABLE meals ADD COLUMN photo_upload_id TEXT")
+            conn.commit()
+            logging.getLogger(__name__).info("Migrated: added 'photo_upload_id' to meals")
+        conn.close()
+    except Exception as e:
+        logging.getLogger(__name__).warning(f"meals.photo_upload_id migration failed: {e}")
+
+
 def _migrate_add_training_kcal_burned_column():
     """Add `kcal_burned` to training_sessions. Guarded + idempotent."""
     import sqlite3
@@ -1805,6 +1824,7 @@ class Meal(TimestampMixin, Base):
     sugar_g     = Column(Float, nullable=True)
     source      = Column(String, default="manual")
     notes       = Column(Text, default="")
+    photo_upload_id = Column(String, nullable=True)  # upload id of an attached food photo, served via /api/upload/{id}
 
 
 class WeightEntry(TimestampMixin, Base):
@@ -1918,6 +1938,7 @@ def init_db():
     _migrate_add_calendar_origin()
     _migrate_add_calendar_account_id()
     _migrate_add_meal_sugar_column()
+    _migrate_add_meal_photo_column()
     _migrate_add_knowledge_favorite_column()
     _migrate_add_training_kcal_burned_column()
     _migrate_chat_messages_fts()

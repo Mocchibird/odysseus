@@ -728,7 +728,7 @@ app.include_router(setup_note_routes(task_scheduler))
 
 # Health / Habits / Training
 from routes.health_routes import setup_health_routes
-app.include_router(setup_health_routes())
+app.include_router(setup_health_routes(upload_handler))
 
 # Pings & Reminders feed
 from routes.ping_routes import setup_ping_routes
