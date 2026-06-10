@@ -285,8 +285,8 @@ async function _renderHabits() {
           <div class="health-habit-stats">
             <span class="health-streak" title="Current streak">${_I.flame}${h.streak}</span>
             <span class="health-30d" title="Last 30 days">${h.done_30d}/30</span>
-            <button class="health-check-btn${h.done_today ? ' done' : ''}" data-check="${h.id}" title="Toggle today">${h.done_today ? _I.check + 'Done today' : 'Mark today'}</button>
-            <button class="health-check-btn health-check-yday${h.done_yesterday ? ' done' : ''}" data-check-yday="${h.id}" title="Toggle yesterday">${h.done_yesterday ? _I.check + 'Yesterday' : 'Yesterday'}</button>
+            <button class="memory-toolbar-btn health-check-btn${h.done_today ? ' active' : ''}" data-check="${h.id}" title="Toggle today">${h.done_today ? _I.check + 'Done today' : 'Mark today'}</button>
+            <button class="memory-toolbar-btn health-check-btn health-check-yday${h.done_yesterday ? ' active' : ''}" data-check-yday="${h.id}" title="Toggle yesterday">${h.done_yesterday ? _I.check + 'Yesterday' : 'Yesterday'}</button>
             <button class="memory-item-btn health-icon-btn" data-edit-habit="${h.id}" title="Edit habit (rename, icon, category)" aria-label="Edit habit">${_I.edit}</button>
             <button class="memory-item-btn delete health-icon-btn" data-del-habit="${h.id}" title="Delete habit" aria-label="Delete habit">${_I.del}</button>
           </div>

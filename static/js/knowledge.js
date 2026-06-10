@@ -174,8 +174,8 @@ async function _openDetail(id) {
     <div class="kb-detail-meta">${_esc(meta)}</div>
     <div class="kb-tags-edit">
       <div class="kb-tags-current">
-        ${userTags.map(t => `<span class="kb-chip editable" data-tag="${_esc(t)}">${_esc(t)}<button class="kb-chip-x" data-tag="${_esc(t)}" title="Remove">×</button></span>`).join('')}
-        ${aiTags.map(t => `<span class="kb-chip ai" title="auto-tag">${_esc(t)}</span>`).join('')}
+        ${userTags.map(t => `<span class="gallery-ai-chip gallery-user-chip kb-chip editable" data-tag="${_esc(t)}">${_esc(t)}<button class="gallery-tag-x kb-chip-x" data-tag="${_esc(t)}" title="Remove tag" aria-label="Remove tag">×</button></span>`).join('')}
+        ${aiTags.map(t => `<span class="gallery-ai-chip gallery-aitag-chip kb-chip ai" title="auto-tag"><span class="gallery-aitag-mark" aria-hidden="true">✦</span>${_esc(t)}</span>`).join('')}
       </div>
       <input class="memory-search-input kb-tag-input" placeholder="Add tag + Enter">
       <button class="memory-toolbar-btn kb-suggest-tags" type="button" title="AI-generate topical tags from the text"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.59 13.41 13.42 20.58a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>Suggest tags</button>

@@ -38044,13 +38044,14 @@ body.theme-frosted .modal {
 .health-card-head strong { font-size: 13px; }
 .health-big { font-size: 22px; font-weight: 700; line-height: 1; }
 .health-unit { font-size: 12px; font-weight: 500; opacity: 0.6; }
-.health-delta { font-size: 12px; font-weight: 700; padding: 1px 7px; border-radius: 999px; }
+.health-delta { font-size: 12px; font-weight: 700; padding: 1px 7px; border-radius: 10px; }
 .health-delta.down { color: var(--green); background: color-mix(in srgb, var(--green) 15%, transparent); }
 .health-delta.up { color: var(--warn); background: color-mix(in srgb, var(--warn) 15%, transparent); }
 .health-chip {
   font-size: 11px;
   padding: 2px 8px;
-  border-radius: 999px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
   background: color-mix(in srgb, var(--fg) 8%, transparent);
   opacity: 0.85;
 }
@@ -38094,25 +38095,9 @@ body.theme-frosted .modal {
 .health-habit-stats { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .health-streak { font-size: 12px; font-weight: 700; display: inline-flex; align-items: center; gap: 3px; }
 .health-30d { font-size: 11px; opacity: 0.6; }
-.health-check-btn {
-  border: 1px solid var(--border);
-  background: transparent;
-  color: var(--fg);
-  border-radius: 999px;
-  padding: 3px 11px;
-  font-size: 11px;
-  font-weight: 700;
-  cursor: pointer;
-  height: auto;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-}
-.health-check-btn.done {
-  background: color-mix(in srgb, var(--green, #50fa7b) 20%, transparent);
-  border-color: color-mix(in srgb, var(--green, #50fa7b) 45%, var(--border));
-}
-.health-check-btn:hover { border-color: color-mix(in srgb, var(--accent-primary, var(--red)) 50%, var(--border)); }
+/* Check buttons are .memory-toolbar-btn (+.active when done); only the gap
+   for the inline check icon is ours. */
+.health-check-btn { gap: 4px; }
 .health-hm-scroll { overflow-x: auto; padding-bottom: 4px; }
 .health-hm { display: block; }
 .health-hm-cell { fill: color-mix(in srgb, var(--fg) 9%, transparent); }
@@ -38189,8 +38174,8 @@ body.theme-frosted .modal {
 .health-meal-macros { font-size: 12px; color: color-mix(in srgb, var(--fg) 60%, transparent); }
 .health-meal.editing .health-meal-macros { display: none; }
 .health-meal-edit { margin-top: 6px; flex-wrap: wrap; }
-.health-check-btn.health-check-yday { font-weight: 600; opacity: 0.72; }
-.health-check-btn.health-check-yday.done { opacity: 1; }
+.health-check-btn.health-check-yday { opacity: 0.72; }
+.health-check-btn.health-check-yday.active { opacity: 1; }
 
 /* Meal photo: small row thumbnail + expanded full image with a remove button */
 .health-meal-thumb { width: 26px; height: 26px; border-radius: 5px; object-fit: cover; flex: 0 0 auto; }
@@ -38258,7 +38243,7 @@ body.theme-frosted .modal {
   text-transform: uppercase;
   letter-spacing: 0.04em;
   padding: 1px 6px;
-  border-radius: 999px;
+  border-radius: 10px;
   background: color-mix(in srgb, var(--fg) 10%, transparent);
   color: color-mix(in srgb, var(--fg) 75%, transparent);
   flex: 0 0 auto;
@@ -38530,8 +38515,10 @@ body.theme-frosted .modal {
 .kb-card-name { font-weight: 600; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .kb-card-excerpt { font-size: 11px; opacity: 0.62; line-height: 1.4; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .kb-card-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 1px; }
-.kb-chip { font-size: 10px; padding: 1px 7px; border-radius: 999px; background: color-mix(in srgb, var(--fg) 10%, transparent); opacity: 0.8; }
-.kb-chip.ai { border: 1px dashed var(--border); background: transparent; }
+.kb-chip { font-size: 10px; padding: 1px 7px; border: 1px solid var(--border); border-radius: 10px; background: color-mix(in srgb, var(--fg) 10%, transparent); opacity: 0.8; }
+/* Detail-panel chips carry the gallery tag-chip skin; the AI variant keeps a
+   dashed border to read as machine-suggested. */
+.kb-chip.ai { border-style: dashed; }
 .kb-empty { flex: 1 1 auto; display: flex; align-items: center; justify-content: center; text-align: center; opacity: 0.5; font-size: 13px; padding: 24px; }
 .kb-loading { padding: 24px; text-align: center; opacity: 0.5; }
 
@@ -38552,9 +38539,11 @@ body.theme-frosted .modal {
 .kb-detail-meta { font-size: 11px; opacity: 0.55; flex-shrink: 0; }
 .kb-tags-edit { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; flex-shrink: 0; }
 .kb-tags-current { display: flex; flex-wrap: wrap; gap: 5px; }
-.kb-chip.editable { display: inline-flex; align-items: center; gap: 3px; }
-.kb-chip-x { border: none; background: transparent; color: inherit; cursor: pointer; font-size: 13px; line-height: 1; padding: 0; opacity: 0.6; }
-.kb-chip-x:hover { opacity: 1; }
+.kb-chip.editable, .kb-chip.ai { display: inline-flex; align-items: center; background-clip: padding-box; }
+.kb-chip.editable, .kb-chip.ai { font-size: 10px; padding: 3px 8px; opacity: 0.9; }
+/* The remove control is a <button> hosting the gallery-tag-x skin — undo the
+   global button chrome so it renders as the small round x. */
+button.gallery-tag-x { height: 13px; min-height: 0; padding: 0; border: 0; background: none; color: inherit; cursor: pointer; }
 .kb-tag-input { width: 130px; flex: 0 0 auto; }
 
 /* file viewer */
