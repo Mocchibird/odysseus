@@ -315,6 +315,38 @@ def ingest(owner: Optional[str], *, file_path: str, filename: str = "",
         db.close()
 
 
+def extract_and_index(owner: Optional[str], kb_id: str) -> Optional[dict]:
+    """Finish a deferred ingest (``ingest(extract=False)``): extract text from
+    the stored bytes, RAG-index it, and update the row. Runs OFF the request
+    path — image OCR can take minutes, and the agent-tool add 504'd through
+    reverse proxies when extraction ran inline."""
+    from core.database import SessionLocal, KnowledgeFile
+
+    db = SessionLocal()
+    try:
+        kf = (
+            db.query(KnowledgeFile)
+            .filter(KnowledgeFile.id == kb_id, KnowledgeFile.owner == owner)
+            .first()
+        )
+        if not kf or not kf.path:
+            return None
+        abspath = os.path.join(_kb_files_dir(), kf.path)
+        try:
+            text = extract_text(abspath, kf.filename or "", kf.mime or "", owner=owner)
+        except Exception:
+            text = ""
+        if text:
+            kf.text = text
+        if _index_in_rag(kf):
+            kf.indexed = True
+        db.commit()
+        db.refresh(kf)
+        return _to_dict(kf)
+    finally:
+        db.close()
+
+
 def search(owner: Optional[str], q: str = "", tags=None, limit: int = 50) -> list:
     """Keyword / metadata search over the knowledge base (Gallery-style): `q`
     matches filename / extracted-text / tags / ai_tags; each entry in `tags`

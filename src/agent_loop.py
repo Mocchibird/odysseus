@@ -248,7 +248,9 @@ Read a file and return its contents.""",
 <file path>
 <file contents>
 ```
-Write content to a file. First line is the path, rest is the content.""",
+Write content to a file. First line is the path, rest is the content.
+NEVER use this to save user content/attachments — files for the user's
+knowledge base go through manage_knowledge (action=add).""",
 
     "edit_file": """\
 ```edit_file

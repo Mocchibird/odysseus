@@ -185,6 +185,10 @@ class WriteFileTool:
                     if workspace else _resolve_tool_path(raw_path))
         except ValueError as e:
             return {"error": f"write_file: {e}", "exit_code": 1}
+        from src.tool_execution import app_store_write_guard
+        _guard = app_store_write_guard(path)
+        if _guard:
+            return {"error": f"write_file: {_guard}", "exit_code": 1}
         try:
             def _write():
                 old = ""

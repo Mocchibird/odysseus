@@ -1604,23 +1604,40 @@ async def do_manage_knowledge(content: str, owner: Optional[str] = None) -> Dict
             # kind detection (image/pdf/...) stays correct.
             if "." not in filename and "." in original:
                 filename = f"{filename}.{original.rsplit('.', 1)[1]}"
+            # Store the row + bytes FAST (no extraction): image OCR can take
+            # minutes and an inline wait 504s the whole chat request through a
+            # reverse proxy. Extraction/indexing/auto-tagging run in the
+            # background right after.
             rec = await asyncio.to_thread(
                 _kb.ingest, owner,
                 file_path=info["path"], filename=filename, mime=info.get("mime"),
-                upload_id=upload_id, source="chat", tags=tags,
+                upload_id=upload_id, source="chat", tags=tags, extract=False,
             )
             if not rec or not rec.get("id"):
                 return {"error": "Failed to ingest the file into the knowledge base.", "exit_code": 1}
-            if not str(tags).strip() and not rec.get("ai_tags") and (rec.get("excerpt") or "").strip():
+            kb_id = rec["id"]
+            already_extracted = bool((rec.get("excerpt") or "").strip())
+            wants_autotag = not str(tags).strip() and not rec.get("ai_tags")
+
+            async def _finish_ingest():
                 try:
-                    await asyncio.to_thread(_kb.generate_ai_tags, owner, rec["id"])
-                except Exception:
-                    pass
+                    r2 = None
+                    if not already_extracted:
+                        r2 = await asyncio.to_thread(_kb.extract_and_index, owner, kb_id)
+                    if wants_autotag and ((r2 or rec).get("excerpt") or "").strip():
+                        await asyncio.to_thread(_kb.generate_ai_tags, owner, kb_id)
+                except Exception as _bg_e:
+                    logger.warning(f"manage_knowledge add: background indexing failed: {_bg_e}")
+
+            if not already_extracted or wants_autotag:
+                asyncio.create_task(_finish_ingest())
             tag_note = f" (tags: {', '.join(rec.get('tags') or [])})" if rec.get("tags") else ""
-            return {"output": f"Added '{rec.get('filename')}' to the knowledge base{tag_note}. "
-                              "It is stored, indexed, and searchable.",
+            indexing_note = (" Text extraction and indexing are finishing in the background — "
+                             "it will be searchable shortly." if not already_extracted else
+                             " It is stored, indexed, and searchable.")
+            return {"output": f"Added '{rec.get('filename')}' to the knowledge base{tag_note}.{indexing_note}",
                     "exit_code": 0,
-                    "file": {"id": rec.get("id"), "filename": rec.get("filename"),
+                    "file": {"id": kb_id, "filename": rec.get("filename"),
                              "tags": rec.get("tags")}}
         except Exception as e:
             return {"error": f"manage_knowledge add failed: {e}", "exit_code": 1}

@@ -86,6 +86,40 @@ def _is_sensitive_path(resolved: str) -> bool:
     return False
 
 
+def app_store_write_guard(resolved_path: str) -> "str | None":
+    """Refuse direct writes into app-owned data stores. These are managed
+    through their tools — a raw write bypasses ingest/DB/indexing (a model
+    once "saved" a knowledge file by writing a stub .md straight into the
+    store: no record, no index, broken file). The error TEACHES the right
+    tool so the agent can recover in the same turn."""
+    import os as _os
+    stores = []
+    try:
+        from src.knowledge_base import _kb_files_dir
+        stores.append((_kb_files_dir(),
+                       'the knowledge-base store. To save a file into the user\'s knowledge '
+                       'base use manage_knowledge {"action":"add","upload_id":...} with the '
+                       'upload_id from the message\'s attachment context — never write here.'))
+    except Exception:
+        pass
+    try:
+        from src.constants import BOOKS_DIR, CHROMA_DIR, UPLOAD_DIR
+        stores.append((str(CHROMA_DIR), "the vector-index store (app-managed; writing here corrupts recall)."))
+        stores.append((str(UPLOAD_DIR), "the uploads store (files appear here when the user attaches them in chat)."))
+        stores.append((str(BOOKS_DIR), "the books store. Books are added via the Books window or manage_books."))
+    except Exception:
+        pass
+    for root, hint in stores:
+        try:
+            real = _os.path.realpath(str(root))
+            common = _os.path.commonpath([resolved_path, real])
+        except (OSError, ValueError):
+            continue
+        if common == real:
+            return f"'{resolved_path}' is inside {hint}"
+    return None
+
+
 def _tool_path_roots() -> list[str]:
     """Return the list of directory roots that read_file / write_file
     may touch. Default: project data/ + system temp dirs. Extra roots
