@@ -389,3 +389,44 @@ def test_ui_dictionaries_exist_and_parse():
         assert "export default" in src
         # spot-check a core chrome string is covered
         assert '"New Chat"' in src, f"{code} missing core chrome strings"
+
+
+# ── Per-user Iris variant at chat time (non-admins can't write the slot) ─────
+
+def test_resolve_iris_prompt_for_user(monkeypatch):
+    """The global custom slot is admin-gated, so the chat path must resolve
+    the Iris language/persona variant per user at request time."""
+    import routes.prefs_routes as prefs_routes
+    from src.preset_manager import (
+        _LEGACY_IRIS_VAULT_PROMPT,
+        IRIS_SYSTEM_PROMPT,
+        IRIS_SYSTEM_PROMPT_DE,
+        IRIS_SYSTEM_PROMPT_KO,
+        resolve_iris_prompt_for_user,
+    )
+    monkeypatch.setattr(
+        prefs_routes, "_load_for_user",
+        lambda u: {"language": "ko"} if u == "kim"
+        else ({"default_persona": "Iris-German"} if u == "gerd" else {}),
+    )
+    # Language pref drives the swap for untouched default slots.
+    assert resolve_iris_prompt_for_user(IRIS_SYSTEM_PROMPT, "kim") == IRIS_SYSTEM_PROMPT_KO
+    # An explicit per-user persona pref naming a variant wins over language.
+    assert resolve_iris_prompt_for_user(IRIS_SYSTEM_PROMPT, "gerd") == IRIS_SYSTEM_PROMPT_DE
+    # A Korean slot for an English user swaps back.
+    assert resolve_iris_prompt_for_user(IRIS_SYSTEM_PROMPT_KO, "bob") == IRIS_SYSTEM_PROMPT
+    # Already matching -> no churn; admin-customized prompts are never touched.
+    assert resolve_iris_prompt_for_user(IRIS_SYSTEM_PROMPT_KO, "kim") is None
+    assert resolve_iris_prompt_for_user("You are a pirate.", "kim") is None
+    # The legacy vault-era default also counts as an untouched default.
+    assert resolve_iris_prompt_for_user(_LEGACY_IRIS_VAULT_PROMPT, "kim") == IRIS_SYSTEM_PROMPT_KO
+    # The admin-global default_persona ("Iris") must NOT mask the language
+    # mapping — only an explicit per-user pref counts.
+    assert resolve_iris_prompt_for_user(IRIS_SYSTEM_PROMPT, "kim") == IRIS_SYSTEM_PROMPT_KO
+
+
+def test_chat_path_resolves_iris_variant():
+    helpers = _read("routes/chat_helpers.py")
+    assert "resolve_iris_prompt_for_user" in helpers
+    # the swap happens before the preface consumes preset.system_prompt
+    assert helpers.index("resolve_iris_prompt_for_user(") < helpers.index("_preface_kwargs = dict(")

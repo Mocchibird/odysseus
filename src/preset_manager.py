@@ -18,6 +18,50 @@ IRIS_SYSTEM_PROMPT_KO = "당신은 Iris, 사용자의 개인 비서이자 Odysse
 # German variant ("Iris-German" in the client's PROMPT_TEMPLATES).
 IRIS_SYSTEM_PROMPT_DE = "Du bist Iris, die persönliche Assistentin des Nutzers und Begleiterin seines Odysseus-Workspace. Stütze dich bei allem, was du sagst und tust, auf seine realen Systeme — die Wissensbasis seiner hochgeladenen Dateien, seine Notizen und Dokumente und dein persistentes Gedächtnis — und behandle diese Daten mit Sorgfalt. Sei warm, direkt und pragmatisch. Hilf dem Nutzer, klar zu denken, halte Notizen und Wissen gut lesbar und bevorzuge dauerhafte, gut organisierte Aktualisierungen statt verstreuter Fragmente. Wenn du eine Notiz, Datei oder Erinnerung änderst, benenne präzise, was sich geändert hat; wenn du aus der Wissensbasis oder deinem Gedächtnis antwortest, nenne die Datei oder Quelle. Antworte standardmäßig auf Deutsch; schreibt der Nutzer in einer anderen Sprache, folge dieser Sprache."
 
+# All shipped Iris defaults by persona name. The resolver below swaps between
+# them PER USER at chat time: the global custom slot is admin-gated
+# (POST /api/presets/custom -> require_admin), so a non-admin could never
+# write their language's Iris prompt into it.
+IRIS_VARIANTS = {
+    "Iris": IRIS_SYSTEM_PROMPT,
+    "Iris-Korean": IRIS_SYSTEM_PROMPT_KO,
+    "Iris-German": IRIS_SYSTEM_PROMPT_DE,
+}
+_LANG_TO_VARIANT = {"en": "Iris", "ko": "Iris-Korean", "de": "Iris-German"}
+
+
+def resolve_iris_prompt_for_user(stored_prompt, owner) -> "str | None":
+    """Per-user variant of the DEFAULT Iris prompt.
+
+    Only acts when the stored custom-slot prompt is an UNTOUCHED known Iris
+    default (any language) — an admin-customized persona is never overridden.
+    The variant is the user's explicit per-user `default_persona` pref when it
+    names a shipped Iris variant, else the variant matching their language
+    pref. Returns the replacement prompt, or None to leave the slot's prompt.
+    """
+    current = (stored_prompt or "").strip()
+    known = set(IRIS_VARIANTS.values()) | {_LEGACY_IRIS_VAULT_PROMPT}
+    if current not in known:
+        return None
+    # Only an EXPLICIT per-user persona choice counts here — get_user_setting
+    # would fall back to the admin-global default ("Iris"), which must not
+    # mask the language mapping.
+    try:
+        from routes.prefs_routes import _load_for_user
+        persona = str((_load_for_user(str(owner or "")) or {}).get("default_persona") or "").strip()
+    except Exception:
+        persona = ""
+    if persona in IRIS_VARIANTS:
+        want = IRIS_VARIANTS[persona]
+    else:
+        try:
+            from src.i18n import get_user_language
+            want = IRIS_VARIANTS[_LANG_TO_VARIANT.get(get_user_language(owner), "Iris")]
+        except Exception:
+            return None
+    return want if want != current else None
+
+
 # The default that shipped while the Obsidian vault integration still existed.
 # load() swaps it for IRIS_SYSTEM_PROMPT (exact match only) so persisted
 # presets.json files stop instructing the model about removed systems, while

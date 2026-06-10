@@ -599,6 +599,18 @@ async def build_chat_context(
     # The stream path uses enhanced_message (with CoT/preprocessing applied),
     # the sync path uses text_for_context.
     _ctx_msg = preprocessed.enhanced_message if use_enhanced_message else preprocessed.text_for_context
+    # Per-user Iris language/persona variant. The shared custom slot is
+    # admin-gated, so non-admins can't persist their variant into it — when
+    # the slot holds an untouched default Iris prompt, resolve the variant
+    # for THIS user (their per-user persona pref, else their language).
+    if preset.system_prompt:
+        try:
+            from src.preset_manager import resolve_iris_prompt_for_user
+            _variant = resolve_iris_prompt_for_user(preset.system_prompt, user)
+            if _variant:
+                preset.system_prompt = _variant
+        except Exception:
+            pass
     _preface_kwargs = dict(
         message=_ctx_msg,
         session=sess,
