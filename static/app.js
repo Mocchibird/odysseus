@@ -29,7 +29,7 @@ import healthModule from './js/health.js?v=391';
 import pingsModule from './js/pings.js?v=370';
 import knowledgeModule from './js/knowledge.js?v=389';
 import todayModule from './js/today.js?v=370';
-import adminModule from './js/admin.js?v=380';
+import adminModule from './js/admin.js?v=392';
 import settingsModule from './js/settings.js?v=380';
 // Eagerly bind unified minimize/restore behavior across all tool modals.
 import './js/modalManager.js';
