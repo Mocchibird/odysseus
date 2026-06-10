@@ -32089,7 +32089,7 @@ body.notes-mobile-mode.notes-drag-mode .note-card-pin.active {
   gap: 8px;
 }
 .notes-pane-books .notes-vault-file.notes-book-file {
-  grid-template-columns: 44px minmax(0, 1fr) 32px;
+  grid-template-columns: 44px minmax(0, 1fr) auto auto;
   min-height: 88px;
   max-height: none;
   align-items: start;
@@ -37942,7 +37942,7 @@ body.theme-frosted .modal {
    / .notes-vault-file.notes-book-file). */
 #books-modal .notes-vault-list { gap: 8px; }
 #books-modal .notes-vault-file.notes-book-file {
-  grid-template-columns: 44px minmax(0, 1fr) 32px;
+  grid-template-columns: 44px minmax(0, 1fr) auto auto;
   min-height: 88px;
   max-height: none;
   align-items: start;
