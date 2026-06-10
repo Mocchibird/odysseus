@@ -187,6 +187,9 @@ async def auto_name_session(session_manager, sess):
             logger.debug("[auto-name] No model provided, skipping")
             return
 
+        from src.i18n import get_user_language, t as _i18n_t
+        _title_prompt = _i18n_t("session_title_prompt", get_user_language(owner))
+
         # max_tokens big enough that reasoning models (Minimax M2,
         # DeepSeek R1, QwQ, etc.) have headroom for <think>…</think>
         # plus the actual title — 200 used to clip them mid-reasoning
@@ -196,7 +199,7 @@ async def auto_name_session(session_manager, sess):
             t_url,
             t_model,
             [
-                {"role": "system", "content": "Generate a short title (3-6 words, no quotes) for a conversation that starts with this message. Reply with ONLY the title, nothing else. Do NOT include any thinking, reasoning, or explanation — just the title."},
+                {"role": "system", "content": _title_prompt},
                 {"role": "user", "content": first_msg},
             ],
             temperature=0.3,

@@ -198,6 +198,16 @@ class ChatProcessor:
                 "role": "system",
                 "content": preset_system_prompt
             })
+        # Per-user answering language (stable per user, so KV-cache safe).
+        # Agent mode gets the directive inside its own assembled prompt.
+        if not agent_mode:
+            try:
+                from src.i18n import get_user_language, language_directive
+                _lang_line = language_directive(get_user_language(owner))
+            except Exception:
+                _lang_line = ""
+            if _lang_line:
+                preface.append({"role": "system", "content": _lang_line})
         preface.append({
             "role": "system",
             "content": UNTRUSTED_CONTEXT_POLICY,

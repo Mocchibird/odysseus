@@ -2185,6 +2185,26 @@ async function initShortcuts() {
    INIT & REFRESH
    ═══════════════════════════════════════════ */
 function initAccount() {
+  // Language preference (per-user; drives Iris's reply language, the default
+  // persona for new chats, and reminder/brief localization — src/i18n.py).
+  const langSel = el('set-language');
+  if (langSel) {
+    fetch('/api/prefs/language', { credentials: 'same-origin' })
+      .then(r => (r.ok ? r.json() : null))
+      .then(d => { if (d && d.value) langSel.value = String(d.value); })
+      .catch(() => {});
+    langSel.addEventListener('change', async () => {
+      try {
+        await fetch('/api/prefs/language', {
+          method: 'PUT',
+          credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ value: langSel.value }),
+        });
+      } catch (_) {}
+    });
+  }
+
   // Populate user info
   fetch('/api/auth/status', { credentials: 'same-origin' })
     .then(r => r.json())

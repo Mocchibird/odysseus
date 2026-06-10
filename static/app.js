@@ -30,7 +30,7 @@ import pingsModule from './js/pings.js?v=395';
 import knowledgeModule from './js/knowledge.js?v=397';
 import todayModule from './js/today.js?v=395';
 import adminModule from './js/admin.js?v=392';
-import settingsModule from './js/settings.js?v=380';
+import settingsModule from './js/settings.js?v=399';
 // Eagerly bind unified minimize/restore behavior across all tool modals.
 import './js/modalManager.js';
 // Desktop window tiling — drag a modal near an edge/corner to snap.

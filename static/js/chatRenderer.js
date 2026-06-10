@@ -5,7 +5,7 @@ import uiModule from './ui.js';
 import markdownModule from './markdown.js';
 import { addAITTSButton } from './tts-ai.js';
 import { providerLogo, providerLabel } from './providers.js';
-import settingsModule from './settings.js?v=380';
+import settingsModule from './settings.js?v=399';
 import spinnerModule from './spinner.js';
 import { bindMenuDismiss } from './escMenuStack.js';
 import { matchModelKey } from './model/matchKey.js';

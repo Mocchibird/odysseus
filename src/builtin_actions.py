@@ -992,6 +992,8 @@ async def action_daily_brief(owner: str, **kwargs) -> Tuple[str, bool]:
 
         from core.database import SessionLocal, CalendarEvent, CalendarCal, Note
         from routes.email_helpers import _imap_connect, _decode_header
+        from src.i18n import format_date, get_user_language, t as _t18
+        _lang = get_user_language(owner)
 
         # ----- Calendar: today's events -----
         today = _dt.now().replace(hour=0, minute=0, second=0, microsecond=0)
@@ -1044,7 +1046,7 @@ async def action_daily_brief(owner: str, **kwargs) -> Tuple[str, bool]:
                             continue
                         hdr = msg_data[0][1] if isinstance(msg_data[0], tuple) else msg_data[0]
                         parsed = _email.message_from_bytes(hdr)
-                        subject = _decode_header(parsed.get("Subject") or "") or "(no subject)"
+                        subject = _decode_header(parsed.get("Subject") or "") or _t18("no_subject", _lang)
                         from_raw = _decode_header(parsed.get("From") or "") or "?"
                         # Extract just the display name if "Name <addr>" form
                         if "<" in from_raw:
@@ -1078,31 +1080,31 @@ async def action_daily_brief(owner: str, **kwargs) -> Tuple[str, bool]:
         # ----- Compose -----
         # %-d is GNU-only; format the day with str() so the brief works on
         # Windows / non-glibc Python builds too.
-        date_label = today.strftime(f"%A, %B {today.day}, %Y")
+        date_label = format_date(today, _lang)
 
-        plain = [f"Daily brief — {date_label}", ""]
+        plain = [_t18("brief_title", _lang, date=date_label), ""]
         if events:
-            plain.append("Calendar:")
+            plain.append(_t18("brief_calendar", _lang))
             for e in events:
-                t = e.dtstart.strftime("%H:%M") if not e.all_day else "all day"
+                t = e.dtstart.strftime("%H:%M") if not e.all_day else _t18("brief_all_day", _lang)
                 loc = f" @ {e.location}" if e.location else ""
                 plain.append(f"  {t}  {e.summary}{loc}")
             plain.append("")
         else:
-            plain.append("Calendar: nothing scheduled.")
+            plain.append(_t18("brief_calendar_empty", _lang))
             plain.append("")
 
-        plain.append(f"Email: {unread_count} unread")
+        plain.append(_t18("brief_email_unread", _lang, n=unread_count))
         for sender, subj in recent_subjects:
             plain.append(f"  · {sender} — {subj}")
         plain.append("")
 
         if todo_lines:
-            plain.append("Todos:")
+            plain.append(_t18("brief_todos", _lang))
             for t in todo_lines[:10]:
                 plain.append(f"  · {t}")
         else:
-            plain.append("Todos: none active.")
+            plain.append(_t18("brief_todos_empty", _lang))
 
         plain_body = "\n".join(plain)
 
@@ -1402,7 +1404,9 @@ async def action_ping_notes(owner: str, **kwargs) -> Tuple[str, bool]:
                             if not it.get("done") and not it.get("checked")
                         ]
                         if pending:
-                            body_parts.append("Pending:\n" + "\n".join(f"- {t}" for t in pending[:8]))
+                            from src.i18n import get_user_language as _gl, t as _t18
+                            _hdr = _t18("pending_header_plain", _gl(n.owner or owner))
+                            body_parts.append(f"{_hdr}\n" + "\n".join(f"- {t}" for t in pending[:8]))
                     except Exception:
                         pass
                 body = "\n\n".join(p for p in body_parts if p) or title
@@ -1456,6 +1460,8 @@ async def action_check_email_urgency(owner: str, **kwargs) -> Tuple[str, bool]:
 
     try:
         settings = load_settings()
+        from src.i18n import get_user_language as _gl, t as _t18
+        _lang = _gl(owner)
         import json as _json
         import email as _email_mod
         import asyncio as _aio
@@ -1574,6 +1580,15 @@ async def action_check_email_urgency(owner: str, **kwargs) -> Tuple[str, bool]:
                             _ody_origin = (msg.get("X-Odysseus-Origin") or "").strip().lower()
                             _ody_kind = (msg.get("X-Odysseus-Kind") or "").strip().lower()
                             _raw_subj = (msg.get("Subject") or "").lower()
+                            # Localized reminder subjects arrive RFC2047-
+                            # encoded on the wire — guard against the DECODED
+                            # subject across every supported language too.
+                            try:
+                                _dec_subj = _decode_header(msg.get("Subject") or "").strip().lower()
+                            except Exception:
+                                _dec_subj = _raw_subj
+                            from src.i18n import reminder_subject_prefixes as _rsp
+                            _self_prefixes = _rsp() + ("[task]",)
                             # MCP path drops custom headers (email_server's
                             # schema doesn't accept them), so we ALSO match the
                             # `[Task]` subject prefix that `_deliver_via_mcp`
@@ -1583,7 +1598,8 @@ async def action_check_email_urgency(owner: str, **kwargs) -> Tuple[str, bool]:
                             if (_ody_origin == "odysseus-ui" or _ody_kind == "reminder"
                                     or _raw_subj.startswith("reminder (odysseus):")
                                     or _raw_subj.startswith("reminder:")
-                                    or _raw_subj.startswith("[task]")):
+                                    or _raw_subj.startswith("[task]")
+                                    or _dec_subj.startswith(_self_prefixes)):
                                 # Drop this candidate entirely — don't list it
                                 # in results so its UID never enters the cache
                                 # nor counts toward `scanned`.
@@ -1679,7 +1695,7 @@ async def action_check_email_urgency(owner: str, **kwargs) -> Tuple[str, bool]:
                     e = txt.rfind("}")
                     if s < 0 or e <= s:
                         failed_classifications.append({
-                            "subject": item.get("subject") or "(no subject)",
+                            "subject": item.get("subject") or _t18("no_subject", _lang),
                             "from": item.get("from") or "",
                             "reason": "model returned no JSON",
                         })
@@ -1753,7 +1769,7 @@ async def action_check_email_urgency(owner: str, **kwargs) -> Tuple[str, bool]:
                     saved_classifications += 1
                 except Exception as e:
                     failed_classifications.append({
-                        "subject": item.get("subject") or "(no subject)",
+                        "subject": item.get("subject") or _t18("no_subject", _lang),
                         "from": item.get("from") or "",
                         "reason": str(e)[:120] or "classification failed",
                     })
@@ -1864,7 +1880,8 @@ async def action_check_email_urgency(owner: str, **kwargs) -> Tuple[str, bool]:
         newly_notified = set()
         notify_failed = set()
         if new_urgent:
-            title = "Urgent email" if total_urgent == 1 else f"{total_urgent} urgent emails"
+            title = (_t18("urgent_email_title_one", _lang) if total_urgent == 1
+                     else _t18("urgent_email_title_many", _lang, n=total_urgent))
             # Build a real listing — subject · sender · reason for each urgent
             # one — so the reminder email tells you which messages to act on,
             # not just "4 needing reply". Optional deep-link when the user has
@@ -1877,9 +1894,12 @@ async def action_check_email_urgency(owner: str, **kwargs) -> Tuple[str, bool]:
             )[:10]
             _pub = (settings.get("app_public_url") or "").strip().rstrip("/")
             from urllib.parse import quote as _quote
-            lines = [f"{total_urgent} email" + ("" if total_urgent == 1 else "s") + " need an urgent reply:", ""]
+            lines = [
+                (_t18("urgent_email_lead_one", _lang) if total_urgent == 1
+                 else _t18("urgent_email_lead", _lang, n=total_urgent)), "",
+            ]
             for i, (k, v) in enumerate(sorted_urgent, 1):
-                subj = (v.get("subject") or "(no subject)")[:160]
+                subj = (v.get("subject") or _t18("no_subject", _lang))[:160]
                 frm = v.get("from") or ""
                 why = v.get("reason") or ""
                 uid_for_link = str(k).split(":", 1)[-1]
@@ -1891,10 +1911,10 @@ async def action_check_email_urgency(owner: str, **kwargs) -> Tuple[str, bool]:
                 if why:
                     line += f"  ·  {why}"
                 lines.append(line)
-                lines.append(f"   Open email: {open_link}")
+                lines.append(f"   {_t18('open_email', _lang)} {open_link}")
             if total_urgent > len(sorted_urgent):
                 lines.append("")
-                lines.append(f"…and {total_urgent - len(sorted_urgent)} more.")
+                lines.append(_t18("and_n_more", _lang, n=total_urgent - len(sorted_urgent)))
             body = "\n".join(lines)
             try:
                 # Call dispatch_reminder DIRECTLY (no HTTP/auth roundtrip — the
@@ -1973,7 +1993,7 @@ async def action_check_email_urgency(owner: str, **kwargs) -> Tuple[str, bool]:
             head += f" · notify failed {len(notify_failed)}"
 
         def _fmt_one(v, newly_notified_set, failed_set, key):
-            subj = (v.get("subject") or "(no subject)")[:80]
+            subj = (v.get("subject") or _t18("no_subject", _lang))[:80]
             frm = v.get("from") or ""
             why = v.get("reason") or ""
             tag = " · *notified now*" if key in newly_notified_set else (" · *notify failed*" if key in failed_set else "")
@@ -2003,7 +2023,7 @@ async def action_check_email_urgency(owner: str, **kwargs) -> Tuple[str, bool]:
             lines.append("")
             lines.append(f"**Unclassified ({len(failed_classifications)}):**")
             for v in failed_classifications[:8]:
-                subj = (v.get("subject") or "(no subject)")[:80]
+                subj = (v.get("subject") or _t18("no_subject", _lang))[:80]
                 frm = v.get("from") or ""
                 why = v.get("reason") or ""
                 line = f"- **{subj}**" + (f" — _{frm}_" if frm else "")
@@ -2228,6 +2248,8 @@ async def action_evening_wrapup(owner: str, **kwargs) -> Tuple[str, bool]:
         from datetime import datetime as _dt, timedelta as _td
         import json as _json
         from core.database import SessionLocal, CalendarEvent, CalendarCal, Note
+        from src.i18n import format_date, get_user_language, t as _t18
+        _lang = get_user_language(owner)
 
         today = _dt.now().replace(hour=0, minute=0, second=0, microsecond=0)
         tomorrow = today + _td(days=1)
@@ -2260,7 +2282,7 @@ async def action_evening_wrapup(owner: str, **kwargs) -> Tuple[str, bool]:
                     items = _json.loads(n.items)
                     for it in items:
                         if not it.get("done") and it.get("text"):
-                            open_todos.append(f"{n.title or 'Checklist'}: {it['text']}")
+                            open_todos.append(f"{n.title or _t18('checklist_fallback', _lang)}: {it['text']}")
                 except Exception:
                     continue
 
@@ -2271,35 +2293,36 @@ async def action_evening_wrapup(owner: str, **kwargs) -> Tuple[str, bool]:
             if habits:
                 done = [h["name"] for h in habits if h["done_today"]]
                 pending = [h["name"] for h in habits if not h["done_today"]]
-                habit_line = f"Habits: {len(done)}/{len(habits)} done" + (
-                    f" · pending: {', '.join(pending)}" if pending else " · all done 🎉")
+                habit_line = _t18("habits_line", _lang, done=len(done), total=len(habits)) + (
+                    _t18("habits_pending", _lang, names=", ".join(pending))
+                    if pending else _t18("habits_all_done", _lang))
         except Exception:
             pass
 
-        date_label = today.strftime(f"%A, %B {today.day}, %Y")
-        out = [f"Evening wrap-up — {date_label}", ""]
-        out.append(f"Today you had {len(today_events)} event(s).")
+        date_label = format_date(today, _lang)
+        out = [_t18("wrapup_title", _lang, date=date_label), ""]
+        out.append(_t18("wrapup_events", _lang, n=len(today_events)))
         for e in today_events:
-            t = e.dtstart.strftime("%H:%M") if not e.all_day else "all day"
+            t = e.dtstart.strftime("%H:%M") if not e.all_day else _t18("brief_all_day", _lang)
             out.append(f"  {t}  {e.summary}")
         out.append("")
         if habit_line:
             out.append(habit_line)
             out.append("")
         if open_todos:
-            out.append(f"Still open ({len(open_todos)}):")
+            out.append(_t18("wrapup_still_open", _lang, n=len(open_todos)))
             for t in open_todos[:10]:
                 out.append(f"  · {t}")
         else:
-            out.append("No open todos. Nice and clear.")
+            out.append(_t18("wrapup_no_todos", _lang))
         out.append("")
         if tomorrow_events:
-            out.append("Tomorrow:")
+            out.append(_t18("wrapup_tomorrow", _lang))
             for e in tomorrow_events[:5]:
-                t = e.dtstart.strftime("%H:%M") if not e.all_day else "all day"
+                t = e.dtstart.strftime("%H:%M") if not e.all_day else _t18("brief_all_day", _lang)
                 out.append(f"  {t}  {e.summary}")
         else:
-            out.append("Tomorrow: nothing scheduled yet.")
+            out.append(_t18("wrapup_tomorrow_empty", _lang))
         return "\n".join(out), True
     except Exception as e:
         logger.error(f"evening_wrapup action failed: {e}")
@@ -2407,6 +2430,8 @@ async def action_carry_forward(owner: str, **kwargs) -> Tuple[str, bool]:
     try:
         from datetime import datetime as _dt
         from core.database import SessionLocal, Note
+        from src.i18n import get_user_language, t as _t18
+        _lang = get_user_language(owner)
 
         start = _dt.now().replace(hour=0, minute=0, second=0, microsecond=0)
         target = start.replace(hour=9)
@@ -2424,16 +2449,16 @@ async def action_carry_forward(owner: str, **kwargs) -> Tuple[str, bool]:
                 if due is None or due >= start:
                     continue  # only strictly-overdue reminders
                 n.due_date = target.isoformat(timespec="minutes")
-                moved.append(n.title or "(untitled)")
+                moved.append(n.title or _t18("untitled", _lang))
             if moved:
                 db.commit()
         finally:
             db.close()
         if not moved:
-            return "No overdue reminders to carry forward.", True
+            return _t18("cf_none", _lang), True
         body = "\n".join(f"  · {t}" for t in moved[:20])
-        more = f"\n  …and {len(moved) - 20} more" if len(moved) > 20 else ""
-        return f"Carried {len(moved)} overdue reminder(s) forward to today 09:00:\n{body}{more}", True
+        more = "\n" + _t18("cf_more", _lang, n=len(moved) - 20) if len(moved) > 20 else ""
+        return _t18("cf_carried", _lang, n=len(moved)) + f"\n{body}{more}", True
     except Exception as e:
         logger.error(f"carry_forward action failed: {e}")
         return str(e), False

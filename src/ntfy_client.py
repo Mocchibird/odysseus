@@ -88,6 +88,33 @@ def _apply_auth(
     return url, None
 
 
+def _ascii_safe(value: str) -> bool:
+    """httpx rejects any non-ASCII header value (encodes headers as ASCII),
+    so the header publish path is only safe for pure-ASCII title/actions."""
+    try:
+        str(value).encode("ascii")
+        return True
+    except (UnicodeEncodeError, AttributeError):
+        return False
+
+
+def _actions_header(actions: list) -> str:
+    """Format structured actions as the simple ntfy ``Actions`` header value."""
+    parts = []
+    for a in actions:
+        bits = [f"action={a.get('action', 'http')}", f"label={a.get('label', '')}", f"url={a.get('url', '')}"]
+        if a.get("method"):
+            bits.append(f"method={a['method']}")
+        if a.get("clear"):
+            bits.append("clear=true")
+        parts.append(", ".join(bits))
+    return "; ".join(parts)
+
+
+# ntfy's JSON publish endpoint wants numeric priorities.
+_PRIORITY_NUM = {"max": 5, "urgent": 5, "high": 4, "default": 3, "low": 2, "min": 1}
+
+
 async def send_ntfy_notification(
     integration: Dict[str, Any],
     topic: str,
@@ -96,13 +123,19 @@ async def send_ntfy_notification(
     title: str = "Iris",
     priority: str = "high",
     tags: str = "bell",
-    actions: Optional[str] = None,
+    actions: Optional[Any] = None,
     timeout: float = 10.0,
 ) -> Dict[str, Any]:
     """Send a plain-text ntfy notification through a saved integration.
 
-    ``actions`` is an optional ntfy ``Actions`` header value (e.g. snooze/done
-    http buttons) — see https://docs.ntfy.sh/publish/#action-buttons.
+    ``actions`` is either a prebuilt ntfy ``Actions`` header string or a list
+    of action dicts ({action,label,url,method,clear}) — see
+    https://docs.ntfy.sh/publish/#action-buttons.
+
+    HTTP header values must be ASCII (httpx refuses anything else), so when
+    the title or action labels carry non-ASCII text (Korean reminders, accented
+    titles) the notification is published through ntfy's JSON endpoint instead,
+    which is full UTF-8. The message body is UTF-8 on both paths.
     """
     base_url = str(integration.get("base_url") or "").rstrip("/")
     clean_topic = str(topic or "").strip()
@@ -114,21 +147,56 @@ async def send_ntfy_notification(
     if not clean_message:
         return {"error": "message is required", "exit_code": 1}
 
-    headers: Dict[str, str] = {
-        "Title": str(title or "Iris")[:120],
-        "Priority": str(priority or "high"),
-    }
-    if tags:
-        headers["Tags"] = str(tags)
-    if actions:
-        headers["Actions"] = str(actions)
+    clean_title = str(title or "Iris")[:120]
+    action_list = actions if isinstance(actions, list) else None
+    action_text = (
+        _actions_header(action_list) if action_list is not None
+        else (str(actions) if actions else "")
+    )
+    needs_json = not _ascii_safe(clean_title) or (action_text and not _ascii_safe(action_text))
 
-    url = f"{base_url}/{quote(clean_topic, safe='')}"
+    headers: Dict[str, str] = {}
+    if needs_json:
+        # JSON publish: topic/title/actions ride in the UTF-8 body.
+        url = base_url
+        payload: Dict[str, Any] = {
+            "topic": clean_topic,
+            "message": clean_message,
+            "title": clean_title,
+            "priority": _PRIORITY_NUM.get(str(priority or "high").lower(), 4),
+        }
+        if tags:
+            payload["tags"] = [t.strip() for t in str(tags).split(",") if t.strip()]
+        if action_list is not None:
+            payload["actions"] = action_list
+        elif action_text and _ascii_safe(action_text):
+            # A prebuilt header string can't be structured for the JSON body —
+            # attach it as a header only when transport-safe; otherwise drop
+            # the buttons rather than failing the whole push.
+            headers["Actions"] = action_text
+    else:
+        url = f"{base_url}/{quote(clean_topic, safe='')}"
+        headers = {
+            "Title": clean_title,
+            "Priority": str(priority or "high"),
+        }
+        if tags:
+            headers["Tags"] = str(tags)
+        if action_text:
+            headers["Actions"] = action_text
+
     url, auth = _apply_auth(integration, url, headers)
 
     try:
         async with httpx.AsyncClient(timeout=timeout) as client:
-            response = await client.post(url, content=clean_message, headers=headers, auth=auth)
+            if needs_json:
+                import json as _json
+                response = await client.post(
+                    url, content=_json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+                    headers=headers, auth=auth,
+                )
+            else:
+                response = await client.post(url, content=clean_message, headers=headers, auth=auth)
     except Exception as exc:
         return {"error": f"ntfy ping failed: {exc}", "exit_code": 1}
 

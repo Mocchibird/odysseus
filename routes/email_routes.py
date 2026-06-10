@@ -1875,6 +1875,18 @@ def setup_email_routes():
                             # "Reminder: ..."; include them in Clear without
                             # sweeping unrelated external reminder emails.
                             uids.update(_search_uids(conn, f'(FROM {addr_q} SUBJECT {_search_quote("Reminder:")})'))
+                        # Localized reminders (e.g. Korean "알림 (Odysseus):").
+                        # Non-ASCII IMAP SEARCH is server-dependent, so each
+                        # sweep is best-effort — header-based matching above
+                        # remains the primary path.
+                        from src.i18n import reminder_subject_prefixes
+                        for _pfx in reminder_subject_prefixes():
+                            if _pfx.isascii():
+                                continue  # English prefixes already swept
+                            try:
+                                uids.update(_search_uids(conn, f'(SUBJECT {_search_quote(_pfx)})'))
+                            except Exception:
+                                pass
                         if not uids:
                             continue
                         for uid in sorted(uids, key=lambda b: int(b)):
@@ -2783,6 +2795,13 @@ def setup_email_routes():
                     logger.warning(f"sender-thread-context failed: {_e}")
 
             system_prompt = _EMAIL_REPLY_SYS_PROMPT_BASE
+            try:
+                from src.i18n import email_language_hint, get_user_language
+                _lang_hint = email_language_hint(get_user_language(owner))
+            except Exception:
+                _lang_hint = ""
+            if _lang_hint:
+                system_prompt += f"\n\n{_lang_hint}"
             if style:
                 system_prompt += f"\n\nWRITING STYLE TO MATCH:\n{style}"
             if context_snippets:

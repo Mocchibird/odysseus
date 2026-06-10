@@ -2292,8 +2292,8 @@ async def do_manage_notes(content: str, owner: Optional[str] = None) -> Dict:
     db = SessionLocal()
 
     def _norm_note_title(value: str) -> str:
-        text = (value or "").strip().lower()
-        text = re.sub(r"^\s*reminder\s*:\s*", "", text)
+        from src.i18n import strip_reminder_prefix
+        text = strip_reminder_prefix(value or "").lower()
         return re.sub(r"\s+", " ", text)
 
     def _note_visible_to_owner(note, owner_value: Optional[str]) -> bool:
@@ -2618,16 +2618,17 @@ async def do_manage_calendar(content: str, owner: Optional[str] = None) -> Dict:
         loc = f" @ {location}" if location else ""
         text = f"{summary}{loc} — {start_fmt}"
         due_date = remind_at.isoformat() + ("Z" if is_utc else "")
-        expected_title = f"Reminder: {summary}"
+        from src.i18n import get_user_language as _gl, strip_reminder_prefix as _strip_rp, t as _t18
+        expected_title = _t18("reminder_prefix", _gl(owner), title=summary)
         existing_q = db.query(Note).filter(
             Note.archived == False,  # noqa: E712
             Note.due_date == due_date,
         )
         if owner is not None:
             existing_q = existing_q.filter(Note.owner == owner)
-        target_title = re.sub(r"^\s*reminder\s*:\s*", "", expected_title.strip().lower())
+        target_title = _strip_rp(expected_title).lower()
         for existing in existing_q.limit(25).all():
-            existing_title = re.sub(r"^\s*reminder\s*:\s*", "", (existing.title or "").strip().lower())
+            existing_title = _strip_rp(existing.title or "").lower()
             if existing_title == target_title:
                 return existing.id, "duplicate reminder already exists"
         note = Note(

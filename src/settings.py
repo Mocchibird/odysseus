@@ -121,6 +121,9 @@ DEFAULT_SETTINGS = {
     "default_endpoint_id": "",
     "default_model": "",
     "default_persona": "Iris",
+    # Preferred output language for the assistant + notifications (en/ko).
+    # Per-user override via _PER_USER_KEYS; see src/i18n.py.
+    "language": "en",
     # Admin-set GLOBAL allowlist of model ids that NON-ADMIN users may use for
     # chat & agent. Empty = no restriction (every enabled endpoint's models show
     # in their picker, current behavior). When non-empty: non-admins' model
@@ -267,6 +270,8 @@ _PER_USER_KEYS = {
     # got injected into the chat composer on first open.
     "default_endpoint_id", "default_model", "default_model_fallbacks",
     "default_persona",
+    # Assistant/notification language is personal (en/ko, see src/i18n.py).
+    "language",
     "utility_endpoint_id", "utility_model", "utility_model_fallbacks",
     "research_endpoint_id", "research_model",
     # Reminder delivery is personal: one user may want browser-only alerts,

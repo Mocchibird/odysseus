@@ -96,9 +96,11 @@ def _note_to_dict(note: Note) -> Dict[str, Any]:
     }
 
 
-def _reminder_text_from_note(note: Note) -> tuple[str, str]:
+def _reminder_text_from_note(note: Note, lang: str = "en") -> tuple[str, str]:
     """Return the reminder title/body from a stored note row."""
-    title = (note.title or "Note reminder").strip() or "Note reminder"
+    from src.i18n import count_items, t as _t18
+    default_title = _t18("note_reminder_title", lang)
+    title = (note.title or default_title).strip() or default_title
     if note.items:
         try:
             items = json.loads(note.items)
@@ -116,9 +118,9 @@ def _reminder_text_from_note(note: Note) -> tuple[str, str]:
                     pending.append(text)
             if pending:
                 shown = "\n".join(f"- {text}" for text in pending[:8])
-                extra = f"\n...and {len(pending) - 8} more" if len(pending) > 8 else ""
-                return title, f"Pending ({len(pending)}):\n{shown}{extra}"
-            return title, f"{len(items)} item{'s' if len(items) != 1 else ''}"
+                extra = "\n" + _t18("more_items", lang, n=len(pending) - 8) if len(pending) > 8 else ""
+                return title, f"{_t18('pending_header', lang, n=len(pending))}\n{shown}{extra}"
+            return title, count_items(len(items), lang)
     return title, (note.content or "").strip()[:400]
 
 
@@ -151,11 +153,13 @@ def _reminder_ntfy_actions(note_id, owner):
     except Exception:
         return None
     url = f"{base}/api/notes/reminder-action?token={tok}"
-    return "; ".join([
-        f"action=http, label=Done, url={url}&do=done, method=POST, clear=true",
-        f"action=http, label=Snooze 1h, url={url}&do=snooze1h, method=POST, clear=true",
-        f"action=http, label=Tomorrow 9am, url={url}&do=tomorrow, method=POST, clear=true",
-    ])
+    from src.i18n import get_user_language, t as _t18
+    lang = get_user_language(owner)
+    return [
+        {"action": "http", "label": _t18("btn_done", lang), "url": f"{url}&do=done", "method": "POST", "clear": True},
+        {"action": "http", "label": _t18("btn_snooze_1h", lang), "url": f"{url}&do=snooze1h", "method": "POST", "clear": True},
+        {"action": "http", "label": _t18("btn_tomorrow_9", lang), "url": f"{url}&do=tomorrow", "method": "POST", "clear": True},
+    ]
 
 
 def _clear_note_ping_cache(owner, note_id):
@@ -197,6 +201,8 @@ async def dispatch_reminder(
     nothing is "sent" synchronously for it — the channel just routes there.
     """
     from src.settings import get_user_setting, load_settings
+    from src.i18n import get_user_language as _get_lang, t as _i18n_t
+    _lang = _get_lang(owner)
     settings = {**load_settings(), **(settings_override or {})}
 
     def _setting(key: str, default=None):
@@ -274,7 +280,7 @@ async def dispatch_reminder(
                 raw = await llm_call_async(
                     url=url, model=model,
                     messages=[
-                        {"role": "system", "content": "You are a reminder assistant. Write a single short, warm, motivating sentence (max 25 words) reminding the user about the note below. Do not add greetings, preamble, or hashtags. Output only the sentence."},
+                        {"role": "system", "content": _i18n_t("reminder_synthesis_prompt", _lang)},
                         {"role": "user", "content": f"Title: {title}\n\n{note_body}".strip()},
                     ],
                     temperature=0.7, max_tokens=200, headers=headers, timeout=30,
@@ -416,9 +422,10 @@ async def dispatch_reminder(
                 msg = MIMEMultipart("alternative")
                 msg["From"] = from_addr
                 msg["To"] = recipient
-                _t = title or 'Note'
-                _t = _t[len('Reminder:'):].strip() if _t.lower().startswith('reminder:') else _t
-                msg["Subject"] = f"Reminder (Odysseus): {_t}"
+                from src.i18n import strip_reminder_prefix as _strip_rp
+                _nf = _i18n_t("note_fallback", _lang)
+                _t = _strip_rp(title or _nf) or _nf
+                msg["Subject"] = _i18n_t("email_reminder_subject", _lang, title=_t)
                 msg["Date"] = _dt.utcnow().strftime("%a, %d %b %Y %H:%M:%S +0000")
                 msg["X-Odysseus-Origin"] = "odysseus-ui"
                 msg["X-Odysseus-Kind"] = "reminder"
@@ -484,8 +491,8 @@ async def dispatch_reminder(
                         # Render template: JSON-escape the values so the result
                         # is always valid JSON regardless of special characters.
                         # dumps() returns `"value"` — strip outer quotes.
-                        msg = (synthesis or note_body or title or "Reminder")[:4000]
-                        _t = _wjson.dumps(title or "Reminder")[1:-1]
+                        msg = (synthesis or note_body or title or _i18n_t("reminder_fallback_title", _lang))[:4000]
+                        _t = _wjson.dumps(title or _i18n_t("reminder_fallback_title", _lang))[1:-1]
                         _m = _wjson.dumps(msg)[1:-1]
                         rendered = template.replace("{{title}}", _t).replace("{{message}}", _m)
                         hdrs = {"Content-Type": "application/json"}
@@ -539,7 +546,7 @@ async def dispatch_reminder(
                     intg,
                     topic,
                     ntfy_body,
-                    title=title or "Reminder",
+                    title=title or _i18n_t("reminder_fallback_title", _lang),
                     priority="high",
                     tags="bell",
                     actions=_reminder_ntfy_actions(note_id, owner),
@@ -563,11 +570,12 @@ async def dispatch_reminder(
     if queue_browser and not suppress_push and _scheduler_ref is not None:
         try:
             _scheduler_ref.add_notification(
-                task_name=title or "Reminder",
+                task_name=title or _i18n_t("reminder_fallback_title", _lang),
                 status="success",
                 task_id=f"reminder-{note_id}",
                 owner=owner or None,
-                body=(synthesis or note_body or title or "").strip()[:500] or "Reminder",
+                body=(synthesis or note_body or title or "").strip()[:500]
+                or _i18n_t("reminder_fallback_title", _lang),
             )
             browser_sent = True
         except Exception as _e:
@@ -580,7 +588,8 @@ async def dispatch_reminder(
         try:
             from src import pings_store
             pings_store.create(
-                owner, title or "Reminder", synthesis or note_body or title or "",
+                owner, title or _i18n_t("reminder_fallback_title", _lang),
+                synthesis or note_body or title or "",
                 kind="reminder", source="reminder (quiet hours)" if suppress_push else "reminder",
                 source_ref=f"note:{note_id}",
             )
@@ -925,7 +934,8 @@ def setup_note_routes(task_scheduler=None):
                     raise HTTPException(404, "Note not found")
                 if caller is not None and note.owner != caller:
                     raise HTTPException(404, "Note not found")
-                title, note_body = _reminder_text_from_note(note)
+                from src.i18n import get_user_language as _get_lang
+                title, note_body = _reminder_text_from_note(note, _get_lang(caller))
             finally:
                 db.close()
 
@@ -957,16 +967,18 @@ def setup_note_routes(task_scheduler=None):
             note = db.query(Note).filter(Note.id == note_id).first()
             if not note or (owner and note.owner != owner):
                 raise HTTPException(404, "Reminder not found")
+            from src.i18n import get_user_language as _get_lang, t as _i18n_t
+            _lang = _get_lang(owner)
             if action == "done":
                 note.due_date = None
-                msg = "Reminder dismissed."
+                msg = _i18n_t("ack_dismissed", _lang)
             elif action == "snooze1h":
                 note.due_date = (_dt.now() + _td(hours=1)).isoformat()
-                msg = "Snoozed 1 hour."
+                msg = _i18n_t("ack_snoozed_1h", _lang)
             else:  # tomorrow
                 t = (_dt.now() + _td(days=1)).replace(hour=9, minute=0, second=0, microsecond=0)
                 note.due_date = t.isoformat()
-                msg = "Snoozed to tomorrow 9:00."
+                msg = _i18n_t("ack_snoozed_tomorrow", _lang)
             db.commit()
         finally:
             db.close()
@@ -975,7 +987,8 @@ def setup_note_routes(task_scheduler=None):
         try:
             from src import pings_store
             pings_store.create(
-                owner, "Reminder " + ("dismissed" if action == "done" else "snoozed"),
+                owner,
+                _i18n_t("ack_title_dismissed" if action == "done" else "ack_title_snoozed", _lang),
                 msg, kind="reminder", source="reminder action", source_ref=f"note:{note_id}",
             )
         except Exception:

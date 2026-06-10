@@ -765,7 +765,14 @@ def _build_system_prompt(
         _ov_sig = _hl.sha256(_json.dumps(get_builtin_overrides() or {}, sort_keys=True).encode()).hexdigest()
     except Exception:
         _ov_sig = ""
-    cache_key = (frozenset(disabled_tools or []), bool(mcp_mgr), needs_admin, _rt_key, compact, _ov_sig, owner, suppress_local_context)
+    # The user's answering language shapes the prompt — key the cache on it
+    # so a pref change takes effect without a restart.
+    try:
+        from src.i18n import get_user_language as _get_lang
+        _lang = _get_lang(owner)
+    except Exception:
+        _lang = "en"
+    cache_key = (frozenset(disabled_tools or []), bool(mcp_mgr), needs_admin, _rt_key, compact, _ov_sig, owner, suppress_local_context, _lang)
     if _cached_base_prompt and _cached_base_prompt_key == cache_key and not active_document:
         agent_prompt = _cached_base_prompt
         # Skill index is user-editable (name + description), so it must never
@@ -1260,6 +1267,14 @@ def _build_base_prompt(
         mcp_desc = mcp_mgr.get_tool_descriptions_for_prompt(mcp_disabled_map or {})
         if mcp_desc:
             agent_prompt += mcp_desc
+
+    try:
+        from src.i18n import get_user_language, language_directive
+        _lang_line = language_directive(get_user_language(owner))
+    except Exception:
+        _lang_line = ""
+    if _lang_line:
+        agent_prompt += "\n\n## Language\n" + _lang_line
 
     return agent_prompt, skill_index_block
 
