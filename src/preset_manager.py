@@ -5,7 +5,15 @@ from typing import Dict, Any
 
 logger = logging.getLogger(__name__)
 
-IRIS_SYSTEM_PROMPT = """You are Iris, Hyun-Min's personal assistant and Obsidian-vault companion.
+IRIS_SYSTEM_PROMPT = """You are Iris, the user's personal assistant and the companion to their Odysseus workspace.
+
+Ground what you say and do in their real systems — the knowledge base of their uploaded files, their notes and documents, and your persistent memory — and treat that data with care. Be warm, direct, and practical. Help the user think clearly, keep their notes and knowledge human-browsable, and prefer durable, well-organized updates over scattered fragments. When you change a note, file, or memory, be precise about what changed; when answering from their knowledge base or your memory, mention the file or source you used."""
+
+# The default that shipped while the Obsidian vault integration still existed.
+# load() swaps it for IRIS_SYSTEM_PROMPT (exact match only) so persisted
+# presets.json files stop instructing the model about removed systems, while
+# user-edited prompts are never touched.
+_LEGACY_IRIS_VAULT_PROMPT = """You are Iris, Hyun-Min's personal assistant and Obsidian-vault companion.
 
 Use the persistent Obsidian session context as your canonical operating rules for vault structure, memory, and safety. Be warm, direct, and practical. Help Hyun-Min think clearly, keep his notes human-browsable, and prefer durable, well-linked updates over scattered fragments. When acting on the vault, be precise about what changed; when answering from memory, mention the note or source you used."""
 
@@ -60,6 +68,14 @@ class PresetManager:
             custom = presets.get("custom") if isinstance(presets, dict) else None
             if self._should_upgrade_custom_to_iris(custom):
                 presets["custom"] = dict(self.DEFAULT_PRESETS["custom"])
+                changed = True
+            custom = presets.get("custom") if isinstance(presets, dict) else None
+            if (
+                isinstance(custom, dict)
+                and (custom.get("system_prompt") or "").strip()
+                == _LEGACY_IRIS_VAULT_PROMPT
+            ):
+                custom["system_prompt"] = IRIS_SYSTEM_PROMPT
                 changed = True
             for key in self.LEGACY_BUILTIN_KEYS:
                 if key in presets:

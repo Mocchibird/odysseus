@@ -6,8 +6,15 @@ user-edited custom/persona entries and user templates are preserved.
 import json
 import os
 import tempfile
+from pathlib import Path
 
-from src.preset_manager import PresetManager
+from src.preset_manager import (
+    IRIS_SYSTEM_PROMPT,
+    PresetManager,
+    _LEGACY_IRIS_VAULT_PROMPT,
+)
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 def _write_presets(data: dict) -> str:
@@ -67,3 +74,30 @@ def test_complete_file_is_not_rewritten_needlessly():
     pm = PresetManager(data_dir)
     assert pm.presets["custom"]["enabled"] is True
     assert pm.presets == full
+
+
+def test_vault_era_iris_prompt_is_swapped_for_current_default():
+    # A persisted persona still carrying the shipped Obsidian-vault prompt is
+    # healed to the current default; user-tuned fields survive.
+    stale_custom = dict(PresetManager.DEFAULT_PRESETS["custom"])
+    stale_custom["system_prompt"] = _LEGACY_IRIS_VAULT_PROMPT
+    stale_custom["temperature"] = 0.55
+    data_dir = _write_presets({"custom": stale_custom})
+    pm = PresetManager(data_dir)
+    assert pm.presets["custom"]["system_prompt"] == IRIS_SYSTEM_PROMPT
+    assert pm.presets["custom"]["temperature"] == 0.55
+    with open(os.path.join(data_dir, "presets.json"), encoding="utf-8") as f:
+        on_disk = json.load(f)
+    assert on_disk["custom"]["system_prompt"] == IRIS_SYSTEM_PROMPT
+
+
+def test_default_prompts_are_vault_free_and_user_agnostic():
+    # The Obsidian vault integration is gone and the default persona is
+    # user-agnostic; neither default prompt (server-side constant or the
+    # client template in presets.js) may steer the model toward removed
+    # systems or a hardcoded user.
+    presets_js = (ROOT / "static/js/presets.js").read_text(encoding="utf-8")
+    for text in (IRIS_SYSTEM_PROMPT.lower(), presets_js.lower()):
+        assert "obsidian" not in text
+        assert "vault" not in text
+        assert "hyun-min" not in text
