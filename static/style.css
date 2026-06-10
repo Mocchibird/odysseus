@@ -32210,8 +32210,8 @@ body.notes-mobile-mode.notes-drag-mode .note-card-pin.active {
   cursor: pointer;
   flex-shrink: 0;
 }
-.notes-book-fav:hover { color: #e8c14e; border-color: color-mix(in srgb, #e8c14e 45%, var(--border)); }
-.notes-book-fav.is-fav { color: #e8c14e; border-color: color-mix(in srgb, #e8c14e 40%, var(--border)); }
+.notes-book-fav:hover { color: var(--accent-primary, var(--red)); border-color: color-mix(in srgb, var(--accent-primary, var(--red)) 45%, var(--border)); }
+.notes-book-fav.is-fav { color: var(--accent-primary, var(--red)); border-color: color-mix(in srgb, var(--accent-primary, var(--red)) 40%, var(--border)); }
 .notes-book-fav.loading { opacity: 0.5; pointer-events: none; }
 .notes-book-reader-edit {
   margin-left: 0;
@@ -38612,11 +38612,11 @@ body.theme-frosted .modal {
 .kb-indexed > summary { cursor: pointer; opacity: 0.6; padding: 4px 0; }
 .kb-indexed-pre { white-space: pre-wrap; word-break: break-word; max-height: 200px; overflow-y: auto; background: color-mix(in srgb, var(--fg) 4%, transparent); border-radius: 6px; padding: 8px; font-size: 11px; margin: 4px 0 0; }
 /* edit text + suggest tags (lightweight content correction — not a 2nd doc editor) */
-.kb-suggest-tags { flex-shrink: 0; padding: 3px 10px; border: 1px solid var(--border); border-radius: 999px; background: var(--bg); color: var(--fg); font-size: 11px; cursor: pointer; }
+.kb-suggest-tags { flex-shrink: 0; display: inline-flex; align-items: center; gap: 5px; padding: 3px 10px; border: 1px solid var(--border); border-radius: 999px; background: var(--bg); color: var(--fg); font-size: 11px; cursor: pointer; }
 .kb-suggest-tags:hover:not(:disabled) { background: color-mix(in srgb, var(--fg) 8%, transparent); }
 .kb-suggest-tags:disabled { opacity: 0.5; cursor: default; }
 .kb-indexed-actions { display: flex; align-items: center; gap: 8px; margin: 6px 0 0; }
-.kb-edit-text { padding: 3px 10px; border: 1px solid var(--border); border-radius: 7px; background: transparent; color: var(--fg); font-size: 11px; cursor: pointer; }
+.kb-edit-text { display: inline-flex; align-items: center; gap: 5px; padding: 3px 10px; border: 1px solid var(--border); border-radius: 7px; background: transparent; color: var(--fg); font-size: 11px; cursor: pointer; }
 .kb-edit-text:hover { background: color-mix(in srgb, var(--fg) 8%, transparent); }
 .kb-edit-hint { font-size: 10px; opacity: 0.5; }
 .kb-edit-wrap { margin: 6px 0 0; }

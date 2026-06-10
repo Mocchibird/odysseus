@@ -178,13 +178,13 @@ async function _openDetail(id) {
         ${aiTags.map(t => `<span class="kb-chip ai" title="auto-tag">${_esc(t)}</span>`).join('')}
       </div>
       <input class="kb-tag-input" placeholder="Add tag + Enter">
-      <button class="kb-suggest-tags" type="button" title="AI-generate topical tags from the text">✨ Suggest tags</button>
+      <button class="kb-suggest-tags" type="button" title="AI-generate topical tags from the text"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.59 13.41 13.42 20.58a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>Suggest tags</button>
     </div>
     <div class="kb-viewer"></div>
     <details class="kb-indexed">
       <summary>Indexed text — exactly what Iris searches (${(rec.text || '').length} chars)</summary>
       <div class="kb-indexed-actions">
-        <button class="kb-edit-text" type="button">✎ Edit text</button>
+        <button class="kb-edit-text" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>Edit text</button>
         <span class="kb-edit-hint">${(kind === 'md' || kind === 'text') ? 'Edits the file content.' : 'Edits the searchable text only — the original file is left unchanged.'}</span>
       </div>
       <pre class="kb-indexed-pre">${_esc(rec.text || '(no text extracted)')}</pre>
@@ -283,7 +283,7 @@ async function _saveText(rec, text) {
 }
 
 async function _suggestTags(rec, btn) {
-  if (btn) { btn.disabled = true; btn.textContent = 'Suggesting…'; }
+  if (btn) btn.disabled = true;  // :disabled dims it; keep the SVG icon + label intact
   try {
     const res = await fetch(`${API_BASE}/api/knowledge/${encodeURIComponent(rec.id)}/autotag`, {
       method: 'POST', credentials: 'same-origin',
@@ -293,7 +293,7 @@ async function _suggestTags(rec, btn) {
     _openDetail(rec.id);  // re-render to show the new AI tags
   } catch (_) {
     uiModule.showToast && uiModule.showToast('Could not suggest tags');
-    if (btn) { btn.disabled = false; btn.textContent = '✨ Suggest tags'; }
+    if (btn) btn.disabled = false;
   }
 }
 
