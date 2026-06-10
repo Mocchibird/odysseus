@@ -660,16 +660,17 @@ FUNCTION_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "manage_knowledge",
-            "description": "EDIT the user's KNOWLEDGE BASE files (uploaded PDFs/images/markdown/docs): correct or replace a file's text, append to it, set or AI-generate tags, or delete it. Find the file with search_knowledge first to get its id. For text files (.md/.txt) an edit rewrites the stored file; for PDFs/images it corrects only the searchable extracted text. Every content change re-indexes recall so search stays in sync. NOT for reading/finding files (use search_knowledge) and NOT for authoring long new documents (use the document tools / Library).",
+            "description": "MANAGE the user's KNOWLEDGE BASE files (uploaded PDFs/images/markdown/docs): ADD a user-attached/uploaded file to the knowledge base (action add + the upload_id from the message's attachment context), correct or replace a file's text, append to it, set or AI-generate tags, or delete it. For edits, find the file with search_knowledge first to get its id. For text files (.md/.txt) an edit rewrites the stored file; for PDFs/images it corrects only the searchable extracted text. Every change re-indexes recall so search stays in sync. NOT for reading/finding files (use search_knowledge), NOT for authoring long new documents (document tools / Library), and NEVER write_file for user files.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "action": {"type": "string", "enum": ["edit", "append", "retag", "autotag", "delete"], "description": "edit = replace full text; append = add text; retag = set user tags; autotag = AI-generate tags from the text; delete = remove the file."},
+                    "action": {"type": "string", "enum": ["add", "edit", "append", "retag", "autotag", "delete"], "description": "add = store an uploaded/attached file in the knowledge base (requires upload_id); edit = replace full text; append = add text; retag = set user tags; autotag = AI-generate tags from the text; delete = remove the file."},
+                    "upload_id": {"type": "string", "description": "For add: the attachment/upload id (listed in the [user attachments] context of the user's message)."},
                     "id": {"type": "string", "description": "The knowledge file id (from a search_knowledge #knowledge-<id> link). Preferred."},
                     "query": {"type": "string", "description": "Alternative to id: a filename or keywords that identify exactly ONE file."},
                     "text": {"type": "string", "description": "For edit: the new FULL content. For append: the text to add."},
                     "tags": {"type": "array", "items": {"type": "string"}, "description": "For retag: the tags to set (replaces the existing user tags)."},
-                    "filename": {"type": "string", "description": "Optional new filename when editing (rename)."}
+                    "filename": {"type": "string", "description": "For add: a friendly name/title for the stored file (extension kept automatically). For edit: optional rename."}
                 },
                 "required": ["action"]
             }

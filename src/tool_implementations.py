@@ -1547,9 +1547,11 @@ async def do_search_knowledge(content: str, owner: Optional[str] = None) -> Dict
 
 
 async def do_manage_knowledge(content: str, owner: Optional[str] = None) -> Dict:
-    """EDIT the user's KNOWLEDGE BASE (uploaded files): correct/replace a file's
-    text, append to it, set tags, auto-tag, or delete it. Reading/finding files is
-    search_knowledge — use that first to get the file id, then act here.
+    """MANAGE the user's KNOWLEDGE BASE (uploaded files): ADD an uploaded/attached
+    file to it, correct/replace a file's text, append to it, set tags, auto-tag,
+    or delete it. Reading/finding files is search_knowledge — use that first to
+    get the file id, then act here. To store a file the user attached in chat,
+    use action add with the upload_id from the message's attachment context.
 
     For text files (.md/.txt/…) an edit rewrites the stored file; for binaries
     (pdf/image) it corrects only the searchable extracted text. Every content
@@ -1564,14 +1566,64 @@ async def do_manage_knowledge(content: str, owner: Optional[str] = None) -> Dict
     action = (args.get("action") or "").replace("-", "_").strip().lower()
     _aliases = {
         "update": "edit", "replace": "edit", "set_text": "edit", "edit_text": "edit",
-        "add": "append", "tag": "retag", "set_tags": "retag", "tags": "retag",
+        "add_text": "append", "tag": "retag", "set_tags": "retag", "tags": "retag",
         "suggest_tags": "autotag", "auto_tag": "autotag", "remove": "delete",
+        # Storing a user-attached/uploaded file IS "add" — it used to alias to
+        # append (which needs an existing file), which is why the agent fell
+        # back to write_file when asked to save chat images into knowledge.
+        "store": "add", "save": "add", "ingest": "add", "upload": "add",
     }
     action = _aliases.get(action, action)
-    if action not in {"edit", "append", "retag", "autotag", "delete"}:
-        return {"error": "manage_knowledge action must be one of: edit, append, retag, "
+    if action not in {"add", "edit", "append", "retag", "autotag", "delete"}:
+        return {"error": "manage_knowledge action must be one of: add, edit, append, retag, "
                          "autotag, delete. (To read or find files, use search_knowledge.)",
                 "exit_code": 1}
+
+    if action == "add":
+        # Ingest an already-uploaded file (e.g. a chat attachment) into the
+        # knowledge base — mirrors POST /api/knowledge, owner-scoped.
+        upload_id = str(args.get("upload_id") or args.get("attachment_id") or "").strip()
+        if not upload_id:
+            return {"error": "add requires 'upload_id' — the id of an uploaded/attached "
+                             "file (listed in the [user attachments] context of the "
+                             "message). To add plain text to an EXISTING file use append.",
+                    "exit_code": 1}
+        try:
+            from src.constants import BASE_DIR, UPLOAD_DIR
+            from src.upload_handler import UploadHandler
+            info = UploadHandler(BASE_DIR, UPLOAD_DIR).resolve_upload(upload_id, owner=owner)
+            if not info or not info.get("path"):
+                return {"error": f"Upload '{upload_id}' not found (or not accessible).",
+                        "exit_code": 1}
+            tags = args.get("tags") or ""
+            if isinstance(tags, list):
+                tags = ",".join(str(t).strip() for t in tags if str(t).strip())
+            original = str(info.get("name") or info.get("original_name") or upload_id)
+            filename = str(args.get("filename") or args.get("title") or "").strip() or original
+            # A friendly title ("Cloud Tree") keeps the original extension so
+            # kind detection (image/pdf/...) stays correct.
+            if "." not in filename and "." in original:
+                filename = f"{filename}.{original.rsplit('.', 1)[1]}"
+            rec = await asyncio.to_thread(
+                _kb.ingest, owner,
+                file_path=info["path"], filename=filename, mime=info.get("mime"),
+                upload_id=upload_id, source="chat", tags=tags,
+            )
+            if not rec or not rec.get("id"):
+                return {"error": "Failed to ingest the file into the knowledge base.", "exit_code": 1}
+            if not str(tags).strip() and not rec.get("ai_tags") and (rec.get("excerpt") or "").strip():
+                try:
+                    await asyncio.to_thread(_kb.generate_ai_tags, owner, rec["id"])
+                except Exception:
+                    pass
+            tag_note = f" (tags: {', '.join(rec.get('tags') or [])})" if rec.get("tags") else ""
+            return {"output": f"Added '{rec.get('filename')}' to the knowledge base{tag_note}. "
+                              "It is stored, indexed, and searchable.",
+                    "exit_code": 0,
+                    "file": {"id": rec.get("id"), "filename": rec.get("filename"),
+                             "tags": rec.get("tags")}}
+        except Exception as e:
+            return {"error": f"manage_knowledge add failed: {e}", "exit_code": 1}
 
     try:
         # Resolve the target file — explicit id preferred, else a unique match on

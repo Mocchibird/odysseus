@@ -652,6 +652,20 @@ async def build_chat_context(
     # Build messages
     messages = preface + sess.get_context_messages()
 
+    # Agent mode: surface this message's attachments (upload ids) so tools can
+    # act on them — e.g. manage_knowledge {"action":"add","upload_id":...} to
+    # store an attached file in the knowledge base. Untrusted context (names
+    # are user data) at the dynamic tail, so the KV-cached prefix stays stable.
+    if agent_mode and preprocessed.attachment_meta:
+        try:
+            _att_lines = "\n".join(
+                f"- upload_id={m.get('id')}  filename={m.get('name') or ''}  ({m.get('mime') or 'unknown'}, {m.get('size') or 0} bytes)"
+                for m in preprocessed.attachment_meta
+            )
+            messages.append(untrusted_context_message("user attachments on this message", _att_lines))
+        except Exception:
+            pass
+
     # Current date/time — injected as a standalone *user*-role context message
     # placed immediately before the latest user turn, NOT folded into the
     # system prompt. Its text changes every minute, and local OpenAI-compatible
