@@ -15,6 +15,7 @@ pytest.importorskip("sqlalchemy")
 
 from core.database import Base, engine  # noqa: E402
 from src import book_store, knowledge_base as kb  # noqa: E402
+from fastapi import HTTPException  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
@@ -105,3 +106,37 @@ def test_delete_book_removes_from_knowledge_and_clears_state():
     assert book_store.list_annotations("d", kid)["items"] == []
     assert book_store.get_progress("d", kid, missing_ok=True)["chapter_index"] == 0
     assert book_store.delete_book("d", kid) is False  # already gone
+
+
+def test_favorite_sorts_books_to_top():
+    a = book_store.add_book("fav", "A.pdf", b"%PDF a", mime="application/pdf")
+    book_store.add_book("fav", "B.pdf", b"%PDF b", mime="application/pdf")
+    book_store.add_book("fav", "C.pdf", b"%PDF c", mime="application/pdf")
+    assert all(x["favorite"] is False for x in book_store.list_books("fav"))
+    # star one -> it jumps to the top of the list (favourites first)
+    out = book_store.set_favorite("fav", a["id"], True)
+    assert out["favorite"] is True
+    rows = book_store.list_books("fav")
+    assert rows[0]["id"] == a["id"]
+    assert [r["favorite"] for r in rows] == [True, False, False]
+    assert len(rows) == 3
+    # unstar -> nothing pinned
+    book_store.set_favorite("fav", a["id"], False)
+    assert all(x["favorite"] is False for x in book_store.list_books("fav"))
+
+
+def test_set_favorite_owner_scoped_and_synced_to_knowledge():
+    rec = book_store.add_book("o1", "x.pdf", b"%PDF x", mime="application/pdf")
+    with pytest.raises(HTTPException):
+        book_store.set_favorite("o2", rec["id"], True)  # not their book
+    assert book_store.get_book("o1", rec["id"])["favorite"] is False
+    # favourite is a knowledge-file attribute -> visible in BOTH Books and Knowledge
+    book_store.set_favorite("o1", rec["id"], True)
+    assert book_store.get_book("o1", rec["id"])["favorite"] is True
+    assert kb.get("o1", rec["id"])["favorite"] is True
+
+
+def test_books_routes_expose_favorite():
+    from routes.book_routes import setup_book_routes
+    paths = {r.path for r in setup_book_routes().routes}
+    assert "/api/books/favorite" in paths

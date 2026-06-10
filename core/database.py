@@ -312,6 +312,7 @@ class KnowledgeFile(TimestampMixin, Base):
     ai_tags    = Column(Text, nullable=True, default="")        # LLM-generated tags (comma-separated)
     source     = Column(String, nullable=True, default="upload")  # upload | vault-migration | …
     indexed    = Column(Boolean, default=False)                 # RAG-indexed?
+    favorite   = Column(Boolean, default=False, index=True)     # starred (Books/Knowledge)
 
     __table_args__ = (
         Index('ix_knowledge_files_owner_created', 'owner', 'created_at'),
@@ -799,6 +800,25 @@ def _migrate_add_meal_sugar_column():
         conn.close()
     except Exception as e:
         logging.getLogger(__name__).warning(f"meals.sugar_g migration failed: {e}")
+
+
+def _migrate_add_knowledge_favorite_column():
+    """Add `favorite` to knowledge_files (star a book/file). Guarded + idempotent."""
+    import sqlite3
+    db_path = DATABASE_URL.replace("sqlite:///", "")
+    if not os.path.exists(db_path):
+        return
+    try:
+        conn = sqlite3.connect(db_path)
+        cursor = conn.execute("PRAGMA table_info(knowledge_files)")
+        columns = [row[1] for row in cursor.fetchall()]
+        if columns and "favorite" not in columns:
+            conn.execute("ALTER TABLE knowledge_files ADD COLUMN favorite BOOLEAN DEFAULT 0")
+            conn.commit()
+            logging.getLogger(__name__).info("Migrated: added 'favorite' to knowledge_files")
+        conn.close()
+    except Exception as e:
+        logging.getLogger(__name__).warning(f"knowledge_files.favorite migration failed: {e}")
 
 
 def _migrate_add_training_kcal_burned_column():
@@ -1898,6 +1918,7 @@ def init_db():
     _migrate_add_calendar_origin()
     _migrate_add_calendar_account_id()
     _migrate_add_meal_sugar_column()
+    _migrate_add_knowledge_favorite_column()
     _migrate_add_training_kcal_burned_column()
     _migrate_chat_messages_fts()
     _migrate_encrypt_email_passwords()

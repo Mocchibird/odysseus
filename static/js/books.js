@@ -819,6 +819,9 @@ function _renderListInto() {
         <span class="notes-book-row-path">${_esc(book.path || '')}</span>
         <span class="notes-book-row-meta">${_esc(loc)} · ${_esc(_formatVaultSize(book.size))}</span>
       </span>
+      <button type="button" class="notes-book-fav${book.favorite ? ' is-fav' : ''}" data-path="${_attrEsc(book.path || '')}" data-fav="${book.favorite ? '1' : '0'}" title="${book.favorite ? 'Unfavourite' : 'Favourite'}" aria-label="${book.favorite ? 'Unfavourite' : 'Favourite'}" aria-pressed="${book.favorite ? 'true' : 'false'}">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="${book.favorite ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+      </button>
       <button type="button" class="notes-book-title-edit" data-path="${_attrEsc(book.path || '')}" data-title="${_attrEsc(title)}" title="Rename book" aria-label="Rename book">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
       </button>
@@ -841,6 +844,28 @@ function _renderListInto() {
         await _renameBook(btn.dataset.path || '', btn.dataset.title || '');
       } catch (err) {
         uiModule.showError?.(err?.message || 'Failed to rename book');
+      }
+    });
+  });
+  scroll.querySelectorAll('.notes-book-fav').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const path = btn.dataset.path || '';
+      const next = btn.dataset.fav !== '1';
+      btn.classList.add('loading');
+      try {
+        const res = await fetch(`${API_BASE}/api/books/favorite`, {
+          method: 'POST', credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ path, favorite: next }),
+        });
+        if (!res.ok) throw new Error();
+        await _fetchBooks();
+        _render();  // re-render so favourites re-sort to the top
+      } catch (_) {
+        btn.classList.remove('loading');
+        uiModule.showError?.('Could not update favourite');
       }
     });
   });

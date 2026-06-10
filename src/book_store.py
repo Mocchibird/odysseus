@@ -56,6 +56,7 @@ def _book_dict(rec: dict) -> dict:
         "url": rec.get("url"),
         "excerpt": rec.get("excerpt") or "",
         "tags": rec.get("tags") or [],
+        "favorite": bool(rec.get("favorite")),
     }
 
 
@@ -87,9 +88,21 @@ def list_books(owner: Optional[str], query: str = "", limit: int = 50) -> list[d
         b = _book_dict(rec)
         b["progress"] = get_progress(owner, b["id"], missing_ok=True)
         books.append(b)
-        if len(books) >= cap:
-            break
-    return books
+    # Favourites first, then the search order (newest-first). Stable sort keeps
+    # the within-group order; cap AFTER sorting so a starred book never drops off.
+    books.sort(key=lambda b: 0 if b.get("favorite") else 1)
+    return books[:cap]
+
+
+def set_favorite(owner: Optional[str], kb_id: str, favorite: bool) -> dict:
+    """Star/unstar a book (owner-scoped). Returns the updated book dict; 404 if
+    the file isn't this owner's readable book."""
+    rec = kb.set_favorite(owner, kb_id, bool(favorite))
+    if not rec or not is_book(rec.get("filename") or ""):
+        raise HTTPException(404, "Book not found")
+    b = _book_dict(rec)
+    b["progress"] = get_progress(owner, b["id"], missing_ok=True)
+    return b
 
 
 def add_book(owner: Optional[str], filename: str, content: bytes, *, mime: str = "") -> dict:

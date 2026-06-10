@@ -32,6 +32,11 @@ class BookTitleRequest(BaseModel):
     title: str
 
 
+class BookFavoriteRequest(BaseModel):
+    path: str
+    favorite: bool = True
+
+
 class BookAnnotationRequest(BaseModel):
     path: str
     type: str = "bookmark"  # "bookmark" | "highlight"
@@ -108,6 +113,10 @@ def setup_book_routes() -> APIRouter:
     @router.post("/title")
     async def save_title(body: BookTitleRequest, request: Request):
         return {"ok": True, "book": book_reader.save_title(_owner(request), body.path, body.title)}
+
+    @router.post("/favorite")
+    async def save_favorite(body: BookFavoriteRequest, request: Request):
+        return {"ok": True, "book": book_reader.set_favorite(_owner(request), body.path, body.favorite)}
 
     @router.get("/search")
     async def search_book(request: Request, path: str, q: str = "", limit: int = 120):

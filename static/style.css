@@ -32196,6 +32196,23 @@ body.notes-mobile-mode.notes-drag-mode .note-card-pin.active {
   border-color: color-mix(in srgb, var(--accent-primary, var(--red)) 45%, var(--border));
   background: color-mix(in srgb, var(--accent-primary, var(--red)) 9%, transparent);
 }
+/* Favourite (star) toggle — matches the row's edit button; gold when starred. */
+.notes-book-fav {
+  width: 30px;
+  height: 30px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--fg) 4%, transparent);
+  color: color-mix(in srgb, var(--fg) 55%, transparent);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.notes-book-fav:hover { color: #e8c14e; border-color: color-mix(in srgb, #e8c14e 45%, var(--border)); }
+.notes-book-fav.is-fav { color: #e8c14e; border-color: color-mix(in srgb, #e8c14e 40%, var(--border)); }
+.notes-book-fav.loading { opacity: 0.5; pointer-events: none; }
 .notes-book-reader-edit {
   margin-left: 0;
 }

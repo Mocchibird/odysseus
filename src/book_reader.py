@@ -164,6 +164,10 @@ def save_title(owner: str | None, kb_id: str, title: str) -> dict:
     return book_store.set_title(owner, kb_id, title)
 
 
+def set_favorite(owner: str | None, kb_id: str, favorite: bool) -> dict:
+    return book_store.set_favorite(owner, kb_id, favorite)
+
+
 def read_book_location(owner: str | None, kb_id: str, chapter_index: int = 0) -> dict:
     book = open_book(owner, kb_id)
     chapters = book.get("chapters") or []

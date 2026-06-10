@@ -170,6 +170,7 @@ def _to_dict(kf) -> dict:
         "ai_tags": _split_tags(kf.ai_tags),
         "source": kf.source,
         "indexed": bool(kf.indexed),
+        "favorite": bool(getattr(kf, "favorite", False)),
         # The real-file open URL (KB-owned bytes preferred; falls back to the
         # uploads store). The user's "double-check the actual file" path.
         "url": (f"/api/knowledge/{kf.id}/raw" if kf.path
@@ -414,6 +415,23 @@ def set_tags(owner: Optional[str], kb_id: str, tags) -> Optional[dict]:
         if not kf or (owner is not None and kf.owner != owner):
             return None
         kf.tags = _norm_tags(tags)
+        db.commit()
+        db.refresh(kf)
+        return _to_dict(kf)
+    finally:
+        db.close()
+
+
+def set_favorite(owner: Optional[str], kb_id: str, favorite: bool) -> Optional[dict]:
+    """Star/unstar a file (owner-scoped). Returns the updated row or None."""
+    from core.database import SessionLocal, KnowledgeFile
+
+    db = SessionLocal()
+    try:
+        kf = db.query(KnowledgeFile).filter(KnowledgeFile.id == kb_id).first()
+        if not kf or (owner is not None and kf.owner != owner):
+            return None
+        kf.favorite = bool(favorite)
         db.commit()
         db.refresh(kf)
         return _to_dict(kf)
