@@ -17,11 +17,11 @@
 
 :root {
   /* Core palette */
-  --bg: #151914;
-  --fg: #e7dff2;
-  --panel: #101410;
-  --border: #4f5f4d;
-  --red: #b996ff;
+  --bg: #282c34;
+  --fg: #9cdef2;
+  --panel: #111;
+  --border: #355a66;
+  --red: #e06c75;
   /* Were `var(--green)` / `var(--warn)` — self-referential, so they
      resolved to invalid and every site fell back to its own literal
      (or, for sites with no fallback, painted as transparent/inherit).
@@ -30,9 +30,9 @@
   --warn: #f0ad4e;
 
   /* Syntax highlighting */
-  --hl-bg: #111611;
-  --hl-fg: #e7dff2;
-  --hl-keyword: #c7a8ff;
+  --hl-bg: #1e2228;
+  --hl-fg: #9cdef2;
+  --hl-keyword: #c678dd;
   --hl-string: #e5c07b;
   --hl-comment: #828997;
   --hl-function: #61afef;
@@ -1859,7 +1859,7 @@ body.bg-pattern-sparkles {
       letter-spacing:0.03em;
       margin-bottom:10px;
     }
-    .welcome-mark {
+    .welcome-boat {
       width: 1.8rem;
       height: 1.8rem;
       margin-right: 0.4rem;
@@ -32492,7 +32492,7 @@ body.notes-mobile-mode.notes-drag-mode .note-card-pin.active {
 .notes-book-tool.flash { animation: bookToolFlash 0.6s ease; }
 .notes-book-tool.loading { opacity: 0.5; pointer-events: none; }
 @keyframes bookToolFlash {
-  0% { background: color-mix(in srgb, var(--green, #50fa7b) 40%, transparent); }
+  0% { background: color-mix(in srgb, var(--green) 40%, transparent); }
   100% { background: color-mix(in srgb, var(--fg) 4%, transparent); }
 }
 
@@ -32541,7 +32541,7 @@ body.notes-mobile-mode.notes-drag-mode .note-card-pin.active {
 }
 .book-tool-close:hover { color: var(--fg); background: color-mix(in srgb, var(--fg) 8%, transparent); }
 .book-tool-body { overflow-y: auto; padding: 6px; }
-.book-tool-hint { padding: 16px 10px; opacity: 0.55; font-size: 12.5px; text-align: center; }
+.book-tool-hint { padding: 16px 10px; opacity: 0.55; font-size: 12px; text-align: center; }
 .book-tool-meta { padding: 4px 8px 8px; font-size: 11px; font-weight: 700; opacity: 0.55; }
 .book-search-hit {
   display: block;
@@ -32555,8 +32555,8 @@ body.notes-mobile-mode.notes-drag-mode .note-card-pin.active {
   color: var(--fg);
 }
 .book-search-hit:hover { background: color-mix(in srgb, var(--fg) 7%, transparent); }
-.book-hit-loc { display: block; font-size: 10.5px; font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase; opacity: 0.5; margin-bottom: 2px; }
-.book-hit-snip { display: block; font-size: 12.5px; line-height: 1.5; opacity: 0.9; }
+.book-hit-loc { display: block; font-size: 10px; font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase; opacity: 0.5; margin-bottom: 2px; }
+.book-hit-snip { display: block; font-size: 12px; line-height: 1.5; opacity: 0.9; }
 .book-hit-snip mark, .book-annot-text mark { background: color-mix(in srgb, var(--accent-primary, #ffd24a) 45%, transparent); color: inherit; border-radius: 2px; padding: 0 1px; }
 .book-annot {
   display: flex;
@@ -32580,8 +32580,8 @@ body.notes-mobile-mode.notes-drag-mode .note-card-pin.active {
 }
 .book-annot-badge { flex: 0 0 auto; font-size: 13px; opacity: 0.8; }
 .book-annot-main { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-.book-annot-loc { font-size: 10.5px; font-weight: 800; letter-spacing: 0.03em; text-transform: uppercase; opacity: 0.5; }
-.book-annot-text { font-size: 12.5px; line-height: 1.45; border-left: 2px solid color-mix(in srgb, var(--accent-primary, var(--red)) 50%, var(--border)); padding-left: 7px; }
+.book-annot-loc { font-size: 10px; font-weight: 800; letter-spacing: 0.03em; text-transform: uppercase; opacity: 0.5; }
+.book-annot-text { font-size: 12px; line-height: 1.45; border-left: 2px solid color-mix(in srgb, var(--accent-primary, var(--red)) 50%, var(--border)); padding-left: 7px; }
 .book-annot.highlight .book-annot-text { font-style: italic; }
 .book-annot-note { font-size: 12px; opacity: 0.7; }
 .book-annot-del {
@@ -32595,7 +32595,7 @@ body.notes-mobile-mode.notes-drag-mode .note-card-pin.active {
   padding: 0 8px;
   border-radius: 6px;
 }
-.book-annot-del:hover { color: var(--red, #ff5555); }
+.book-annot-del:hover { color: var(--red); }
 
 /* Selection mini-toolbar */
 .book-sel-popover {
@@ -32655,7 +32655,7 @@ body.notes-mobile-mode.notes-drag-mode .note-card-pin.active {
   overflow: auto;
 }
 .book-explain-body { padding: 4px 12px 14px; font-size: 13px; line-height: 1.6; white-space: pre-wrap; }
-.book-explain-err { color: var(--red, #ff5555); }
+.book-explain-err { color: var(--red); }
 .book-explain-spin {
   display: inline-block;
   width: 11px; height: 11px;
@@ -37935,8 +37935,16 @@ body.theme-frosted .modal {
   flex-direction: column;
   align-items: stretch;
   gap: 6px;
-  padding: 8px;
+  /* No top padding: the sticky reader chrome must sit flush at the scrollport
+     top, else content scrolls past it through the gap. */
+  padding: 0 8px 8px;
   scrollbar-width: thin;
+}
+/* Span the chrome across the scroller's side gutters so scrolling text can't
+   bleed past it in the 8px padding strips. */
+.books-reader-view .notes-book-chrome {
+  margin: 0 -8px;
+  padding: 0 8px;
 }
 /* Library list spacing + the book-row grid (was .notes-pane-books .notes-vault-list
    / .notes-vault-file.notes-book-file). */
@@ -37985,6 +37993,10 @@ body.theme-frosted .modal {
   flex-direction: column;
   gap: 12px;
 }
+/* Children are content-sized; the body scrolls. Without this, default
+   flex-shrink squashed the Profile & goals <details> (overflow:hidden from the
+   collapsible idiom) into a 2px sliver. */
+.health-modal-content .modal-body > * { flex-shrink: 0; }
 .health-loading, .health-error, .health-empty {
   padding: 18px 8px;
   font-size: 13px;
@@ -37994,12 +38006,7 @@ body.theme-frosted .modal {
 .health-error { color: var(--red); opacity: 0.95; }
 .health-muted { opacity: 0.6; font-weight: 400; font-size: 11px; }
 
-.health-card {
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--fg) 3%, transparent);
-  padding: 12px 12px 14px;
-}
+#health-modal .admin-card, #habits-modal .admin-card { margin-bottom: 0; }
 .health-card-head {
   display: flex;
   align-items: baseline;
@@ -38011,8 +38018,8 @@ body.theme-frosted .modal {
 .health-big { font-size: 22px; font-weight: 700; line-height: 1; }
 .health-unit { font-size: 12px; font-weight: 500; opacity: 0.6; }
 .health-delta { font-size: 12px; font-weight: 700; padding: 1px 7px; border-radius: 999px; }
-.health-delta.down { color: var(--green, #50fa7b); background: color-mix(in srgb, var(--green, #50fa7b) 15%, transparent); }
-.health-delta.up { color: var(--warn, #f0ad4e); background: color-mix(in srgb, var(--warn, #f0ad4e) 15%, transparent); }
+.health-delta.down { color: var(--green); background: color-mix(in srgb, var(--green) 15%, transparent); }
+.health-delta.up { color: var(--warn); background: color-mix(in srgb, var(--warn) 15%, transparent); }
 .health-chip {
   font-size: 11px;
   padding: 2px 8px;
@@ -38021,55 +38028,23 @@ body.theme-frosted .modal {
   opacity: 0.85;
 }
 
-/* Inputs + buttons — mirror the app's compact control styling. */
-.health-input {
-  background: var(--bg);
-  border: 1px solid var(--border);
-  color: var(--fg);
-  border-radius: 7px;
-  padding: 6px 9px;
-  font: inherit;
-  font-size: 13px;
-  min-width: 0;
-}
-.health-input:focus { outline: none; border-color: color-mix(in srgb, var(--accent-primary, var(--red)) 55%, var(--border)); }
+/* Form controls use the app-global input/select/button styling; these helpers
+   only size them. (Buttons are .admin-btn-add / .admin-btn-sm; row edit/delete
+   actions are .memory-item-btn.) */
 .health-input-sm { width: 78px; flex: 0 0 auto; }
 .health-input-icon { width: 52px; flex: 0 0 auto; text-align: center; }
-.health-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  box-sizing: border-box;
-  background: color-mix(in srgb, var(--accent-primary, var(--red)) 18%, transparent);
-  border: 1px solid color-mix(in srgb, var(--accent-primary, var(--red)) 38%, var(--border));
-  color: var(--fg);
-  border-radius: 7px;
-  padding: 6px 12px;
-  font: inherit;
-  font-size: 12px;
-  line-height: 1.5;
-  font-weight: 700;
-  cursor: pointer;
-  flex: 0 0 auto;
-}
-.health-btn:hover { background: color-mix(in srgb, var(--accent-primary, var(--red)) 28%, transparent); }
-.health-icon-btn {
-  background: transparent;
-  border: 0;
-  color: color-mix(in srgb, var(--fg) 55%, transparent);
-  cursor: pointer;
-  font-size: 12px;
-  padding: 2px 5px;
-  border-radius: 5px;
-}
-.health-icon-btn:hover { color: var(--red); background: color-mix(in srgb, var(--red) 12%, transparent); }
 .health-add-habit, .health-inline-form {
   display: flex;
   gap: 7px;
   align-items: center;
   flex-wrap: wrap;
 }
-.health-add-habit .health-input[name="name"], .health-inline-form .health-input:first-child { flex: 1 1 140px; }
+/* display:flex above would defeat the hidden attribute — keep hidden forms hidden. */
+.health-add-habit[hidden], .health-inline-form[hidden] { display: none; }
+.health-add-habit input, .health-inline-form input, .health-inline-form select { height: 32px; min-width: 0; }
+.health-add-habit input[name="name"], .health-inline-form input:first-child { flex: 1 1 140px; }
+/* <label>-as-button (camera, CSV import): labels miss the global button height. */
+.health-file-btn { height: 32px; box-sizing: border-box; display: inline-flex; align-items: center; gap: 5px; cursor: pointer; }
 .health-toolbar { margin-bottom: 2px; }
 
 /* Habit cards + GitHub-style heatmap */
@@ -38082,10 +38057,10 @@ body.theme-frosted .modal {
   margin-bottom: 10px;
 }
 .health-habit-title { display: flex; align-items: center; gap: 7px; min-width: 0; }
-.health-habit-title strong { font-size: 13.5px; }
+.health-habit-title strong { font-size: 13px; }
 .health-habit-icon { font-size: 15px; }
 .health-habit-stats { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.health-streak { font-size: 12px; font-weight: 700; }
+.health-streak { font-size: 12px; font-weight: 700; display: inline-flex; align-items: center; gap: 3px; }
 .health-30d { font-size: 11px; opacity: 0.6; }
 .health-check-btn {
   border: 1px solid var(--border);
@@ -38096,6 +38071,10 @@ body.theme-frosted .modal {
   font-size: 11px;
   font-weight: 700;
   cursor: pointer;
+  height: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
 }
 .health-check-btn.done {
   background: color-mix(in srgb, var(--green, #50fa7b) 20%, transparent);
@@ -38114,7 +38093,7 @@ body.theme-frosted .modal {
 .health-line { fill: none; stroke: var(--accent-primary, var(--red)); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
 .health-line-dot { fill: var(--accent-primary, var(--red)); }
 .health-bar { fill: color-mix(in srgb, var(--accent-primary, var(--red)) 60%, transparent); }
-.health-bar.over { fill: var(--warn, #f0ad4e); }
+.health-bar.over { fill: var(--warn); }
 .health-target-line { stroke: color-mix(in srgb, var(--fg) 40%, transparent); stroke-width: 1; stroke-dasharray: 4 3; }
 .health-axis-label { fill: color-mix(in srgb, var(--fg) 50%, transparent); font-size: 9px; }
 
@@ -38126,8 +38105,8 @@ body.theme-frosted .modal {
   overflow: hidden;
   margin: 4px 0 8px;
 }
-.health-progress span { display: block; height: 100%; background: var(--green, #50fa7b); transition: width 0.25s ease; }
-.health-progress span.over { background: var(--warn, #f0ad4e); }
+.health-progress span { display: block; height: 100%; background: var(--green); transition: width 0.25s ease; }
+.health-progress span.over { background: var(--warn); }
 .health-macros { display: flex; gap: 14px; font-size: 12px; opacity: 0.75; margin-bottom: 8px; }
 .health-macros-extra { margin: -2px 0 8px; }
 .health-macros-extra summary { cursor: pointer; font-size: 12px; padding: 2px 0; list-style-position: inside; }
@@ -38138,35 +38117,28 @@ body.theme-frosted .modal {
 .health-ring svg { transform: rotate(-90deg); }
 .health-ring-bg { fill: none; stroke: color-mix(in srgb, var(--fg) 12%, transparent); stroke-width: 6; }
 .health-ring-fg { fill: none; stroke-width: 6; stroke-linecap: round; transition: stroke-dashoffset 0.4s ease; }
-.health-ring-fg.over { stroke: var(--warn, #f0ad4e) !important; }
+.health-ring-fg.over { stroke: var(--warn) !important; }
 .health-ring-val { transform: rotate(90deg); transform-origin: 32px 32px; fill: var(--fg); font-size: 13px; font-weight: 700; text-anchor: middle; }
 .health-ring-unit { transform: rotate(90deg); transform-origin: 32px 32px; fill: color-mix(in srgb, var(--fg) 55%, transparent); font-size: 8px; text-anchor: middle; }
 .health-ring-label { font-size: 11px; opacity: 0.8; }
 .health-ring-label span { opacity: 0.55; }
 /* Weight projection line */
-.health-proj { font-size: 12px; margin: 6px 0 8px; padding: 5px 9px; border-radius: 7px; background: color-mix(in srgb, var(--green, #50fa7b) 12%, transparent); }
-.health-proj.off { background: color-mix(in srgb, var(--warn, #f0ad4e) 14%, transparent); }
+.health-proj { font-size: 12px; margin: 6px 0 8px; padding: 5px 9px; border-radius: 7px; background: color-mix(in srgb, var(--green) 12%, transparent); }
+.health-proj.off { background: color-mix(in srgb, var(--warn) 14%, transparent); }
 /* Weekly habit summary */
 .health-week-rows { display: flex; flex-direction: column; gap: 5px; }
-.health-week-row { display: flex; align-items: center; gap: 10px; font-size: 12.5px; }
+.health-week-row { display: flex; align-items: center; gap: 10px; font-size: 12px; }
 .health-week-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .health-week-dots { display: inline-flex; gap: 3px; flex: 0 0 auto; }
 .health-week-dots i { width: 9px; height: 9px; border-radius: 2px; background: color-mix(in srgb, var(--fg) 12%, transparent); }
 .health-week-dots i.on { background: var(--accent-primary, var(--red)); }
 .health-week-num { flex: 0 0 auto; font-size: 11px; opacity: 0.6; width: 30px; text-align: right; }
-.health-btn-sub { box-sizing: border-box; display: inline-flex; align-items: center; justify-content: center; background: transparent; border: 1px solid var(--border); color: color-mix(in srgb, var(--fg) 70%, transparent); border-radius: 7px; padding: 6px 12px; font-size: 12px; line-height: 1.5; font-weight: 700; cursor: pointer; }
-.health-btn-sub:hover { color: var(--fg); }
-/* Profile & goals collapsible: render its summary like a normal card head so it
-   reads as a clear section (it used to inherit a gold accent → an unexplained
-   "yellow" sliver below the fold that the user couldn't identify). */
-.health-profile > summary { color: var(--fg); cursor: pointer; padding: 2px 0; }
-.health-profile > summary strong { color: var(--fg); font-size: 13px; }
 .health-list { display: flex; flex-direction: column; gap: 2px; }
 .health-row {
   display: flex;
   justify-content: space-between;
   gap: 10px;
-  font-size: 12.5px;
+  font-size: 12px;
   padding: 5px 2px;
   border-bottom: 1px solid color-mix(in srgb, var(--fg) 7%, transparent);
 }
@@ -38179,7 +38151,7 @@ body.theme-frosted .modal {
 .health-meal .health-meal-head:hover { background: color-mix(in srgb, var(--fg) 5%, transparent); }
 .health-meal-desc { display: inline-flex; align-items: center; gap: 6px; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .health-meal-right { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
-.health-meal-caret { font-size: 9px; opacity: 0.5; transition: transform 0.15s ease; display: inline-block; }
+.health-meal-caret { opacity: 0.5; transition: transform 0.15s ease; display: inline-flex; align-items: center; }
 .health-meal.expanded .health-meal-caret { transform: rotate(90deg); }
 .health-meal-detail { padding: 2px 6px 8px 18px; }
 .health-meal-macros { font-size: 12px; color: color-mix(in srgb, var(--fg) 60%, transparent); }
@@ -38192,7 +38164,7 @@ body.theme-frosted .modal {
 .health-meal-thumb { width: 26px; height: 26px; border-radius: 5px; object-fit: cover; flex: 0 0 auto; }
 .health-meal-photo { margin: 4px 0 6px; }
 .health-meal-photo img { max-width: 160px; max-height: 160px; border-radius: 8px; object-fit: cover; display: block; }
-.health-meal-photo .health-btn-sub { margin-top: 6px; font-size: 11px; padding: 4px 10px; }
+.health-meal-photo .admin-btn-sm { margin-top: 6px; }
 /* Per-day meal history groups (Calories tab) */
 .health-day-group { margin-bottom: 10px; }
 .health-day-group:last-child { margin-bottom: 0; }
@@ -38203,16 +38175,16 @@ body.theme-frosted .modal {
 .health-entry .health-row { border-bottom: 0; }
 .health-entry-edit { margin: 2px 0 8px; flex-wrap: wrap; }
 
-/* Profile / goals */
-.health-profile summary { cursor: pointer; font-size: 13px; }
+/* Profile / goals — the <details> itself uses the app-global collapsible idiom. */
 .health-profile-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 10px;
-  margin-top: 12px;
+  margin: 0;
+  padding: 12px 14px;
 }
 .health-profile-grid label { display: flex; flex-direction: column; gap: 4px; font-size: 11px; opacity: 0.8; }
-.health-profile-grid .health-btn { grid-column: 1 / -1; justify-self: start; }
+.health-profile-grid .admin-btn-add { grid-column: 1 / -1; justify-self: start; }
 
 @media (max-width: 768px) {
   .health-modal-content { width: 100vw; max-width: 100vw; height: 100%; }
@@ -38237,23 +38209,6 @@ body.theme-frosted .modal {
   gap: 8px;
 }
 .pings-empty { padding: 24px 8px; text-align: center; opacity: 0.6; font-size: 13px; }
-.ping-filter-toggle {
-  background: transparent;
-  border: 1px solid var(--border);
-  color: color-mix(in srgb, var(--fg) 72%, transparent);
-  border-radius: 7px;
-  padding: 3px 9px;
-  font-size: 11px;
-  font-weight: 700;
-  cursor: pointer;
-  margin-right: 6px;
-}
-.ping-filter-toggle:hover { color: var(--fg); }
-.ping-filter-toggle.active {
-  color: var(--fg);
-  background: color-mix(in srgb, var(--accent-primary, var(--red)) 18%, transparent);
-  border-color: color-mix(in srgb, var(--accent-primary, var(--red)) 40%, var(--border));
-}
 .ping-card {
   border: 1px solid var(--border);
   border-radius: 9px;
@@ -38277,13 +38232,13 @@ body.theme-frosted .modal {
   flex: 0 0 auto;
 }
 .ping-kind-reminder { background: color-mix(in srgb, var(--accent-primary, var(--red)) 22%, transparent); color: var(--fg); }
-.ping-kind-brief    { background: color-mix(in srgb, var(--color-accent, #00aaff) 22%, transparent); color: var(--fg); }
-.ping-kind-task     { background: color-mix(in srgb, var(--green, #50fa7b) 20%, transparent); color: var(--fg); }
+.ping-kind-brief    { background: color-mix(in srgb, var(--color-accent) 22%, transparent); color: var(--fg); }
+.ping-kind-task     { background: color-mix(in srgb, var(--green) 20%, transparent); color: var(--fg); }
 .ping-title { font-size: 13px; font-weight: 600; flex: 1 1 auto; min-width: 0; }
-.ping-keep-flag { color: var(--warn, #f0ad4e); font-size: 12px; }
+.ping-keep-flag { color: var(--warn); display: inline-flex; align-items: center; }
 .ping-time { font-size: 11px; opacity: 0.55; flex: 0 0 auto; }
 .ping-body {
-  font-size: 12.5px;
+  font-size: 12px;
   line-height: 1.5;
   opacity: 0.85;
   margin: 5px 0 7px;
@@ -38292,29 +38247,7 @@ body.theme-frosted .modal {
   overflow: auto;
 }
 .ping-actions { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-.ping-btn {
-  background: color-mix(in srgb, var(--accent-primary, var(--red)) 16%, transparent);
-  border: 1px solid color-mix(in srgb, var(--accent-primary, var(--red)) 36%, var(--border));
-  color: var(--fg);
-  border-radius: 7px;
-  padding: 4px 11px;
-  font-size: 11.5px;
-  font-weight: 700;
-  cursor: pointer;
-}
-.ping-btn:hover { background: color-mix(in srgb, var(--accent-primary, var(--red)) 26%, transparent); }
-.ping-btn-sub {
-  background: transparent;
-  border: 1px solid var(--border);
-  color: color-mix(in srgb, var(--fg) 65%, transparent);
-  border-radius: 7px;
-  padding: 4px 9px;
-  font-size: 11px;
-  cursor: pointer;
-}
-.ping-btn-sub:hover { color: var(--fg); border-color: color-mix(in srgb, var(--fg) 35%, var(--border)); }
 .ping-del { margin-left: auto; }
-.ping-del:hover { color: var(--red); border-color: color-mix(in srgb, var(--red) 45%, var(--border)); }
 /* Rail unread badge on the bell */
 #rail-pings { position: relative; }
 .rail-ping-badge {
@@ -38375,10 +38308,10 @@ body.theme-frosted .modal {
 .today-allclear {
   text-align: center;
   padding: 14px 12px;
-  font-size: 13.5px;
+  font-size: 13px;
   opacity: 0.75;
-  background: color-mix(in srgb, var(--green, #50fa7b) 9%, transparent);
-  border: 1px solid color-mix(in srgb, var(--green, #50fa7b) 22%, var(--border));
+  background: color-mix(in srgb, var(--green) 9%, transparent);
+  border: 1px solid color-mix(in srgb, var(--green) 22%, var(--border));
   border-radius: 10px;
 }
 .today-section { display: flex; flex-direction: column; gap: 6px; }
@@ -38406,18 +38339,18 @@ body.theme-frosted .modal {
 .today-cf-btn {
   margin-left: auto;
   background: transparent;
-  border: 1px solid color-mix(in srgb, var(--red, #ff5555) 40%, var(--border));
-  color: color-mix(in srgb, var(--red, #ff5555) 92%, var(--fg));
+  border: 1px solid color-mix(in srgb, var(--red) 40%, var(--border));
+  color: color-mix(in srgb, var(--red) 92%, var(--fg));
   border-radius: 7px;
   padding: 2px 10px;
   font-size: 11px;
   font-weight: 700;
   cursor: pointer;
 }
-.today-cf-btn:hover { background: color-mix(in srgb, var(--red, #ff5555) 12%, transparent); }
+.today-cf-btn:hover { background: color-mix(in srgb, var(--red) 12%, transparent); }
 .today-cf-btn:disabled { opacity: 0.5; cursor: default; }
 .today-list { display: flex; flex-direction: column; gap: 4px; }
-.today-section-empty { font-size: 12.5px; opacity: 0.5; padding: 4px 2px; }
+.today-section-empty { font-size: 12px; opacity: 0.5; padding: 4px 2px; }
 .today-item {
   display: flex;
   align-items: baseline;
@@ -38426,7 +38359,7 @@ body.theme-frosted .modal {
   border-radius: 9px;
   background: color-mix(in srgb, var(--fg) 4%, transparent);
   border: 1px solid var(--border);
-  font-size: 13.5px;
+  font-size: 13px;
 }
 .today-time {
   flex: 0 0 auto;
@@ -38446,8 +38379,8 @@ body.theme-frosted .modal {
   background: color-mix(in srgb, var(--fg) 35%, transparent);
   align-self: center;
 }
-.today-reminder.overdue { border-color: color-mix(in srgb, var(--red, #ff5555) 45%, var(--border)); }
-.today-reminder.overdue .today-dot { background: var(--red, #ff5555); }
+.today-reminder.overdue { border-color: color-mix(in srgb, var(--red) 45%, var(--border)); }
+.today-reminder.overdue .today-dot { background: var(--red); }
 .today-due {
   flex: 0 0 auto;
   font-size: 11px;
@@ -38455,7 +38388,7 @@ body.theme-frosted .modal {
   opacity: 0.6;
   font-variant-numeric: tabular-nums;
 }
-.today-reminder.overdue .today-due { color: var(--red, #ff5555); opacity: 0.95; }
+.today-reminder.overdue .today-due { color: var(--red); opacity: 0.95; }
 .today-habits { display: flex; flex-wrap: wrap; gap: 7px; }
 .today-habit {
   display: inline-flex;
@@ -38471,7 +38404,7 @@ body.theme-frosted .modal {
   cursor: pointer;
   transition: background 0.15s, border-color 0.15s, opacity 0.25s, transform 0.15s;
 }
-.today-habit:hover { border-color: color-mix(in srgb, var(--green, #50fa7b) 50%, var(--border)); background: color-mix(in srgb, var(--green, #50fa7b) 9%, transparent); }
+.today-habit:hover { border-color: color-mix(in srgb, var(--green) 50%, var(--border)); background: color-mix(in srgb, var(--green) 9%, transparent); }
 .today-habit-check {
   width: 15px;
   height: 15px;
@@ -38481,13 +38414,13 @@ body.theme-frosted .modal {
   position: relative;
   transition: background 0.15s, border-color 0.15s;
 }
-.today-habit:hover .today-habit-check { border-color: var(--green, #50fa7b); }
+.today-habit:hover .today-habit-check { border-color: var(--green); }
 .today-habit.checked {
   background: color-mix(in srgb, var(--green, #50fa7b) 16%, transparent);
-  border-color: color-mix(in srgb, var(--green, #50fa7b) 55%, var(--border));
+  border-color: color-mix(in srgb, var(--green) 55%, var(--border));
   opacity: 0.6;
 }
-.today-habit.checked .today-habit-check { background: var(--green, #50fa7b); border-color: var(--green, #50fa7b); }
+.today-habit.checked .today-habit-check { background: var(--green); border-color: var(--green); }
 .today-habit.checked .today-habit-check::after {
   content: '';
   position: absolute;
@@ -38497,7 +38430,7 @@ body.theme-frosted .modal {
   border-width: 0 2px 2px 0;
   transform: rotate(45deg);
 }
-.today-habit-streak { font-size: 11px; opacity: 0.8; font-weight: 700; }
+.today-habit-streak { display: inline-flex; align-items: center; gap: 3px; font-size: 11px; opacity: 0.8; font-weight: 700; }
 @media (max-width: 768px) {
   .today-modal-content { width: 100vw; max-width: 100vw; height: 100%; }
   .today-date-label { display: none; }
@@ -38534,11 +38467,7 @@ body.theme-frosted .modal {
   background: var(--bg); color: var(--fg); font-size: 13px;
 }
 .kb-search:focus { outline: none; border-color: var(--accent, var(--red)); }
-.kb-upload-btn {
-  flex-shrink: 0; padding: 8px 14px; border: none; border-radius: 8px; cursor: pointer;
-  background: var(--accent, var(--red)); color: #fff; font-size: 13px; font-weight: 600;
-}
-.kb-upload-btn:hover { filter: brightness(1.08); }
+.kb-upload-btn { flex-shrink: 0; display: inline-flex; align-items: center; gap: 5px; }
 
 /* upload progress */
 .kb-upload-bar { flex-shrink: 0; }
@@ -38548,12 +38477,7 @@ body.theme-frosted .modal {
 
 /* tag filter chips */
 .kb-tags-row { display: flex; flex-wrap: wrap; gap: 6px; flex-shrink: 0; max-height: 64px; overflow-y: auto; }
-.kb-tag-chip {
-  padding: 3px 10px; border: 1px solid var(--border); border-radius: 999px; cursor: pointer;
-  background: transparent; color: var(--fg); font-size: 11px; opacity: 0.75;
-}
-.kb-tag-chip:hover { opacity: 1; }
-.kb-tag-chip.active { background: var(--accent, var(--red)); color: #fff; border-color: transparent; opacity: 1; }
+/* Tag filter chips reuse .memory-cat-chip (incl. its .active state). */
 
 /* file list */
 .kb-cards { flex: 1 1 auto; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; display: flex; flex-direction: column; gap: 8px; padding-right: 2px; }
@@ -38566,13 +38490,13 @@ body.theme-frosted .modal {
 .kb-card-badge {
   flex-shrink: 0; min-width: 42px; height: 42px; padding: 0 6px; border-radius: 8px;
   display: flex; align-items: center; justify-content: center;
-  font-size: 10px; font-weight: 800; letter-spacing: 0.5px; color: #fff; background: var(--fg-muted, #888);
+  font-size: 10px; font-weight: 800; letter-spacing: 0.5px; color: #fff; background: var(--color-muted);
 }
-.kb-kind-image { background: #2a9d6b; } .kb-kind-pdf { background: #c0392b; }
-.kb-kind-md { background: #3a6ea5; } .kb-kind-text { background: #6b7280; } .kb-kind-other { background: #8a6d3b; }
+.kb-kind-image { background: var(--color-success); } .kb-kind-pdf { background: var(--color-danger); }
+.kb-kind-md { background: var(--color-brand-blue); } .kb-kind-text { background: var(--color-muted-alt); } .kb-kind-other { background: var(--accent-warm); }
 .kb-card-main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
 .kb-card-name { font-weight: 600; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.kb-card-excerpt { font-size: 11.5px; opacity: 0.62; line-height: 1.4; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.kb-card-excerpt { font-size: 11px; opacity: 0.62; line-height: 1.4; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .kb-card-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 1px; }
 .kb-chip { font-size: 10px; padding: 1px 7px; border-radius: 999px; background: color-mix(in srgb, var(--fg) 10%, transparent); opacity: 0.8; }
 .kb-chip.ai { border: 1px dashed var(--border); background: transparent; }
@@ -38581,13 +38505,17 @@ body.theme-frosted .modal {
 
 /* detail view */
 .kb-detail-head { display: flex; gap: 8px; align-items: center; flex-shrink: 0; }
-.kb-back, .kb-delete, .kb-open-orig {
-  flex-shrink: 0; padding: 5px 10px; border: 1px solid var(--border); border-radius: 7px;
-  background: transparent; color: var(--fg); font-size: 12px; cursor: pointer; text-decoration: none;
+/* Back/Delete reuse .memory-toolbar-btn / .admin-btn-delete; the external link
+   gets the same compact chip look (anchors don't inherit button styling). */
+.kb-back { flex-shrink: 0; display: inline-flex; align-items: center; gap: 4px; }
+/* Match the 24px toolbar-button row height in the detail head. */
+.kb-detail-head .admin-btn-delete { height: 24px; padding: 2px 8px; }
+.kb-open-orig {
+  flex-shrink: 0; display: inline-flex; align-items: center; gap: 4px; height: 24px;
+  padding: 0 8px; border: 1px solid var(--border); border-radius: 6px;
+  color: color-mix(in srgb, var(--fg) 60%, transparent); font-size: 11px; text-decoration: none;
 }
-.kb-back:hover, .kb-open-orig:hover { background: color-mix(in srgb, var(--fg) 8%, transparent); }
-.kb-delete { color: var(--red); border-color: color-mix(in srgb, var(--red) 40%, var(--border)); }
-.kb-delete:hover { background: color-mix(in srgb, var(--red) 12%, transparent); }
+.kb-open-orig:hover { color: var(--fg); border-color: var(--fg); }
 .kb-detail-title { flex: 1 1 auto; min-width: 0; font-weight: 700; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .kb-detail-meta { font-size: 11px; opacity: 0.55; flex-shrink: 0; }
 .kb-tags-edit { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; flex-shrink: 0; }
@@ -38595,8 +38523,7 @@ body.theme-frosted .modal {
 .kb-chip.editable { display: inline-flex; align-items: center; gap: 3px; }
 .kb-chip-x { border: none; background: transparent; color: inherit; cursor: pointer; font-size: 13px; line-height: 1; padding: 0; opacity: 0.6; }
 .kb-chip-x:hover { opacity: 1; }
-.kb-tag-input { padding: 3px 9px; border: 1px solid var(--border); border-radius: 999px; background: var(--bg); color: var(--fg); font-size: 11px; width: 130px; }
-.kb-tag-input:focus { outline: none; border-color: var(--accent, var(--red)); }
+.kb-tag-input { width: 130px; flex: 0 0 auto; }
 
 /* file viewer */
 .kb-viewer {
@@ -38612,12 +38539,10 @@ body.theme-frosted .modal {
 .kb-indexed > summary { cursor: pointer; opacity: 0.6; padding: 4px 0; }
 .kb-indexed-pre { white-space: pre-wrap; word-break: break-word; max-height: 200px; overflow-y: auto; background: color-mix(in srgb, var(--fg) 4%, transparent); border-radius: 6px; padding: 8px; font-size: 11px; margin: 4px 0 0; }
 /* edit text + suggest tags (lightweight content correction — not a 2nd doc editor) */
-.kb-suggest-tags { flex-shrink: 0; display: inline-flex; align-items: center; gap: 5px; padding: 3px 10px; border: 1px solid var(--border); border-radius: 999px; background: var(--bg); color: var(--fg); font-size: 11px; cursor: pointer; }
-.kb-suggest-tags:hover:not(:disabled) { background: color-mix(in srgb, var(--fg) 8%, transparent); }
+.kb-suggest-tags { flex-shrink: 0; gap: 5px; }
 .kb-suggest-tags:disabled { opacity: 0.5; cursor: default; }
 .kb-indexed-actions { display: flex; align-items: center; gap: 8px; margin: 6px 0 0; }
-.kb-edit-text { display: inline-flex; align-items: center; gap: 5px; padding: 3px 10px; border: 1px solid var(--border); border-radius: 7px; background: transparent; color: var(--fg); font-size: 11px; cursor: pointer; }
-.kb-edit-text:hover { background: color-mix(in srgb, var(--fg) 8%, transparent); }
+.kb-edit-text { gap: 5px; }
 .kb-edit-hint { font-size: 10px; opacity: 0.5; }
 .kb-edit-wrap { margin: 6px 0 0; }
 .kb-edit-area { width: 100%; box-sizing: border-box; min-height: 200px; resize: vertical; font-family: var(--mono, monospace); font-size: 11px; line-height: 1.5; padding: 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--fg); }
@@ -38629,7 +38554,7 @@ body.theme-frosted .modal {
 .kb-edit-cancel:hover { background: color-mix(in srgb, var(--fg) 8%, transparent); }
 
 /* .md prose (self-contained; KaTeX + highlight.js styles are global) */
-.kb-md { font-size: 13.5px; line-height: 1.6; }
+.kb-md { font-size: 13px; line-height: 1.6; }
 .kb-md h1, .kb-md h2, .kb-md h3 { margin: 0.8em 0 0.4em; line-height: 1.25; }
 .kb-md h1 { font-size: 1.5em; } .kb-md h2 { font-size: 1.3em; } .kb-md h3 { font-size: 1.12em; }
 .kb-md p { margin: 0.5em 0; } .kb-md ul, .kb-md ol { margin: 0.5em 0; padding-left: 1.5em; }

@@ -14,6 +14,19 @@ let _tab = 'calories';
 const _editingHabits = new Set();  // habit ids (as strings) currently in inline-edit mode
 
 const esc = uiModule.esc;  // reuse the canonical HTML-escape helper
+
+// Inline SVG icons — the app bans Unicode emoji in UI; these match the
+// monochrome stroke style used across static/index.html.
+const _I = {
+  edit: '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>',
+  del: '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>',
+  check: '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>',
+  flame: '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"/></svg>',
+  camera: '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>',
+  download: '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>',
+  upload: '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>',
+  chevron: '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>',
+};
 const _todayLocal = () => new Date().toLocaleDateString('en-CA'); // YYYY-MM-DD, local tz
 const _yesterdayLocal = () => { const d = new Date(); d.setDate(d.getDate() - 1); return d.toLocaleDateString('en-CA'); };
 
@@ -28,34 +41,34 @@ function _macroLine(m) {
   return parts.length ? parts.join(' · ') : 'No macros recorded for this entry.';
 }
 
-// A meal row: click to expand its macros; ✎ to edit; ✕ to delete.
+// A meal row: click to expand its macros; pencil to edit; X to delete.
 function _mealRowHtml(m) {
   const v = (x) => (x == null ? '' : x);
   const pid = m.photo_upload_id;
   const thumb = pid ? `<img class="health-meal-thumb" src="${API_BASE}/api/upload/${pid}?thumb=1" alt="" loading="lazy">` : '';
   return `<div class="health-meal${pid ? ' has-photo' : ''}" data-meal-id="${m.id}">
     <div class="health-row health-meal-head" role="button" tabindex="0" data-expand-meal="${m.id}" aria-expanded="false">
-      <span class="health-meal-desc">${thumb}<span class="health-meal-caret">▸</span>${esc(m.description)}</span>
+      <span class="health-meal-desc">${thumb}<span class="health-meal-caret">${_I.chevron}</span>${esc(m.description)}</span>
       <span class="health-meal-right">${m.kcal} kcal
-        <button class="health-icon-btn" data-edit-meal="${m.id}" title="Edit entry" aria-label="Edit meal">✎</button>
-        <button class="health-icon-btn" data-del-meal="${m.id}" title="Delete entry" aria-label="Delete meal">✕</button>
+        <button class="memory-item-btn health-icon-btn" data-edit-meal="${m.id}" title="Edit entry" aria-label="Edit meal">${_I.edit}</button>
+        <button class="memory-item-btn delete health-icon-btn" data-del-meal="${m.id}" title="Delete entry" aria-label="Delete meal">${_I.del}</button>
       </span>
     </div>
     <div class="health-meal-detail" hidden>
       ${pid ? `<div class="health-meal-photo">
         <a href="${API_BASE}/api/upload/${pid}" target="_blank" rel="noopener" title="Open full photo"><img src="${API_BASE}/api/upload/${pid}?thumb=1" alt="Meal photo" loading="lazy"></a>
-        <button type="button" class="health-btn-sub" data-remove-meal-photo="${m.id}">Remove photo</button>
+        <button type="button" class="admin-btn-sm" data-remove-meal-photo="${m.id}">Remove photo</button>
       </div>` : ''}
       <div class="health-meal-macros">${_macroLine(m)}${m.notes ? ` — ${esc(m.notes)}` : ''}</div>
       <form class="health-inline-form health-meal-edit" data-edit-meal-form="${m.id}" hidden>
-        <input name="description" class="health-input" value="${esc(m.description)}" placeholder="Meal" aria-label="Description">
-        <input name="kcal" type="number" min="0" class="health-input health-input-sm" value="${v(m.kcal)}" placeholder="kcal" required aria-label="kcal">
-        <input name="protein_g" type="number" step="0.1" min="0" class="health-input health-input-sm" value="${v(m.protein_g)}" placeholder="protein g" aria-label="protein">
-        <input name="carbs_g" type="number" step="0.1" min="0" class="health-input health-input-sm" value="${v(m.carbs_g)}" placeholder="carbs g" aria-label="carbs">
-        <input name="fat_g" type="number" step="0.1" min="0" class="health-input health-input-sm" value="${v(m.fat_g)}" placeholder="fat g" aria-label="fat">
-        <input name="sugar_g" type="number" step="0.1" min="0" class="health-input health-input-sm" value="${v(m.sugar_g)}" placeholder="sugar g" aria-label="sugar">
-        <button class="health-btn" type="submit">Save</button>
-        <button type="button" class="health-btn-sub" data-cancel-edit-meal="${m.id}">Cancel</button>
+        <input name="description" value="${esc(m.description)}" placeholder="Meal" aria-label="Description">
+        <input name="kcal" type="number" min="0" class="health-input-sm" value="${v(m.kcal)}" placeholder="kcal" required aria-label="kcal">
+        <input name="protein_g" type="number" step="0.1" min="0" class="health-input-sm" value="${v(m.protein_g)}" placeholder="protein g" aria-label="protein">
+        <input name="carbs_g" type="number" step="0.1" min="0" class="health-input-sm" value="${v(m.carbs_g)}" placeholder="carbs g" aria-label="carbs">
+        <input name="fat_g" type="number" step="0.1" min="0" class="health-input-sm" value="${v(m.fat_g)}" placeholder="fat g" aria-label="fat">
+        <input name="sugar_g" type="number" step="0.1" min="0" class="health-input-sm" value="${v(m.sugar_g)}" placeholder="sugar g" aria-label="sugar">
+        <button class="admin-btn-add" type="submit">Save</button>
+        <button type="button" class="admin-btn-sm" data-cancel-edit-meal="${m.id}">Cancel</button>
       </form>
     </div>
   </div>`;
@@ -89,16 +102,16 @@ function _weightRowHtml(w) {
     <div class="health-row">
       <span>${d} · <strong>${w.kg} kg</strong>${w.notes ? ` — ${esc(w.notes)}` : ''}</span>
       <span class="health-meal-right">
-        <button class="health-icon-btn" data-edit-weight="${w.id}" title="Edit entry" aria-label="Edit weight">✎</button>
-        <button class="health-icon-btn" data-del-weight="${w.id}" title="Delete entry" aria-label="Delete weight">✕</button>
+        <button class="memory-item-btn health-icon-btn" data-edit-weight="${w.id}" title="Edit entry" aria-label="Edit weight">${_I.edit}</button>
+        <button class="memory-item-btn delete health-icon-btn" data-del-weight="${w.id}" title="Delete entry" aria-label="Delete weight">${_I.del}</button>
       </span>
     </div>
     <form class="health-inline-form health-entry-edit" data-edit-weight-form="${w.id}" data-orig-date="${d}" hidden>
-      <input name="kg" type="number" step="0.1" min="0" class="health-input health-input-sm" value="${w.kg ?? ''}" placeholder="kg" required aria-label="kg">
-      <input name="measured_at" type="date" class="health-input" value="${d}" aria-label="date">
-      <input name="notes" class="health-input" value="${esc(w.notes || '')}" placeholder="notes" aria-label="notes">
-      <button class="health-btn" type="submit">Save</button>
-      <button type="button" class="health-btn-sub" data-cancel-edit-weight="${w.id}">Cancel</button>
+      <input name="kg" type="number" step="0.1" min="0" class="health-input-sm" value="${w.kg ?? ''}" placeholder="kg" required aria-label="kg">
+      <input name="measured_at" type="date" value="${d}" aria-label="date">
+      <input name="notes" value="${esc(w.notes || '')}" placeholder="notes" aria-label="notes">
+      <button class="admin-btn-add" type="submit">Save</button>
+      <button type="button" class="admin-btn-sm" data-cancel-edit-weight="${w.id}">Cancel</button>
     </form>
   </div>`;
 }
@@ -107,23 +120,23 @@ function _weightRowHtml(w) {
 function _trainingRowHtml(s) {
   const v = (x) => (x == null ? '' : x);
   const d = (s.session_at || '').slice(0, 10);
-  const line = `${d} · ${esc(s.kind || 'Session')}${s.duration_min ? ' · ' + s.duration_min + 'm' : ''}${s.rpe ? ' · RPE ' + s.rpe : ''}${s.kcal_burned ? ' · 🔥' + s.kcal_burned : ''}${s.summary ? ' — ' + esc(s.summary) : ''}`;
+  const line = `${d} · ${esc(s.kind || 'Session')}${s.duration_min ? ' · ' + s.duration_min + 'm' : ''}${s.rpe ? ' · RPE ' + s.rpe : ''}${s.kcal_burned ? ' · ' + s.kcal_burned + ' kcal' : ''}${s.summary ? ' — ' + esc(s.summary) : ''}`;
   return `<div class="health-entry" data-train-id="${s.id}">
     <div class="health-row">
       <span>${line}</span>
       <span class="health-meal-right">
-        <button class="health-icon-btn" data-edit-train="${s.id}" title="Edit entry" aria-label="Edit session">✎</button>
-        <button class="health-icon-btn" data-del-train="${s.id}" title="Delete entry" aria-label="Delete session">✕</button>
+        <button class="memory-item-btn health-icon-btn" data-edit-train="${s.id}" title="Edit entry" aria-label="Edit session">${_I.edit}</button>
+        <button class="memory-item-btn delete health-icon-btn" data-del-train="${s.id}" title="Delete entry" aria-label="Delete session">${_I.del}</button>
       </span>
     </div>
     <form class="health-inline-form health-entry-edit" data-edit-train-form="${s.id}" hidden>
-      <input name="kind" class="health-input" value="${esc(s.kind || '')}" placeholder="Type" required aria-label="kind">
-      <input name="duration_min" type="number" min="0" class="health-input health-input-sm" value="${v(s.duration_min)}" placeholder="min" aria-label="min">
-      <input name="rpe" type="number" min="1" max="10" class="health-input health-input-sm" value="${v(s.rpe)}" placeholder="RPE" aria-label="RPE">
-      <input name="kcal_burned" type="number" min="0" class="health-input health-input-sm" value="${v(s.kcal_burned)}" placeholder="kcal 🔥" aria-label="kcal">
-      <input name="summary" class="health-input" value="${esc(s.summary || '')}" placeholder="notes" aria-label="notes">
-      <button class="health-btn" type="submit">Save</button>
-      <button type="button" class="health-btn-sub" data-cancel-edit-train="${s.id}">Cancel</button>
+      <input name="kind" value="${esc(s.kind || '')}" placeholder="Type" required aria-label="kind">
+      <input name="duration_min" type="number" min="0" class="health-input-sm" value="${v(s.duration_min)}" placeholder="min" aria-label="min">
+      <input name="rpe" type="number" min="1" max="10" class="health-input-sm" value="${v(s.rpe)}" placeholder="RPE" aria-label="RPE">
+      <input name="kcal_burned" type="number" min="0" class="health-input-sm" value="${v(s.kcal_burned)}" placeholder="kcal" aria-label="kcal">
+      <input name="summary" value="${esc(s.summary || '')}" placeholder="notes" aria-label="notes">
+      <button class="admin-btn-add" type="submit">Save</button>
+      <button type="button" class="admin-btn-sm" data-cancel-edit-train="${s.id}">Cancel</button>
     </form>
   </div>`;
 }
@@ -261,25 +274,25 @@ async function _renderHabits() {
     const editing = _editingHabits.has(String(h.id));
     const head = editing ? `
         <form class="health-inline-form health-habit-edit" data-edit-form="${h.id}">
-          <input name="name" class="health-input" value="${esc(h.name)}" placeholder="Habit name" required aria-label="Habit name">
-          <input name="icon" class="health-input health-input-icon" value="${esc(h.icon || '')}" placeholder="🧘" maxlength="2" aria-label="Emoji">
-          <input name="category" class="health-input health-input-sm" value="${esc(h.category || '')}" placeholder="Category" aria-label="Category">
-          <button type="submit" class="health-btn">Save</button>
-          <button type="button" class="health-btn-sub" data-cancel-edit="${h.id}" style="cursor:pointer;padding:6px 12px;">Cancel</button>
+          <input name="name" value="${esc(h.name)}" placeholder="Habit name" required aria-label="Habit name">
+          <input name="icon" class="health-input-icon" value="${esc(h.icon || '')}" placeholder="icon" maxlength="2" aria-label="Icon">
+          <input name="category" class="health-input-sm" value="${esc(h.category || '')}" placeholder="Category" aria-label="Category">
+          <button type="submit" class="admin-btn-add">Save</button>
+          <button type="button" class="admin-btn-sm" data-cancel-edit="${h.id}">Cancel</button>
         </form>` : `
         <div class="health-habit-head">
           <div class="health-habit-title">${h.icon ? `<span class="health-habit-icon">${esc(h.icon)}</span>` : ''}<strong>${esc(h.name)}</strong>${h.category ? `<span class="health-chip">${esc(h.category)}</span>` : ''}</div>
           <div class="health-habit-stats">
-            <span class="health-streak" title="Current streak">🔥 ${h.streak}</span>
+            <span class="health-streak" title="Current streak">${_I.flame}${h.streak}</span>
             <span class="health-30d" title="Last 30 days">${h.done_30d}/30</span>
-            <button class="health-check-btn${h.done_today ? ' done' : ''}" data-check="${h.id}" title="Toggle today">${h.done_today ? '✓ Done today' : 'Mark today'}</button>
-            <button class="health-check-btn health-check-yday${h.done_yesterday ? ' done' : ''}" data-check-yday="${h.id}" title="Toggle yesterday">${h.done_yesterday ? '✓ Yesterday' : 'Yesterday'}</button>
-            <button class="health-icon-btn" data-edit-habit="${h.id}" title="Edit habit (rename, emoji, category)" aria-label="Edit habit">✎</button>
-            <button class="health-icon-btn" data-del-habit="${h.id}" title="Delete habit" aria-label="Delete habit">✕</button>
+            <button class="health-check-btn${h.done_today ? ' done' : ''}" data-check="${h.id}" title="Toggle today">${h.done_today ? _I.check + 'Done today' : 'Mark today'}</button>
+            <button class="health-check-btn health-check-yday${h.done_yesterday ? ' done' : ''}" data-check-yday="${h.id}" title="Toggle yesterday">${h.done_yesterday ? _I.check + 'Yesterday' : 'Yesterday'}</button>
+            <button class="memory-item-btn health-icon-btn" data-edit-habit="${h.id}" title="Edit habit (rename, icon, category)" aria-label="Edit habit">${_I.edit}</button>
+            <button class="memory-item-btn delete health-icon-btn" data-del-habit="${h.id}" title="Delete habit" aria-label="Delete habit">${_I.del}</button>
           </div>
         </div>`;
     return `
-      <div class="health-card health-habit" data-id="${h.id}">
+      <div class="admin-card health-habit" data-id="${h.id}">
         ${head}
         ${_heatmapSVG(hm.days)}
       </div>`;
@@ -287,16 +300,16 @@ async function _renderHabits() {
   const weekDone = habits.reduce((s, h) => s + (h.done_7d || 0), 0);
   const weekPossible = habits.length * 7;
   const weeklyCard = habits.length ? `
-    <div class="health-card health-week-card">
+    <div class="admin-card health-week-card">
       <div class="health-card-head"><strong>This week</strong><span class="health-big">${weekDone}<span class="health-unit">/${weekPossible}</span></span></div>
       <div class="health-week-rows">${habits.map((h) => `<div class="health-week-row"><span class="health-week-name">${h.icon ? esc(h.icon) + ' ' : ''}${esc(h.name)}</span><span class="health-week-dots">${[...Array(7)].map((_, i) => `<i class="${i < (h.done_7d || 0) ? 'on' : ''}"></i>`).join('')}</span><span class="health-week-num">${h.done_7d || 0}/7</span></div>`).join('')}</div>
     </div>` : '';
   b.innerHTML = `
     <div class="health-toolbar">
       <form class="health-add-habit" id="health-add-habit">
-        <input name="name" class="health-input" placeholder="New habit (e.g. Meditate)" required>
-        <input name="icon" class="health-input health-input-icon" placeholder="🧘" maxlength="2">
-        <button class="health-btn" type="submit">Add</button>
+        <input name="name" placeholder="New habit (e.g. Meditate)" required>
+        <input name="icon" class="health-input-icon" placeholder="icon" maxlength="2">
+        <button class="admin-btn-add" type="submit">Add</button>
       </form>
     </div>
     ${weeklyCard}
@@ -383,7 +396,7 @@ async function _renderWeight() {
     }
   }
   b.innerHTML = `
-    <div class="health-card">
+    <div class="admin-card">
       <div class="health-card-head"><strong>Weight</strong>
         ${last != null ? `<span class="health-big">${last} <span class="health-unit">kg</span></span>` : ''}
         ${delta != null ? `<span class="health-delta ${delta <= 0 ? 'down' : 'up'}">${delta > 0 ? '+' : ''}${delta} kg</span>` : ''}
@@ -391,11 +404,11 @@ async function _renderWeight() {
       ${_lineChartSVG(trend.series || [], { target, unit: 'kg' })}
       ${projHtml}
       <form class="health-inline-form" id="health-log-weight">
-        <input name="kg" type="number" step="0.1" class="health-input" placeholder="Weight (kg)" required>
-        <button class="health-btn" type="submit">Log weight</button>
+        <input name="kg" type="number" step="0.1" placeholder="Weight (kg)" required>
+        <button class="admin-btn-add" type="submit">Log weight</button>
       </form>
     </div>
-    ${entries.length ? `<div class="health-card"><div class="health-card-head"><strong>History</strong> <span class="health-muted">tap ✎ to edit</span></div>
+    ${entries.length ? `<div class="admin-card"><div class="health-card-head"><strong>History</strong> <span class="health-muted">tap the pencil to edit</span></div>
       <div class="health-list">${entries.slice().reverse().map(_weightRowHtml).join('')}</div></div>` : ''}`;
   b.querySelector('#health-log-weight')?.addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -450,68 +463,68 @@ async function _renderCalories() {
   const meals = day.meals || [];
   const p = profile.profile || {};
   b.innerHTML = `
-    <div class="health-card">
+    <div class="admin-card">
       <div class="health-card-head"><strong>Today</strong>
         <span class="health-big">${day.total_kcal} <span class="health-unit">kcal</span></span>
-        ${adjTarget ? `<span class="health-chip">${day.remaining_kcal >= 0 ? day.remaining_kcal + ' left' : Math.abs(day.remaining_kcal) + ' over'} · target ${adjTarget}${day.burn_credit ? ` (+${day.burn_credit} 🏃)` : ''}</span>` : '<span class="health-chip">set a goal in Profile for a target</span>'}
+        ${adjTarget ? `<span class="health-chip">${day.remaining_kcal >= 0 ? day.remaining_kcal + ' left' : Math.abs(day.remaining_kcal) + ' over'} · target ${adjTarget}${day.burn_credit ? ` (+${day.burn_credit} training)` : ''}</span>` : '<span class="health-chip">set a goal in Profile for a target</span>'}
       </div>
-      ${day.kcal_burned ? `<div class="health-muted" style="margin:-2px 0 6px;font-size:12px">🔥 ${day.kcal_burned} kcal burned in training · ${day.burn_credit} credited back to today's budget</div>` : ''}
+      ${day.kcal_burned ? `<div class="health-muted" style="margin:-2px 0 6px;font-size:12px">${day.kcal_burned} kcal burned in training · ${day.burn_credit} credited back to today's budget</div>` : ''}
       ${adjTarget ? `<div class="health-progress"><span style="width:${pct}%" class="${day.total_kcal > adjTarget ? 'over' : ''}"></span></div>` : ''}
       ${day.macro_targets
         ? `<div class="health-rings">
-             ${_ringSVG(day.protein_g || 0, day.macro_targets.protein_g, 'Protein', '--green, #50fa7b')}
-             ${_ringSVG(day.carbs_g || 0, day.macro_targets.carbs_g, 'Carbs', '--color-accent, #00aaff')}
-             ${_ringSVG(day.fat_g || 0, day.macro_targets.fat_g, 'Fat', '--warn, #f0ad4e')}
+             ${_ringSVG(day.protein_g || 0, day.macro_targets.protein_g, 'Protein', '--green')}
+             ${_ringSVG(day.carbs_g || 0, day.macro_targets.carbs_g, 'Carbs', '--color-accent')}
+             ${_ringSVG(day.fat_g || 0, day.macro_targets.fat_g, 'Fat', '--warn')}
            </div>`
         : `<div class="health-macros"><span>P ${day.protein_g || 0}g</span><span>C ${day.carbs_g || 0}g</span><span>F ${day.fat_g || 0}g</span></div>`}
       ${day.sugar_g ? `<div class="health-macros"><span>Sugar ${day.sugar_g}g</span></div>` : ''}
       <form class="health-inline-form health-meal-form" id="health-log-meal">
-        <input name="description" class="health-input" placeholder="Meal (optional)">
-        <input name="kcal" type="number" class="health-input health-input-sm" placeholder="kcal" required>
-        <button class="health-btn" type="submit">Add</button>
-        <label class="health-btn-sub" style="cursor:pointer;padding:6px 10px;" title="Estimate from a photo">📷<input id="health-meal-photo" type="file" accept="image/*" capture="environment" style="display:none"></label>
+        <input name="description" placeholder="Meal (optional)">
+        <input name="kcal" type="number" class="health-input-sm" placeholder="kcal" required>
+        <button class="admin-btn-add" type="submit">Add</button>
+        <label class="admin-btn-sm health-file-btn" title="Estimate from a photo">${_I.camera}<input id="health-meal-photo" type="file" accept="image/*" capture="environment" style="display:none"></label>
       </form>
       <details class="health-macros-extra">
         <summary class="health-muted">+ macros (optional)</summary>
         <div class="health-inline-form" style="margin-top:6px">
-          <input name="protein_g" type="number" step="0.1" min="0" class="health-input health-input-sm" placeholder="protein g" form="health-log-meal">
-          <input name="carbs_g" type="number" step="0.1" min="0" class="health-input health-input-sm" placeholder="carbs g" form="health-log-meal">
-          <input name="fat_g" type="number" step="0.1" min="0" class="health-input health-input-sm" placeholder="fat g" form="health-log-meal">
-          <input name="sugar_g" type="number" step="0.1" min="0" class="health-input health-input-sm" placeholder="sugar g" form="health-log-meal">
+          <input name="protein_g" type="number" step="0.1" min="0" class="health-input-sm" placeholder="protein g" form="health-log-meal">
+          <input name="carbs_g" type="number" step="0.1" min="0" class="health-input-sm" placeholder="carbs g" form="health-log-meal">
+          <input name="fat_g" type="number" step="0.1" min="0" class="health-input-sm" placeholder="fat g" form="health-log-meal">
+          <input name="sugar_g" type="number" step="0.1" min="0" class="health-input-sm" placeholder="sugar g" form="health-log-meal">
         </div>
       </details>
       <div id="health-meal-est-note" class="health-muted" style="display:none;margin:-2px 0 8px;"></div>
       <div class="health-list health-meal-list">${meals.length ? meals.map(_mealRowHtml).join('') : '<div class="health-empty">No meals logged today.</div>'}</div>
     </div>
-    <div class="health-card">
+    <div class="admin-card">
       <div class="health-card-head"><strong>Last 14 days</strong></div>
       ${_barChartSVG(series.series || [], { target })}
     </div>
-    <div class="health-card">
+    <div class="admin-card">
       <div class="health-card-head"><strong>History</strong> <span class="health-muted">earlier days — tap a meal to edit</span></div>
       <div class="health-list health-meal-list">${_mealsHistoryHtml(history, _todayLocal())}</div>
     </div>
-    <div class="health-card">
+    <div class="admin-card">
       <div class="health-card-head"><strong>Data (CSV)</strong> <span class="health-muted">export / import meals, weights, training</span></div>
       <div class="health-inline-form">
-        <select id="health-csv-kind" class="health-input"><option value="meals">Meals</option><option value="weights">Weights</option><option value="training">Training</option></select>
-        <button class="health-btn" id="health-csv-export" type="button">Export ⤓</button>
-        <label class="health-btn" style="cursor:pointer;">Import ⤒<input id="health-csv-import" type="file" accept=".csv,text/csv" style="display:none"></label>
+        <select id="health-csv-kind"><option value="meals">Meals</option><option value="weights">Weights</option><option value="training">Training</option></select>
+        <button class="admin-btn-sm" id="health-csv-export" type="button">${_I.download} Export</button>
+        <label class="admin-btn-sm health-file-btn">${_I.upload} Import<input id="health-csv-import" type="file" accept=".csv,text/csv" style="display:none"></label>
       </div>
     </div>
-    <details class="health-card health-profile">
+    <details class="health-profile">
       <summary><strong>Profile &amp; goals</strong> <span class="health-muted">drives your calorie target (TDEE)</span></summary>
       <form id="health-profile-form" class="health-profile-grid">
-        <label>Height (cm)<input name="height_cm" type="number" step="0.1" class="health-input" value="${p.height_cm ?? ''}"></label>
-        <label>Date of birth<input name="date_of_birth" type="date" class="health-input" value="${p.date_of_birth ?? ''}"></label>
-        <label>Sex<select name="sex" class="health-input"><option value="">—</option><option value="M" ${p.sex === 'M' ? 'selected' : ''}>Male</option><option value="F" ${p.sex === 'F' ? 'selected' : ''}>Female</option></select></label>
-        <label>Activity<select name="activity_level" class="health-input">
+        <label>Height (cm)<input name="height_cm" type="number" step="0.1" value="${p.height_cm ?? ''}"></label>
+        <label>Date of birth<input name="date_of_birth" type="date" value="${p.date_of_birth ?? ''}"></label>
+        <label>Sex<select name="sex"><option value="">—</option><option value="M" ${p.sex === 'M' ? 'selected' : ''}>Male</option><option value="F" ${p.sex === 'F' ? 'selected' : ''}>Female</option></select></label>
+        <label>Activity<select name="activity_level">
           ${['sedentary', 'lightly_active', 'moderately_active', 'very_active', 'extra_active'].map((a) => `<option value="${a}" ${(p.activity_level || 'moderately_active') === a ? 'selected' : ''}>${a.replace(/_/g, ' ')}</option>`).join('')}
         </select></label>
-        <label>Target weight (kg)<input name="target_kg" type="number" step="0.1" class="health-input" value="${p.target_kg ?? ''}"></label>
-        <label>Weekly loss (kg)<input name="target_weekly_loss_kg" type="number" step="0.1" class="health-input" value="${p.target_weekly_loss_kg ?? ''}"></label>
-        <label>Manual kcal target<input name="daily_kcal_target" type="number" class="health-input" value="${p.daily_kcal_target ?? ''}" placeholder="auto from TDEE"></label>
-        <button class="health-btn" type="submit">Save profile</button>
+        <label>Target weight (kg)<input name="target_kg" type="number" step="0.1" value="${p.target_kg ?? ''}"></label>
+        <label>Weekly loss (kg)<input name="target_weekly_loss_kg" type="number" step="0.1" value="${p.target_weekly_loss_kg ?? ''}"></label>
+        <label>Manual kcal target<input name="daily_kcal_target" type="number" value="${p.daily_kcal_target ?? ''}" placeholder="auto from TDEE"></label>
+        <button class="admin-btn-add" type="submit">Save profile</button>
       </form>
     </details>`;
   let _pendingMacros = null;  // macros from a photo estimate, sent on the next Add
@@ -560,10 +573,10 @@ async function _renderCalories() {
     try { await _api(`/meals/${btn.dataset.delMeal}`, { method: 'DELETE' }); _renderCalories(); }
     catch (err) { uiModule.showError?.(err.message); }
   }));
-  // Expand a meal row to reveal its macros (clicking the row, not the ✎/✕ buttons).
+  // Expand a meal row to reveal its macros (clicking the row, not the action buttons).
   b.querySelectorAll('[data-expand-meal]').forEach((head) => {
     const toggle = (e) => {
-      if (e.target.closest('.health-icon-btn')) return;  // ✎/✕ handle themselves
+      if (e.target.closest('.health-icon-btn')) return;  // edit/delete handle themselves
       const item = head.closest('.health-meal');
       const detail = item?.querySelector('.health-meal-detail');
       if (!detail) return;
@@ -575,7 +588,7 @@ async function _renderCalories() {
     head.addEventListener('click', toggle);
     head.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(e); } });
   });
-  // ✎ → open the detail + reveal the inline edit form.
+  // Edit button: open the detail + reveal the inline edit form.
   b.querySelectorAll('[data-edit-meal]').forEach((btn) => btn.addEventListener('click', (e) => {
     e.stopPropagation();
     const item = btn.closest('.health-meal');
@@ -659,17 +672,17 @@ async function _renderTraining() {
   try { data = await _api('/training?days=60'); } catch (e) { b.innerHTML = `<div class="health-error">${esc(e.message)}</div>`; return; }
   const sessions = data.sessions || [];
   b.innerHTML = `
-    <div class="health-card">
+    <div class="admin-card">
       <form class="health-inline-form health-train-form" id="health-log-train">
-        <input name="kind" class="health-input" placeholder="Type (Strength, Run…)" required>
-        <input name="duration_min" type="number" class="health-input health-input-sm" placeholder="min">
-        <input name="rpe" type="number" min="1" max="10" class="health-input health-input-sm" placeholder="RPE">
-        <input name="kcal_burned" type="number" min="0" class="health-input health-input-sm" placeholder="kcal 🔥">
-        <button class="health-btn" type="submit">Log</button>
+        <input name="kind" placeholder="Type (Strength, Run…)" required>
+        <input name="duration_min" type="number" class="health-input-sm" placeholder="min">
+        <input name="rpe" type="number" min="1" max="10" class="health-input-sm" placeholder="RPE">
+        <input name="kcal_burned" type="number" min="0" class="health-input-sm" placeholder="kcal">
+        <button class="admin-btn-add" type="submit">Log</button>
       </form>
-      <input name="summary" id="health-train-summary" class="health-input" placeholder="Notes (optional)" form="health-log-train" style="margin-top:6px">
+      <input name="summary" id="health-train-summary" placeholder="Notes (optional)" form="health-log-train" style="margin-top:6px">
     </div>
-    <div class="health-card"><div class="health-card-head"><strong>Recent sessions</strong> <span class="health-muted">tap ✎ to edit</span></div>
+    <div class="admin-card"><div class="health-card-head"><strong>Recent sessions</strong> <span class="health-muted">tap the pencil to edit</span></div>
       <div class="health-list">${sessions.length ? sessions.map(_trainingRowHtml).join('') : '<div class="health-empty">No sessions logged.</div>'}</div>
     </div>`;
   b.querySelector('#health-log-train')?.addEventListener('submit', async (e) => {

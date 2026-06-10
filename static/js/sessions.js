@@ -7,7 +7,7 @@ import markdownModule from './markdown.js';
 import chatRenderer from './chatRenderer.js';
 import { providerLogo } from './providers.js';
 import { initModelPicker, updateModelPicker } from './modelPicker.js';
-import themeModule from './theme.js';
+import themeModule from './theme.js?v=395';
 import spinnerModule from './spinner.js';
 
 const API_BASE = window.location.origin;
@@ -62,7 +62,7 @@ function _deselectCurrentSession(sid) {
   if (currentSessionId !== sid) return;
   currentSessionId = null;
   uiModule.el('chat-history').innerHTML = '';
-  uiModule.el('current-meta').textContent = 'Iris Chat';
+  uiModule.el('current-meta').textContent = 'Odysseus Chat';
   Storage.remove('lastSessionId');
   history.replaceState(null, '', window.location.pathname);
   if (window.chatModule && window.chatModule.showWelcomeScreen) {
@@ -1573,7 +1573,7 @@ export async function selectSession(id, { keepSidebar = false } = {}) {
 
     const currentMetaEl = uiModule.el('current-meta');
     if (currentMetaEl) {
-      currentMetaEl.textContent = meta ? meta.name : 'Iris Chat';
+      currentMetaEl.textContent = meta ? meta.name : 'Odysseus Chat';
     }
     // Update model picker visibility
     updateModelPicker();

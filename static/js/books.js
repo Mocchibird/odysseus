@@ -14,7 +14,7 @@
 import * as Modals from './modalManager.js';
 import { makeToolModalDraggable } from './modalFullscreen.js?v=370';
 import { createPdfReader } from './pdfReader.js?v=383';
-import bookToolsModule from './bookTools.js?v=370';
+import bookToolsModule from './bookTools.js?v=395';
 import uiModule from './ui.js';
 
 const API_BASE = window.location.origin;

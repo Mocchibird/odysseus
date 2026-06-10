@@ -96,7 +96,7 @@ function _renderTagsRow() {
   row.style.display = '';
   row.innerHTML = _allTags.map(t => {
     const on = _activeTags.includes(t);
-    return `<button class="kb-tag-chip${on ? ' active' : ''}" data-tag="${_esc(t)}">${_esc(t)}</button>`;
+    return `<button class="memory-cat-chip kb-tag-chip${on ? ' active' : ''}" data-tag="${_esc(t)}">${_esc(t)}</button>`;
   }).join('');
 }
 
@@ -166,10 +166,10 @@ async function _openDetail(id) {
 
   view.innerHTML = `
     <div class="kb-detail-head">
-      <button class="kb-back" title="Back">‹ Back</button>
+      <button class="memory-toolbar-btn kb-back" title="Back"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg> Back</button>
       <div class="kb-detail-title" title="${_esc(rec.filename)}">${_esc(rec.filename)}</div>
-      <a class="kb-open-orig" href="${_esc(rec.url || '#')}" target="_blank" rel="noopener" ${rec.has_file ? '' : 'style="display:none"'}>Open original ↗</a>
-      <button class="kb-delete" title="Delete from knowledge base">Delete</button>
+      <a class="kb-open-orig" href="${_esc(rec.url || '#')}" target="_blank" rel="noopener" ${rec.has_file ? '' : 'style="display:none"'}>Open original <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg></a>
+      <button class="admin-btn-delete kb-delete" title="Delete from knowledge base">Delete</button>
     </div>
     <div class="kb-detail-meta">${_esc(meta)}</div>
     <div class="kb-tags-edit">
@@ -177,14 +177,14 @@ async function _openDetail(id) {
         ${userTags.map(t => `<span class="kb-chip editable" data-tag="${_esc(t)}">${_esc(t)}<button class="kb-chip-x" data-tag="${_esc(t)}" title="Remove">×</button></span>`).join('')}
         ${aiTags.map(t => `<span class="kb-chip ai" title="auto-tag">${_esc(t)}</span>`).join('')}
       </div>
-      <input class="kb-tag-input" placeholder="Add tag + Enter">
-      <button class="kb-suggest-tags" type="button" title="AI-generate topical tags from the text"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.59 13.41 13.42 20.58a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>Suggest tags</button>
+      <input class="memory-search-input kb-tag-input" placeholder="Add tag + Enter">
+      <button class="memory-toolbar-btn kb-suggest-tags" type="button" title="AI-generate topical tags from the text"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.59 13.41 13.42 20.58a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>Suggest tags</button>
     </div>
     <div class="kb-viewer"></div>
     <details class="kb-indexed">
       <summary>Indexed text — exactly what Iris searches (${(rec.text || '').length} chars)</summary>
       <div class="kb-indexed-actions">
-        <button class="kb-edit-text" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>Edit text</button>
+        <button class="memory-toolbar-btn kb-edit-text" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>Edit text</button>
         <span class="kb-edit-hint">${(kind === 'md' || kind === 'text') ? 'Edits the file content.' : 'Edits the searchable text only — the original file is left unchanged.'}</span>
       </div>
       <pre class="kb-indexed-pre">${_esc(rec.text || '(no text extracted)')}</pre>
@@ -208,11 +208,11 @@ async function _openDetail(id) {
       if (!document.body.contains(pc)) { try { reader.destroy(); } catch (_) {} return; }
       _pdfReader = reader;
     }).catch(() => {
-      viewer.innerHTML = `<div class="kb-noview">Couldn't render this PDF. <a href="${_esc(rec.url)}" target="_blank" rel="noopener">Open it ↗</a></div>`;
+      viewer.innerHTML = `<div class="kb-noview">Couldn't render this PDF. <a href="${_esc(rec.url)}" target="_blank" rel="noopener">Open it <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg></a></div>`;
     });
   } else {
     viewer.innerHTML = rec.has_file
-      ? `<div class="kb-noview">No inline preview for this file type. <a href="${_esc(rec.url)}" target="_blank" rel="noopener">Open original ↗</a></div>`
+      ? `<div class="kb-noview">No inline preview for this file type. <a href="${_esc(rec.url)}" target="_blank" rel="noopener">Open original <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg></a></div>`
       : '<div class="kb-noview">No stored file.</div>';
   }
 
@@ -441,8 +441,8 @@ export function openKnowledge(openId) {
       <div class="modal-body kb-body">
         <div class="kb-list-view">
           <div class="kb-toolbar">
-            <input class="kb-search" type="text" placeholder="Search files + contents…">
-            <button class="kb-upload-btn">＋ Add files</button>
+            <input class="memory-search-input kb-search" type="text" placeholder="Search files + contents…">
+            <button class="admin-btn-add kb-upload-btn"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg> Add files</button>
             <input type="file" class="kb-file-input" multiple style="display:none">
           </div>
           <div class="kb-upload-bar" style="display:none">

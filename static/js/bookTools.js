@@ -95,6 +95,12 @@ async function _addBookmark(btn) {
   } catch (e) { uiModule.showError?.(e.message); }
 }
 
+// Inline SVG icons — no Unicode emoji in UI; matches static/index.html's style.
+const _SVG_X = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
+const _SVG_PEN = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>';
+const _SVG_BOOKMARK = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>';
+const _SVG_SPARK = '<svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0L14.59 8.41L23 12L14.59 15.59L12 24L9.41 15.59L1 12L9.41 8.41Z"/></svg>';
+
 // ---- Search overlay ---------------------------------------------------------
 function _openSearch() {
   if (!_ctx) return;
@@ -104,7 +110,7 @@ function _openSearch() {
   panel.innerHTML = `
     <div class="book-tool-head">
       <input type="search" class="book-search-input" placeholder="Search in this book…" autocomplete="off" />
-      <button class="book-tool-close" title="Close">✕</button>
+      <button class="book-tool-close" title="Close">${_SVG_X}</button>
     </div>
     <div class="book-tool-body book-search-results"><div class="book-tool-hint">Type to search the whole book.</div></div>`;
   document.body.appendChild(panel);
@@ -147,7 +153,7 @@ async function _openAnnotations() {
   panel.innerHTML = `
     <div class="book-tool-head">
       <strong>Bookmarks &amp; highlights</strong>
-      <button class="book-tool-close" title="Close">✕</button>
+      <button class="book-tool-close" title="Close">${_SVG_X}</button>
     </div>
     <div class="book-tool-body book-annot-list"><div class="book-tool-hint">Loading…</div></div>`;
   document.body.appendChild(panel);
@@ -156,19 +162,19 @@ async function _openAnnotations() {
 
   const list = panel.querySelector('.book-annot-list');
   const render = (items) => {
-    if (!items.length) { list.innerHTML = '<div class="book-tool-hint">No bookmarks or highlights yet. Select text to highlight, or use the 🔖 button to bookmark a spot.</div>'; return; }
+    if (!items.length) { list.innerHTML = '<div class="book-tool-hint">No bookmarks or highlights yet. Select text to highlight, or use the bookmark button to save a spot.</div>'; return; }
     items.sort((a, b) => (a.chapter_index - b.chapter_index) || ((a.created_at || '') < (b.created_at || '') ? -1 : 1));
     list.innerHTML = items.map((a) => `
       <div class="book-annot ${a.type}" data-id="${esc(a.id)}">
         <button class="book-annot-jump" data-ch="${a.chapter_index}">
-          <span class="book-annot-badge">${a.type === 'highlight' ? '✎' : '🔖'}</span>
+          <span class="book-annot-badge">${a.type === 'highlight' ? _SVG_PEN : _SVG_BOOKMARK}</span>
           <span class="book-annot-main">
             <span class="book-annot-loc">${_label()} ${a.chapter_index + 1}${a.chapter_title ? ' · ' + esc(a.chapter_title) : ''}</span>
             ${a.text ? `<span class="book-annot-text">${esc(a.text)}</span>` : ''}
             ${a.note ? `<span class="book-annot-note">${esc(a.note)}</span>` : ''}
           </span>
         </button>
-        <button class="book-annot-del" data-id="${esc(a.id)}" title="Delete">✕</button>
+        <button class="book-annot-del" data-id="${esc(a.id)}" title="Delete">${_SVG_X}</button>
       </div>`).join('');
     list.querySelectorAll('.book-annot-jump').forEach((b) => b.addEventListener('click', () => { _ctx.gotoChapter?.(Number(b.dataset.ch)); _closePanels(); }));
     list.querySelectorAll('.book-annot-del').forEach((b) => b.addEventListener('click', async () => {
@@ -240,9 +246,9 @@ function _maybeShowSelPopover(contentEl) {
   const pop = document.createElement('div');
   pop.className = 'book-sel-popover';
   pop.innerHTML = `
-    <button class="book-sel-btn" data-act="highlight" title="Highlight">✎ Highlight</button>
-    <button class="book-sel-btn" data-act="explain" title="Explain with AI">✨ Explain</button>
-    <button class="book-sel-btn" data-act="read" title="Read aloud">🔊</button>`;
+    <button class="book-sel-btn" data-act="highlight" title="Highlight">${_SVG_PEN} Highlight</button>
+    <button class="book-sel-btn" data-act="explain" title="Explain with AI">${_SVG_SPARK} Explain</button>
+    <button class="book-sel-btn" data-act="read" title="Read aloud"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg></button>`;
   document.body.appendChild(pop);
   _selPopover = pop;
   const top = Math.max(8, rect.top - pop.offsetHeight - 8);
@@ -283,7 +289,7 @@ function _explainSelection(text, rect) {
   const pop = _track(document.createElement('div'));
   pop.className = 'book-explain-popover';
   pop.innerHTML = `
-    <div class="book-explain-head"><span>✨ Explain</span><button class="book-explain-close" title="Close">✕</button></div>
+    <div class="book-explain-head"><span>${_SVG_SPARK} Explain</span><button class="book-explain-close" title="Close">${_SVG_X}</button></div>
     <div class="book-explain-quote">${esc(text.length > 240 ? text.slice(0, 240) + '…' : text)}</div>
     <div class="book-explain-body"><span class="book-explain-spin"></span> Thinking…</div>`;
   document.body.appendChild(pop);

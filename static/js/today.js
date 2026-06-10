@@ -70,11 +70,11 @@ function _render() {
     <button class="today-habit" data-id="${h.id}" title="Mark done for today">
       <span class="today-habit-check" aria-hidden="true"></span>
       <span class="today-habit-name">${h.icon ? esc(h.icon) + ' ' : ''}${esc(h.name)}</span>
-      ${h.streak ? `<span class="today-habit-streak">${h.streak}🔥</span>` : ''}
-    </button>`).join('') : '<div class="today-section-empty">All habits done. 🎉</div>';
+      ${h.streak ? `<span class="today-habit-streak">${h.streak}<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"/></svg></span>` : ''}
+    </button>`).join('') : '<div class="today-section-empty">All habits done.</div>';
 
   body.innerHTML = `
-    ${everythingEmpty ? '<div class="today-allclear">You\'re all caught up. Nothing on the radar for today. ☀️</div>' : ''}
+    ${everythingEmpty ? '<div class="today-allclear">You\'re all caught up. Nothing on the radar for today.</div>' : ''}
     <section class="today-section">
       <div class="today-section-head"><span class="today-section-title">Schedule</span><span class="today-count">${events.length}</span></div>
       <div class="today-list">${eventsHtml}</div>

@@ -76,15 +76,15 @@ function _render() {
       <div class="ping-card-head">
         <span class="ping-kind ping-kind-${esc(p.kind)}">${esc(_KIND_LABEL[p.kind] || p.kind)}</span>
         <span class="ping-title">${esc(p.title)}</span>
-        ${p.keep ? '<span class="ping-keep-flag" title="Kept">★</span>' : ''}
+        ${p.keep ? '<span class="ping-keep-flag" title="Kept"><svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg></span>' : ''}
         <span class="ping-time">${esc(_relTime(p.created_at))}</span>
       </div>
       ${p.body ? `<div class="ping-body">${esc(p.body)}</div>` : ''}
       <div class="ping-actions">
-        <button class="ping-btn ping-branch" data-id="${p.id}">${p.session_id ? 'Open chat' : 'Discuss'}</button>
-        <button class="ping-btn-sub" data-keep="${p.id}">${p.keep ? 'Unkeep' : 'Keep'}</button>
-        <button class="ping-btn-sub" data-read="${p.id}">${p.read ? 'Unread' : 'Read'}</button>
-        <button class="ping-btn-sub ping-del" data-del="${p.id}" aria-label="Delete">✕</button>
+        <button class="memory-toolbar-btn active ping-branch" data-id="${p.id}">${p.session_id ? 'Open chat' : 'Discuss'}</button>
+        <button class="memory-toolbar-btn" data-keep="${p.id}">${p.keep ? 'Unkeep' : 'Keep'}</button>
+        <button class="memory-toolbar-btn" data-read="${p.id}">${p.read ? 'Unread' : 'Read'}</button>
+        <button class="memory-item-btn delete ping-del" data-del="${p.id}" aria-label="Delete"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
       </div>
     </div>`).join('');
 
@@ -185,8 +185,8 @@ export function openPings() {
       <div class="modal-header">
         <h4><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:6px"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>Pings &amp; Reminders</h4>
         <span style="flex:1"></span>
-        <button class="ping-filter-toggle" id="pings-unread-toggle" title="Show unread only">Unread</button>
-        <button class="ping-filter-toggle" id="pings-readall">Mark all read</button>
+        <button class="memory-toolbar-btn" id="pings-unread-toggle" title="Show unread only">Unread</button>
+        <button class="memory-toolbar-btn" id="pings-readall">Mark all read</button>
         <button class="close-btn" id="pings-close">✖</button>
       </div>
       <div class="modal-body"></div>

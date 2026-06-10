@@ -9,12 +9,6 @@ import { makeWindowDraggable } from './windowDrag.js';
 import { snapModalToZone } from './tileManager.js';
 
 export const THEMES = {
-  iris:       { bg:'#151914', fg:'#e7dff2', panel:'#101410', border:'#4f5f4d', red:'#b996ff',
-                advanced: { sidebarBg:'#101410', brandColor:'#d7c2ff',
-                            sendBtnBg:'#8f6ff0', sendBtnHover:'#7d5fe0',
-                            userBubbleBg:'#20271f', aiBubbleBg:'#171b16',
-                            inputBg:'#111611', inputBorder:'#4f5f4d',
-                            toggleActive:'#8f6ff0' } },
   dark:       { bg:'#282c34', fg:'#9cdef2', panel:'#111111', border:'#355a66', red:'#e06c75' },
   light:      { bg:'#f0ebe3', fg:'#5a5248', panel:'#faf6f0', border:'#d4cdc2', red:'#c47d5a' },
   midnight:   { bg:'#0d1117', fg:'#c9d1d9', panel:'#161b22', border:'#30363d', red:'#f85149' },
@@ -37,10 +31,9 @@ export const THEMES = {
   cute:       { bg:'#fff0f5', fg:'#d4608a', panel:'#fff8fa', border:'#f0c0d0', red:'#ff6b9d' },
 };
 
-const DEFAULT_THEME = 'iris';
+const DEFAULT_THEME = 'dark';
 const LS_KEY = 'odysseus-theme';
 const CUSTOM_THEMES_KEY = 'odysseus-custom-themes';
-const IRIS_THEME_DEFAULT_VERSION = 'iris-theme-default-v1';
 
 const FONT_MAP = {
   mono: "'Fira Code', monospace",
@@ -60,7 +53,6 @@ const THEME_DEFAULT_PATTERN = {
   cyberpunk:  'synapse',
   retrowave:  'embers',
   forest:     'petals',
-  iris:       'petals',
   ocean:      'constellations',
   terminal:   'perlin-flow',
   organs:     'rain',
@@ -74,7 +66,6 @@ const THEME_DEFAULT_EFFECT_COLOR = {
   organs:     '#451616',
   cute:       '#ff8cb8',
   ume:        '#f5a0c0',
-  iris:       '#d7c2ff',
 };
 
 // Default effect intensity (0..1) per theme. Any theme not listed defaults to 1.
@@ -192,7 +183,7 @@ const ADV_KEYS = [
   { key: 'aiBubbleBg',         css: '--ai-bubble-bg',      label: 'AI Chat Bubble',   group: 'Chat Bubbles' },
   { key: 'bubbleBorder',       css: '--bubble-border',     label: 'Border Chat Bubble', group: 'Chat Bubbles' },
   { key: 'sidebarBg',          css: '--sidebar-bg',        label: 'Sidebar Bg',       group: 'Sidebar' },
-  { key: 'brandColor',         css: '--brand-color',       label: 'Iris Logo',        group: 'Sidebar' },
+  { key: 'brandColor',         css: '--brand-color',       label: 'Odysseus Logo',    group: 'Sidebar' },
   { key: 'hamburgerColor',     css: '--hamburger-color',   label: 'Hamburger Menu',   group: 'Sidebar' },
   { key: 'inputBg',            css: '--input-bg',          label: 'Input Bg',         group: 'Chat Input / Prompt Area' },
   { key: 'inputBorder',        css: '--input-border',      label: 'Input Border',     group: 'Chat Input / Prompt Area' },
@@ -293,14 +284,13 @@ export function applyColors(colors) {
     s.setProperty(css, adv[key] || defaults[key]);
   }
 
-  // Keep route-specific glyphs theme-colored while the shared Iris brand
-  // favicon stays on the real PNG asset.
+  // Update favicon to match theme accent color
   _updateFavicon(colors.red || '#e06c75');
 }
 
 // Per-route SVG shape registry — kept in sync with the inline favicon
 // script in index.html so a theme change keeps the route icon, not the
-// shared Iris PNG. Returns the inner SVG markup colored with `fg`.
+// default boat. Returns the inner SVG markup colored with `fg`.
 const _ROUTE_FAVICON_SHAPES = {
   '/calendar':
     "<rect x='4' y='6' width='24' height='22' rx='2' fill='none' stroke='__C__' stroke-width='2.5'/>" +
@@ -339,20 +329,20 @@ const _ROUTE_FAVICON_SHAPES = {
 function _updateFavicon(fg) {
   const path = (window.location.pathname || '').toLowerCase();
   const routeShape = _ROUTE_FAVICON_SHAPES[path];
-  let href = '/static/IRIS.png';
-  let type = 'image/png';
+  let svg;
   if (routeShape) {
-    const svg = `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'>${routeShape.split('__C__').join(fg)}</svg>`;
-    href = 'data:image/svg+xml,' + encodeURIComponent(svg);
-    type = 'image/svg+xml';
+    svg = `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'>${routeShape.split('__C__').join(fg)}</svg>`;
+  } else {
+    svg = `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><path d='M16 4L16 22L6 22Z' fill='${fg}'/><path d='M16 8L16 22L24 22Z' fill='${fg}' opacity='0.6'/><path d='M4 24Q10 20 16 24Q22 28 28 24' stroke='${fg}' stroke-width='2.5' fill='none' stroke-linecap='round'/></svg>`;
   }
+  const href = 'data:image/svg+xml,' + encodeURIComponent(svg);
   let link = document.querySelector("link[rel='icon']");
   if (!link) {
     link = document.createElement('link');
     link.rel = 'icon';
+    link.type = 'image/svg+xml';
     document.head.appendChild(link);
   }
-  link.type = type;
   link.href = href;
   let apple = document.querySelector("link[rel='apple-touch-icon']");
   if (!apple) {
@@ -456,17 +446,10 @@ export function getSaved() {
   if (obj && obj.name === 'chatgpt') obj.name = 'gpt';
   // Migration: 'sakura' preset was renamed to 'ume'
   if (obj && obj.name === 'sakura') obj.name = 'ume';
-  if (
-    obj
-    && obj.theme_default_version !== IRIS_THEME_DEFAULT_VERSION
-    && obj.name === 'dark'
-    && _sameCoreThemeColors(obj.colors, THEMES.dark)
-  ) {
-    const migrated = {
-      name: DEFAULT_THEME,
-      colors: THEMES[DEFAULT_THEME],
-      theme_default_version: IRIS_THEME_DEFAULT_VERSION
-    };
+  // Migration: the 'iris' preset was removed — reset to the stock default
+  // (colors too: the stored palette is the retired preset's, not a custom).
+  if (obj && obj.name === 'iris') {
+    const migrated = { name: DEFAULT_THEME, colors: THEMES[DEFAULT_THEME] };
     Storage.setJSON(LS_KEY, migrated);
     _syncToServer(migrated);
     return migrated;
@@ -474,13 +457,8 @@ export function getSaved() {
   return obj;
 }
 
-function _sameCoreThemeColors(a, b) {
-  if (!a || !b) return false;
-  return ['bg', 'fg', 'panel', 'border', 'red'].every(k => a[k] === b[k]);
-}
-
 export function save(name, colors, opts) {
-  const obj = { name, colors, theme_default_version: IRIS_THEME_DEFAULT_VERSION };
+  const obj = { name, colors };
   if (opts) {
     if (opts.font && opts.font !== DEFAULT_FONT) obj.font = opts.font;
     if (opts.density && opts.density !== DEFAULT_DENSITY) obj.density = opts.density;
@@ -960,8 +938,8 @@ export function initThemeUI() {
       if (ds) ds.value = DEFAULT_DENSITY;
       if (ps) ps.value = 'none';
       grid.querySelectorAll('.theme-swatch').forEach(s => s.classList.remove('active'));
-      const defaultSwatch = grid.querySelector(`[data-theme="${DEFAULT_THEME}"]`);
-      if (defaultSwatch) defaultSwatch.classList.add('active');
+      const darkSwatch = grid.querySelector('[data-theme="dark"]');
+      if (darkSwatch) darkSwatch.classList.add('active');
     });
   }
 
@@ -2088,14 +2066,10 @@ async function _initWithSync() {
     const serverTheme = await _loadFromServer();
     if (serverTheme && serverTheme.colors) {
       if (serverTheme.name === 'sakura') serverTheme.name = 'ume';
-      if (
-        serverTheme.theme_default_version !== IRIS_THEME_DEFAULT_VERSION
-        && serverTheme.name === 'dark'
-        && _sameCoreThemeColors(serverTheme.colors, THEMES.dark)
-      ) {
+      // The 'iris' preset was removed — reset a synced copy to the default.
+      if (serverTheme.name === 'iris') {
         serverTheme.name = DEFAULT_THEME;
         serverTheme.colors = THEMES[DEFAULT_THEME];
-        serverTheme.theme_default_version = IRIS_THEME_DEFAULT_VERSION;
         _syncToServer(serverTheme);
       }
       Storage.setJSON(LS_KEY, serverTheme);

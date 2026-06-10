@@ -15,7 +15,7 @@ import sessionModule from './sessions.js';
 import modelsModule from './models.js';
 import chatRenderer from './chatRenderer.js';
 import spinnerModule from './spinner.js';
-import themeModule from './theme.js';
+import themeModule from './theme.js?v=395';
 import documentModule from './document.js';
 import settingsModule from './settings.js?v=380';
 import cookbookModule from './cookbook.js';
