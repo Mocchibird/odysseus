@@ -38033,7 +38033,13 @@ body.theme-frosted .modal {
 #knowledge-modal .modal-body button,
 #books-modal .modal-body button,
 #pings-modal .modal-body button,
-#today-modal .modal-body button { margin-top: 0; }
+#today-modal .modal-body button,
+#health-modal .modal-body .memory-search-input,
+#habits-modal .modal-body .memory-search-input,
+#knowledge-modal .modal-body .memory-search-input,
+#books-modal .modal-body .memory-search-input,
+#pings-modal .modal-body .memory-search-input,
+#today-modal .modal-body .memory-search-input { margin-top: 0; }
 .health-card-head {
   display: flex;
   align-items: baseline;
@@ -38560,10 +38566,10 @@ button.gallery-tag-x { height: 13px; min-height: 0; padding: 0; border: 0; backg
 .kb-indexed > summary { cursor: pointer; opacity: 0.6; padding: 4px 0; }
 .kb-indexed-pre { white-space: pre-wrap; word-break: break-word; max-height: 200px; overflow-y: auto; background: color-mix(in srgb, var(--fg) 4%, transparent); border-radius: 6px; padding: 8px; font-size: 11px; margin: 4px 0 0; }
 /* edit text + suggest tags (lightweight content correction — not a 2nd doc editor) */
-.kb-suggest-tags { flex-shrink: 0; gap: 5px; }
+.kb-suggest-tags { flex-shrink: 0; display: inline-flex; align-items: center; gap: 5px; }
 .kb-suggest-tags:disabled { opacity: 0.5; cursor: default; }
 .kb-indexed-actions { display: flex; align-items: center; gap: 8px; margin: 6px 0 0; }
-.kb-edit-text { gap: 5px; }
+.kb-edit-text { display: inline-flex; align-items: center; gap: 5px; }
 .kb-edit-hint { font-size: 10px; opacity: 0.5; }
 .kb-edit-wrap { margin: 6px 0 0; }
 .kb-edit-area { width: 100%; box-sizing: border-box; min-height: 200px; resize: vertical; font-family: var(--mono, monospace); font-size: 11px; line-height: 1.5; padding: 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--fg); }
