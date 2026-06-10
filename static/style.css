@@ -4100,6 +4100,9 @@ body.bg-pattern-sparkles {
         transition: opacity 0.35s ease;
       }
       #sidebar-backdrop.visible { opacity: 1; pointer-events: auto; }
+      /* The floating model chip sits at z 250 on desktop — below the mobile
+         sidebar overlay (200) + backdrop (199) it must NOT paint through. */
+      .chat-input-top > .model-picker-wrap { z-index: 100; }
       /* Elastic overscroll on sidebar */
       .sidebar-inner {
         -webkit-overflow-scrolling: touch;
@@ -4256,9 +4259,17 @@ body.bg-pattern-sparkles {
         width: 44px;
         height: 44px;
         top: 6px;
+        /* Follow the sidebar side (body.hamburger-left/right, set by
+           sidebar-layout.js) like desktop does — the drawer + edge swipe
+           live on that side, so the toggle must too. The old rule forced
+           it top-right even for the default left drawer. */
+        left: 4px !important;
+        right: auto !important;
+        -webkit-tap-highlight-color: transparent;
+      }
+      body.hamburger-right .hamburger-btn {
         left: auto !important;
         right: 4px !important;
-        -webkit-tap-highlight-color: transparent;
       }
       .hamburger-btn:hover,
       .hamburger-btn:active {
@@ -37944,7 +37955,13 @@ body.theme-frosted .modal {
    bleed past it in the 8px padding strips. */
 .books-reader-view .notes-book-chrome {
   margin: 0 -8px;
-  padding: 0 8px;
+  padding: 8px 8px 6px;
+}
+/* Inside the opaque chrome the head reads as a contained bar, like the
+   chapter select under it (it looked like a borderless flat strip). */
+.notes-book-chrome .notes-book-head {
+  border: 1px solid var(--border);
+  border-radius: 6px;
 }
 /* Library list spacing + the book-row grid (was .notes-pane-books .notes-vault-list
    / .notes-vault-file.notes-book-file). */
@@ -38007,6 +38024,16 @@ body.theme-frosted .modal {
 .health-muted { opacity: 0.6; font-weight: 400; font-size: 11px; }
 
 #health-modal .admin-card, #habits-modal .admin-card { margin-bottom: 0; }
+/* The fork panels lay buttons out in gap-spaced flex/grid rows next to inputs
+   and selects — the global `.modal-body button { margin-top: 6px }` drop made
+   every button sit ~3px below its row-centered siblings ("buttons not in
+   line"). Same reset the email search row uses. */
+#health-modal .modal-body button,
+#habits-modal .modal-body button,
+#knowledge-modal .modal-body button,
+#books-modal .modal-body button,
+#pings-modal .modal-body button,
+#today-modal .modal-body button { margin-top: 0; }
 .health-card-head {
   display: flex;
   align-items: baseline;
@@ -38041,7 +38068,12 @@ body.theme-frosted .modal {
 }
 /* display:flex above would defeat the hidden attribute — keep hidden forms hidden. */
 .health-add-habit[hidden], .health-inline-form[hidden] { display: none; }
-.health-add-habit input, .health-inline-form input, .health-inline-form select { height: 32px; min-width: 0; }
+.health-add-habit input, .health-inline-form input, .health-inline-form select {
+  height: 32px;
+  min-width: 0;
+  /* Match the admin-button radius so the whole row reads as one aligned bar. */
+  border-radius: 6px;
+}
 .health-add-habit input[name="name"], .health-inline-form input:first-child { flex: 1 1 140px; }
 /* <label>-as-button (camera, CSV import): labels miss the global button height. */
 .health-file-btn { height: 32px; box-sizing: border-box; display: inline-flex; align-items: center; gap: 5px; cursor: pointer; }
@@ -38164,7 +38196,7 @@ body.theme-frosted .modal {
 .health-meal-thumb { width: 26px; height: 26px; border-radius: 5px; object-fit: cover; flex: 0 0 auto; }
 .health-meal-photo { margin: 4px 0 6px; }
 .health-meal-photo img { max-width: 160px; max-height: 160px; border-radius: 8px; object-fit: cover; display: block; }
-.health-meal-photo .admin-btn-sm { margin-top: 6px; }
+#health-modal .health-meal-photo .admin-btn-sm { margin-top: 6px; } /* outweigh the panel-wide margin reset */
 /* Per-day meal history groups (Calories tab) */
 .health-day-group { margin-bottom: 10px; }
 .health-day-group:last-child { margin-bottom: 0; }
