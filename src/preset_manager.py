@@ -123,13 +123,18 @@ class PresetManager:
                 presets["custom"] = dict(self.DEFAULT_PRESETS["custom"])
                 changed = True
             custom = presets.get("custom") if isinstance(presets, dict) else None
-            if (
-                isinstance(custom, dict)
-                and (custom.get("system_prompt") or "").strip()
-                == _LEGACY_IRIS_VAULT_PROMPT
-            ):
-                custom["system_prompt"] = IRIS_SYSTEM_PROMPT
-                changed = True
+            if isinstance(custom, dict):
+                _p = (custom.get("system_prompt") or "").strip()
+                # Heal ANY vault-era vintage, not just the byte-exact shipped
+                # prompt — deployed copies drifted (whitespace, older/newer
+                # wordings), and a prompt instructing the model to operate an
+                # Obsidian vault is broken regardless: the integration was
+                # removed. Marker = both terms present; a deliberately custom
+                # prompt about the (nonexistent) vault has no use either.
+                _low = _p.lower()
+                if _p == _LEGACY_IRIS_VAULT_PROMPT or ("obsidian" in _low and "vault" in _low):
+                    custom["system_prompt"] = IRIS_SYSTEM_PROMPT
+                    changed = True
             for key in self.LEGACY_BUILTIN_KEYS:
                 if key in presets:
                     presets.pop(key, None)

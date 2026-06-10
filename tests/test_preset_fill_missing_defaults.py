@@ -101,3 +101,26 @@ def test_default_prompts_are_vault_free_and_user_agnostic():
         assert "obsidian" not in text
         assert "vault" not in text
         assert "hyun-min" not in text
+
+
+def test_drifted_vault_era_prompt_is_healed_too():
+    # Deployed prompts drifted from the byte-exact shipped constant; any prompt
+    # still instructing the model about the removed Obsidian vault is healed.
+    drifted = (
+        "You are Iris, Hyun-Min's personal assistant and Obsidian-vault "
+        "companion. Use the persistent Obsidian session context for vault "
+        "structure. Be warm."
+    )
+    stale_custom = dict(PresetManager.DEFAULT_PRESETS["custom"])
+    stale_custom["system_prompt"] = drifted
+    data_dir = _write_presets({"custom": stale_custom})
+    pm = PresetManager(data_dir)
+    assert pm.presets["custom"]["system_prompt"] == IRIS_SYSTEM_PROMPT
+
+
+def test_non_vault_custom_prompt_survives_heal():
+    stale_custom = dict(PresetManager.DEFAULT_PRESETS["custom"])
+    stale_custom["system_prompt"] = "You are a helpful pirate."
+    data_dir = _write_presets({"custom": stale_custom})
+    pm = PresetManager(data_dir)
+    assert pm.presets["custom"]["system_prompt"] == "You are a helpful pirate."
