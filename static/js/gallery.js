@@ -1370,9 +1370,7 @@ function _showCardMenu(anchor, img) {
   document.querySelectorAll('.gallery-card-menu').forEach(d => d.remove());
   const dropdown = document.createElement('div');
   dropdown.className = 'dropdown gallery-card-menu';
-  const rect = anchor.getBoundingClientRect();
-  const left = Math.min(rect.left, window.innerWidth - 200);
-  dropdown.style.cssText = `position:fixed;display:block;z-index:10001;top:${rect.bottom + 6}px;left:${Math.max(8, left)}px;right:auto;min-width:160px;background:var(--panel,var(--bg));border:1px solid var(--border);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,0.3);padding:6px;font-size:11px;`;
+  dropdown.style.cssText = `position:fixed;display:block;z-index:10001;left:0;top:0;right:auto;min-width:160px;background:var(--panel,var(--bg));border:1px solid var(--border);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,0.3);padding:6px;font-size:11px;visibility:hidden;`;
   const _editIco = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>';
   const _hideIco = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-10-7-10-7a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 10 7 10 7a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>';
   const _eyeIco = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>';
@@ -1389,6 +1387,17 @@ function _showCardMenu(anchor, img) {
     dropdown.appendChild(it);
   }
   document.body.appendChild(dropdown);
+  // The trigger sits at the card's bottom-right, so right-align the menu to the
+  // button and open downward — flipping above when the row is near the viewport
+  // bottom (otherwise bottom-row cards would open the menu off-screen).
+  const rect = anchor.getBoundingClientRect();
+  const w = dropdown.offsetWidth, h = dropdown.offsetHeight;
+  const menuLeft = Math.min(Math.max(8, rect.right - w), window.innerWidth - w - 8);
+  let menuTop = rect.bottom + 6;
+  if (menuTop + h > window.innerHeight - 8) menuTop = Math.max(8, rect.top - 6 - h);
+  dropdown.style.left = `${menuLeft}px`;
+  dropdown.style.top = `${menuTop}px`;
+  dropdown.style.visibility = 'visible';
   const close = (ev) => {
     if (!dropdown.contains(ev.target) && ev.target !== anchor && !anchor.contains(ev.target)) {
       dropdown.remove();
