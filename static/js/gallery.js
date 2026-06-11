@@ -10,6 +10,7 @@ import { makeWindowDraggable } from './windowDrag.js';
 const API_BASE = window.location.origin;
 let _open = false;
 let _galleryResizeHandler = null;
+let _galleryScrollHandler = null;
 
 // Auto-refresh gallery when new image is generated
 window.addEventListener('gallery-refresh', () => {
@@ -1812,15 +1813,24 @@ function _openDetail(img) {
     // `.dropdown { display:none }` isn't tied to [hidden] — set inline display.
     const _setMenu = (show) => { menu.hidden = !show; menu.style.display = show ? 'block' : 'none'; };
     _setMenu(false);
+    // The outside-click closer is attached only while the menu is open and is
+    // torn down on every close path — otherwise _openDetail would leak one
+    // permanent document click listener (closing over a detached menu node)
+    // per photo viewed.
+    let _outsideClose = null;
+    const _detachOutside = () => { if (_outsideClose) { document.removeEventListener('click', _outsideClose, true); _outsideClose = null; } };
+    const _hideMenu = () => { _setMenu(false); _detachOutside(); };
     menuBtn.addEventListener('click', (e) => {
       e.stopPropagation();
-      _setMenu(menu.hidden);
+      if (menu.hidden) {
+        _setMenu(true);
+        _outsideClose = (ev) => { if (!menu.contains(ev.target) && ev.target !== menuBtn) _hideMenu(); };
+        setTimeout(() => document.addEventListener('click', _outsideClose, true), 0);
+      } else {
+        _hideMenu();
+      }
     });
-    menu.addEventListener('click', () => { _setMenu(false); });
-    // Click outside closes the menu.
-    document.addEventListener('click', (e) => {
-      if (!menu.hidden && !menu.contains(e.target) && e.target !== menuBtn) _setMenu(false);
-    });
+    menu.addEventListener('click', () => { _hideMenu(); });
   }
 
   const _toggleDetailFavorite = async () => {
@@ -2534,11 +2544,15 @@ export function openGallery() {
       Promise.resolve(_fetchLibrary(true)).finally(() => { _loadingMore = false; });
     }
   };
-  document.addEventListener('scroll', () => {
+  // Named + stored so _doCloseGallery can detach it — a capture-phase document
+  // scroll listener left attached per open would otherwise accumulate and fire
+  // on every scroll anywhere for the rest of the session.
+  _galleryScrollHandler = () => {
     if (_scrollTick) return;
     _scrollTick = true;
     requestAnimationFrame(_maybeAutoLoad);
-  }, true);
+  };
+  document.addEventListener('scroll', _galleryScrollHandler, true);
 
   // When the window grows (e.g. entering fullscreen), the visible grid
   // can hold more photos than the last page fetched — top up so there's
@@ -3163,6 +3177,10 @@ function _doCloseGallery() {
   if (_galleryResizeHandler) {
     window.removeEventListener('resize', _galleryResizeHandler);
     _galleryResizeHandler = null;
+  }
+  if (_galleryScrollHandler) {
+    document.removeEventListener('scroll', _galleryScrollHandler, true);
+    _galleryScrollHandler = null;
   }
   // Detach the face-overlay resize listener so we don't leak a
   // handler past close (v2 review HIGH-9).

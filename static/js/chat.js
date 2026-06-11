@@ -3327,6 +3327,14 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
     if (sessionModule && sessionModule.markStreaming) {
       sessionModule.markStreaming(sessionId);
     }
+    // The currently-rendered agent-thread nodes are about to be orphaned (the
+    // incoming session wipes chat-history), so stop their per-node tickers —
+    // otherwise their 50ms/100ms intervals keep firing forever against detached
+    // nodes, burning CPU for the rest of the session.
+    document.querySelectorAll('.agent-thread-node.running').forEach(node => {
+      if (node._waveInterval) { clearInterval(node._waveInterval); node._waveInterval = null; }
+      if (node._elapsedTicker) { clearInterval(node._elapsedTicker); node._elapsedTicker = null; }
+    });
     // Clear local state WITHOUT aborting the fetch
     currentAbort = null;
     isStreaming = false;
