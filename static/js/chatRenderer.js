@@ -1097,7 +1097,7 @@ document.addEventListener('click', function(e) {
       if (fn) fn(id);
     });
   } else if (kind === 'document') {
-    import('./document.js').then(mod => {
+    import('./document.js?v=412').then(mod => {
       const open = mod.loadDocument
         || mod.openDocument
         || (mod.default && (mod.default.loadDocument || mod.default.openDocument));
@@ -1109,7 +1109,7 @@ document.addEventListener('click', function(e) {
       if (open) open(id);
     }).catch(() => {});
   } else if (kind === 'image') {
-    import('./gallery.js').then(mod => {
+    import('./gallery.js?v=413').then(mod => {
       const open = mod.openGalleryImage || (mod.default && mod.default.openGalleryImage);
       if (open) open(id);
     }).catch(() => {});
@@ -1233,7 +1233,7 @@ export function buildImageBubble(imageUrl, prompt, model, size, quality, imageId
     e.stopPropagation();
     try {
       const [galleryMod, editorMod] = await Promise.all([
-        import('./gallery.js'),
+        import('./gallery.js?v=413'),
         import('./galleryEditor.js'),
       ]);
       // Ensure the Gallery modal is open so the editor has a container

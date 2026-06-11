@@ -145,12 +145,12 @@ export function handleUIControl(uiData) {
     } else if (uiEvent === 'open_panel' || uiData.ui_event === 'open_panel') {
       var panel = uiData.panel;
       if (panel === 'documents') {
-        import('./documentLibrary.js').then(function(mod) {
+        import('./documentLibrary.js?v=412').then(function(mod) {
           var fn = mod.openLibrary || (mod.default && mod.default.openLibrary);
           if (fn) fn();
         }).catch(function(){});
       } else if (panel === 'gallery') {
-        import('./gallery.js').then(function(mod) {
+        import('./gallery.js?v=413').then(function(mod) {
           var fn = mod.openGallery || (mod.default && mod.default.openGallery);
           if (fn) fn();
         }).catch(function(){});
