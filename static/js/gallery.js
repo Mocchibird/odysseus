@@ -200,38 +200,89 @@ async function _bulkUpload(filesOrItems, fallbackAlbumId) {
   let done = 0, dupes = 0, errors = 0;
   const total = items.length;
 
-  // Concurrency pool — N workers pulling from the queue. 4 is a reasonable
-  // default for a local server: enough to overlap network + EXIF + disk
-  // without flooding SQLite (which serializes writes anyway). Videos in
-  // particular benefit because they're large enough to be I/O-bound.
-  const CONCURRENCY = 4;
+  // Concurrency pool — N workers pulling from the queue. Kept modest so a batch
+  // of large videos doesn't flood the server's write path (each upload is read
+  // fully into memory + an EXIF pass + a serialized SQLite write). Each file is
+  // RETRIED with backoff on transient failures (network blip, 5xx, 429, request
+  // timeout, SQLite "database is locked") — those were the usual cause of "some
+  // of my files didn't upload" with the old fire-once-and-count-errors loop.
+  // Permanent client errors (413 too large, 415/400 unsupported) are NOT
+  // retried; their reason is surfaced in the final summary instead.
+  const CONCURRENCY = 3;
+  const MAX_ATTEMPTS = 3;
   let cursor = 0;
+  const failReasons = [];
+
+  // Per-attempt timeout scales with file size (≈ a 125 KB/s floor) so a slow
+  // large upload isn't aborted prematurely, while a truly hung request still
+  // gives up and retries.
+  const _timeoutFor = (file) => Math.max(120000, Math.ceil((file.size || 0) / (1024 * 1024)) * 8000);
+
+  async function _uploadOnce(it) {
+    const fd = new FormData();
+    fd.append('file', it.file);
+    if (it.albumId) fd.append('album_id', it.albumId);
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), _timeoutFor(it.file));
+    try {
+      const res = await fetch(`${API_BASE}/api/gallery/upload`, {
+        method: 'POST', body: fd, credentials: 'same-origin', signal: ctrl.signal,
+      });
+      let data = null;
+      try { data = await res.json(); } catch (_) { /* non-JSON (e.g. a proxy error page) */ }
+      if (res.ok && data) {
+        if (data.duplicate) return { kind: 'duplicate' };
+        if (data.ok) return { kind: 'ok' };
+        return { kind: 'fail', retryable: false, reason: data.error || data.message || 'rejected' };
+      }
+      // HTTP error: 400/413/415 are permanent (bad/oversized/unsupported);
+      // 408/429/5xx (and anything else) are worth a retry.
+      const permanent = [400, 413, 415].includes(res.status);
+      const reason = res.status === 413 ? 'too large'
+        : (res.status === 415 || res.status === 400) ? 'unsupported'
+        : `server ${res.status}`;
+      return { kind: 'fail', retryable: !permanent, reason };
+    } catch (e) {
+      return { kind: 'fail', retryable: true, reason: e && e.name === 'AbortError' ? 'timed out' : 'network' };
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
   async function worker() {
     while (true) {
       const idx = cursor++;
       if (idx >= items.length) return;
       const it = items[idx];
-      const fd = new FormData();
-      fd.append('file', it.file);
-      if (it.albumId) fd.append('album_id', it.albumId);
-      try {
-        const res = await fetch(`${API_BASE}/api/gallery/upload`, {
-          method: 'POST', body: fd, credentials: 'same-origin',
-        });
-        const data = await res.json();
-        if (data.duplicate) dupes++;
-        else if (!data.ok) errors++;
-      } catch (e) { errors++; }
+      let result = { kind: 'fail', retryable: true, reason: 'network' };
+      for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+        result = await _uploadOnce(it);
+        if (result.kind !== 'fail' || !result.retryable) break;
+        if (attempt < MAX_ATTEMPTS) {
+          const backoff = 600 * Math.pow(3, attempt - 1) + Math.floor(Math.random() * 300);
+          await new Promise(r => setTimeout(r, backoff));
+        }
+      }
+      if (result.kind === 'duplicate') dupes++;
+      else if (result.kind === 'fail') { errors++; failReasons.push(result.reason); }
       done++;
       if (progress) progress.style.width = `${(done / total) * 100}%`;
-      if (status) status.textContent = `${done}/${total}${dupes ? ` (${dupes} duplicates)` : ''}`;
+      if (status) status.textContent = `${done}/${total}${dupes ? ` (${dupes} dup)` : ''}${errors ? ` (${errors} failed)` : ''}`;
     }
   }
   await Promise.all(Array.from({ length: Math.min(CONCURRENCY, total) }, worker));
 
+  // Break the failure count down by reason ("2 too large, 1 network") so the
+  // user knows whether to retry or shrink the files.
+  let errSummary = '';
+  if (errors) {
+    const counts = {};
+    failReasons.forEach(r => { counts[r] = (counts[r] || 0) + 1; });
+    errSummary = ' (' + Object.entries(counts).map(([r, n]) => `${n} ${r}`).join(', ') + ')';
+  }
   const msg = `${done - dupes - errors} imported` +
     (dupes ? `, ${dupes} duplicates skipped` : '') +
-    (errors ? `, ${errors} errors` : '');
+    (errors ? `, ${errors} failed${errSummary}` : '');
   if (status) status.textContent = msg;
   uiModule.showToast(msg);
   setTimeout(() => { bar.style.display = 'none'; }, 3000);
@@ -1406,8 +1457,10 @@ function _showCardMenu(anchor, img) {
   const _hideIco = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-10-7-10-7a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 10 7 10 7a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>';
   const _eyeIco = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>';
   const _delIco = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>';
+  const _albumIco = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>';
   const items = [];
   if (!_isVideoUrl(img.url)) items.push({ label: 'Edit', icon: _editIco, action: () => _cardEdit(img) });
+  items.push({ label: 'Add to album…', icon: _albumIco, action: () => _showAlbumPicker(anchor, (albumId) => _cardSetAlbum(img, albumId)) });
   items.push({ label: img.hidden ? 'Unhide' : 'Hide', icon: img.hidden ? _eyeIco : _hideIco, action: () => _cardToggleHidden(img) });
   items.push({ label: 'Delete', icon: _delIco, danger: true, action: () => _cardDelete(img) });
   for (const a of items) {
@@ -1486,6 +1539,77 @@ function _cardEdit(img) {
   const label = img.prompt?.trim() || baseFilename || 'Photo';
   try { openEditor(img.url, img.id, null, label); }
   catch (e) { if (uiModule) uiModule.showError('Failed to open editor'); }
+}
+
+// Shared album-picker dropdown — lists existing albums (+ "New album…") and
+// invokes onPick(albumId) with the chosen/created album. Used by both the
+// per-card ⋮ menu and the bulk-actions menu so "Add to album" behaves the same.
+function _showAlbumPicker(anchor, onPick) {
+  document.querySelectorAll('.gallery-card-menu, .gallery-bulk-menu, .gallery-album-picker').forEach(d => d.remove());
+  const dropdown = document.createElement('div');
+  dropdown.className = 'dropdown gallery-album-picker';
+  dropdown.style.cssText = `position:fixed;display:block;z-index:10001;left:0;top:0;right:auto;min-width:180px;max-height:280px;overflow-y:auto;background:var(--panel,var(--bg));border:1px solid var(--border);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,0.3);padding:6px;font-size:11px;visibility:hidden;`;
+  const _plusIco = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>';
+  const _albIco = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>';
+  const mkItem = (html) => { const it = document.createElement('div'); it.className = 'dropdown-item-compact'; it.innerHTML = html; return it; };
+  const newIt = mkItem(`<span class="dropdown-icon">${_plusIco}</span><span>New album…</span>`);
+  newIt.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    dropdown.remove();
+    const name = (uiModule.styledPrompt
+      ? await uiModule.styledPrompt('Name your new album.', { title: 'New album', placeholder: 'e.g. Vacation 2026', confirmText: 'Create' })
+      : prompt('Album name:'));
+    if (!name || !name.trim()) return;
+    try {
+      const r = await fetch(`${API_BASE}/api/gallery/albums`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin', body: JSON.stringify({ name: name.trim() }),
+      });
+      const data = await r.json();
+      if (data && data.id) { await _fetchAlbums(); onPick(data.id); }
+      else if (uiModule) uiModule.showError('Could not create album');
+    } catch (_) { if (uiModule) uiModule.showError('Could not create album'); }
+  });
+  dropdown.appendChild(newIt);
+  if (_albums.length) {
+    const sep = document.createElement('div');
+    sep.className = 'dropdown-divider';
+    sep.style.cssText = 'height:1px;background:var(--border);margin:4px 4px;';
+    dropdown.appendChild(sep);
+  }
+  _albums.forEach(a => {
+    const it = mkItem(`<span class="dropdown-icon">${_albIco}</span><span>${_esc(a.name)}</span>`);
+    it.addEventListener('click', (e) => { e.stopPropagation(); dropdown.remove(); onPick(a.id); });
+    dropdown.appendChild(it);
+  });
+  document.body.appendChild(dropdown);
+  // Right-align to the anchor, flip up when there isn't room below.
+  const rect = anchor.getBoundingClientRect();
+  const w = dropdown.offsetWidth, h = dropdown.offsetHeight;
+  const left = Math.min(Math.max(8, rect.right - w), window.innerWidth - w - 8);
+  let top = rect.bottom + 6;
+  if (top + h > window.innerHeight - 8) top = Math.max(8, rect.top - 6 - h);
+  dropdown.style.left = `${left}px`;
+  dropdown.style.top = `${top}px`;
+  dropdown.style.visibility = 'visible';
+  const close = (ev) => {
+    if (!dropdown.contains(ev.target) && ev.target !== anchor && !anchor.contains(ev.target)) {
+      dropdown.remove();
+      document.removeEventListener('click', close, true);
+    }
+  };
+  setTimeout(() => document.addEventListener('click', close, true), 10);
+}
+
+// Add a single photo (from its card ⋮ menu) to an album.
+function _cardSetAlbum(img, albumId) {
+  _patchImage(img.id, { album_id: albumId }).then(ok => {
+    if (!ok) { if (uiModule) uiModule.showError('Failed to add to album'); return; }
+    img.album_id = albumId;
+    const a = _albums.find(x => x.id === albumId);
+    if (uiModule) uiModule.showToast(a ? `Added to “${a.name}”` : 'Added to album');
+    _fetchAlbums();
+  });
 }
 
 // ---- Detail overlay ----
@@ -2755,9 +2879,11 @@ export function openGallery() {
     const _cancelIco = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
     const _hideIco = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-10-7-10-7a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 10 7 10 7a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>';
     const _eyeIco = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>';
+    const _albIco = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>';
     const items = [
       { label: 'Favorite', icon: _favIco, action: () => _bulkFavorite(_selectedIds()) },
       { label: 'Add tag…', icon: _tagIco, action: () => _bulkTag(_selectedIds()) },
+      { label: 'Add to album…', icon: _albIco, action: () => { const ids = _selectedIds(); if (!ids.length) { uiModule.showToast('Select photos first'); return; } _showAlbumPicker(anchor, (albumId) => _bulkAddToAlbum(ids, albumId)); } },
       { label: 'Download', icon: _dlIco, action: () => _bulkDownload(_selectedIds()) },
       { label: 'Hide', icon: _hideIco, action: () => _bulkHide(_selectedIds(), true) },
       { label: 'Unhide', icon: _eyeIco, action: () => _bulkHide(_selectedIds(), false) },
@@ -2888,6 +3014,26 @@ export function openGallery() {
     }
     _renderGrid(); _exitSelectMode();
     if (uiModule) uiModule.showToast(`Favorited ${n} photo${n > 1 ? 's' : ''}`);
+  }
+
+  // Mass-add the selection to an album in one request (the album-scoped add
+  // endpoint moves every owned id at once, so no per-photo round-trips).
+  async function _bulkAddToAlbum(ids, albumId) {
+    if (!ids.length || !albumId) return;
+    try {
+      const r = await fetch(`${API_BASE}/api/gallery/albums/${albumId}/add`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin', body: JSON.stringify({ image_ids: ids }),
+      });
+      if (!r.ok) throw new Error('add failed');
+      ids.forEach(id => { const it = _items.find(i => i.id === id); if (it) it.album_id = albumId; });
+      _exitSelectMode();
+      await _fetchAlbums();
+      const a = _albums.find(x => x.id === albumId);
+      if (uiModule) uiModule.showToast(`Added ${ids.length} photo${ids.length > 1 ? 's' : ''} to “${a ? a.name : 'album'}”`);
+    } catch (_) {
+      if (uiModule) uiModule.showError('Failed to add to album');
+    }
   }
 
   // Bulk hide / unhide the selection — lets the user hide many photos at once
