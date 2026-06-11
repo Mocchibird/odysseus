@@ -14943,7 +14943,11 @@ body [data-act="from-sender"] {
 
 /* Edge docking. Docked panels are fixed to the viewport edge; the workspace
    panes reserve room with margins so left + right docks can be active at the
-   same time without skewing the entire body box. */
+   same time without skewing the entire body box. Only the OUTERMOST in-flow
+   pane on each side may reserve the dock width: when the document editor
+   splits the workspace (body.doc-view), a dock margin on the inner pane too
+   renders as a dock-wide dead gap in the middle of the row (chat | gap |
+   editor) and squeezes both panes by twice the dock width. */
 body.right-dock-active {
   padding-right: 0;
 }
@@ -14956,6 +14960,27 @@ body.left-dock-active:not(.email-doc-split-active) .chat-container {
 body.right-dock-active .chat-container,
 body.right-dock-active:not(.email-doc-split-active) .doc-editor-pane {
   margin-right: var(--right-dock-w, 0px);
+}
+/* Doc editor open on the RIGHT of chat (default): the editor is the
+   rightmost pane and already reserves the right dock above — chat must not. */
+body.right-dock-active.doc-view:not(.email-doc-split-active) .chat-container {
+  margin-right: 0;
+}
+/* Doc editor on the LEFT of chat (right-side sidebar, .doc-left): the
+   reservations swap — chat is outermost on the right, the editor on the
+   left. (.doc-left ~ .chat-container only matches in that DOM order, and
+   its higher specificity beats the zeroing rules above.) */
+body.right-dock-active.doc-view .doc-editor-pane.doc-left ~ .chat-container {
+  margin-right: var(--right-dock-w, 0px);
+}
+body.right-dock-active.doc-view .doc-editor-pane.doc-left {
+  margin-right: 0;
+}
+body.left-dock-active.doc-view:not(.email-doc-split-active) .doc-editor-pane.doc-left {
+  margin-left: var(--left-dock-w, 0px);
+}
+body.left-dock-active.doc-view .doc-editor-pane.doc-left ~ .chat-container {
+  margin-left: 0;
 }
 .modal.modal-right-docked {
   align-items: stretch;

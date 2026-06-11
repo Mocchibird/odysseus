@@ -5636,9 +5636,13 @@ import * as Modals from './modalManager.js';
     });
     document.addEventListener('mousemove', (e) => {
       if (!dragging) return;
+      // Measure from the pane's anchored edge, not the viewport edge — with
+      // an edge-docked window active the pane stops short of the viewport by
+      // the dock width, and viewport math overshoots by exactly that much.
+      const rect = pane.getBoundingClientRect();
       const width = isRight
-        ? e.clientX
-        : window.innerWidth - e.clientX;
+        ? e.clientX - rect.left
+        : rect.right - e.clientX;
       pane.style.width = Math.max(250, Math.min(width, window.innerWidth * 0.7)) + 'px';
       pane.style.flex = 'none';
     });
