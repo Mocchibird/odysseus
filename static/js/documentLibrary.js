@@ -836,11 +836,39 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
       } catch { if (uiModule) uiModule.showError('Failed to ' + (toArchived ? 'archive' : 'restore')); }
     });
 
+    // Rename — works for any document, including imported PDFs/files, without
+    // needing to open it (the editor also renames via double-click on the tab).
+    const renameBtn = document.createElement('button');
+    renameBtn.className = 'doclib-card-text-btn doclib-card-action-btn';
+    renameBtn.innerHTML = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-1px;margin-right:3px;"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>Rename';
+    renameBtn.title = 'Rename this document';
+    renameBtn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const cur = doc.title || '';
+      const next = (uiModule && uiModule.styledPrompt)
+        ? await uiModule.styledPrompt('Rename this document.', { title: 'Rename', defaultValue: cur, placeholder: 'Document title', confirmText: 'Save', maxLength: 200 })
+        : prompt('Rename document:', cur);
+      if (next === null || next === undefined) return;
+      const clean = String(next).trim();
+      if (!clean || clean === cur) return;
+      try {
+        const res = await fetch(`${API_BASE}/api/document/${doc.id}`, {
+          method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+          credentials: 'same-origin', body: JSON.stringify({ title: clean }),
+        });
+        if (!res.ok) throw new Error('failed');
+        doc.title = clean;
+        libraryRenderGrid();
+        if (uiModule) uiModule.showToast('Renamed');
+      } catch { if (uiModule) uiModule.showError('Failed to rename'); }
+    });
+
     const leftGroup = document.createElement('div');
     leftGroup.className = 'doclib-action-group';
     const btnRow = document.createElement('div');
     btnRow.className = 'doclib-action-btn-row';
-    // Export lives in the ⋮ menu — keep the footer uncrowded with Clone + Open.
+    // Export lives in the ⋮ menu — keep the footer uncrowded with Rename + Clone + Open.
+    btnRow.appendChild(renameBtn);
     btnRow.appendChild(cloneBtn);
     btnRow.appendChild(openBtn);
     leftGroup.appendChild(btnRow);
@@ -1980,6 +2008,7 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
             </div>
             <div class="memory-item-actions" style="display:flex;gap:2px;flex-shrink:0;">
               ${openLink}
+              <button class="memory-item-btn doclib-file-rename" data-file-id="${_esc(f.id)}" data-name="${_esc(f.filename)}" title="Rename"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg></button>
               <button class="memory-item-btn doclib-file-delete" data-file-id="${_esc(f.id)}" title="Delete"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg></button>
             </div>
           </div>
@@ -1999,6 +2028,27 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
             if (r.ok) _renderLibFiles();
             else if (uiModule) uiModule.showError('Delete failed');
           } catch (_) { if (uiModule) uiModule.showError('Delete failed'); }
+        });
+      });
+      grid.querySelectorAll('.doclib-file-rename').forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          const id = btn.dataset.fileId;
+          const cur = btn.dataset.name || '';
+          const next = (uiModule && uiModule.styledPrompt)
+            ? await uiModule.styledPrompt('Rename this file.', { title: 'Rename', defaultValue: cur, placeholder: 'File name', confirmText: 'Save', maxLength: 255 })
+            : prompt('Rename file:', cur);
+          if (next === null || next === undefined) return;
+          const clean = String(next).trim();
+          if (!clean || clean === cur) return;
+          try {
+            const r = await fetch(`/api/files/${encodeURIComponent(id)}`, {
+              method: 'PUT', headers: { 'Content-Type': 'application/json' },
+              credentials: 'same-origin', body: JSON.stringify({ filename: clean }),
+            });
+            if (r.ok) { _renderLibFiles(); if (uiModule) uiModule.showToast('Renamed'); }
+            else if (uiModule) uiModule.showError('Rename failed');
+          } catch (_) { if (uiModule) uiModule.showError('Rename failed'); }
         });
       });
     }
