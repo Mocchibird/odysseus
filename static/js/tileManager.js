@@ -23,6 +23,8 @@
  * the original size.
  */
 
+import { clearDockSide } from './modalSnap.js';
+
 const EDGE_THRESHOLD_PX = 24;     // how close to an edge counts as "near"
 const CORNER_THRESHOLD_PX = 64;   // corner box size
 const TOP_FULL_STRIP_PX = 8;      // top strip → maximize
@@ -32,30 +34,6 @@ let _activeZone = null;
 let _tracking = null; // { content, startRect }
 
 function _isDesktop() { return window.innerWidth > 768; }
-
-function _dockClassForSide(side) {
-  return side === 'left' ? 'modal-left-docked' : 'modal-right-docked';
-}
-
-function _hasOtherDockedWindow(side, owner) {
-  const cls = _dockClassForSide(side);
-  return Array.from(document.querySelectorAll(`.${cls}`)).some((el) => {
-    if (!el || el === owner) return false;
-    if (owner && el.contains && el.contains(owner)) return false;
-    if (owner && owner.contains && owner.contains(el)) return false;
-    return true;
-  });
-}
-
-function _clearDockSide(side, owner = null) {
-  if (side !== 'left' && side !== 'right') return;
-  if (_hasOtherDockedWindow(side, owner)) return;
-  document.body.classList.remove(side === 'left' ? 'left-dock-active' : 'right-dock-active');
-  document.documentElement.style.removeProperty(side === 'left' ? '--left-dock-w' : '--right-dock-w');
-  if (side === 'left') {
-    try { window._restoreSidebarIfRouteCollapsed?.(); } catch (_) {}
-  }
-}
 
 function _ensureGhost() {
   if (_ghost) return _ghost;
@@ -146,8 +124,8 @@ function _clearEdgeDockResidue(modal, content) {
     const hadLeft = modal.classList.contains('modal-left-docked');
     const hadRight = modal.classList.contains('modal-right-docked');
     modal.classList.remove('modal-left-docked', 'modal-right-docked');
-    if (hadLeft) _clearDockSide('left', modal);
-    if (hadRight) _clearDockSide('right', modal);
+    if (hadLeft) clearDockSide('left', modal);
+    if (hadRight) clearDockSide('right', modal);
     if (modal._dockCloseWatcher) {
       try { modal._dockCloseWatcher.obs && modal._dockCloseWatcher.obs.disconnect(); } catch (_) {}
       try { modal._dockCloseWatcher.parentObs && modal._dockCloseWatcher.parentObs.disconnect(); } catch (_) {}

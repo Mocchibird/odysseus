@@ -34,13 +34,37 @@ function _dockClassForSide(side) {
   return side === 'left' ? 'modal-left-docked' : 'modal-right-docked';
 }
 
+// True when the element is actually rendered on screen. `offsetParent` can't
+// stand in for this — it is always null for position:fixed elements, which
+// every docked window is — so probe computed style (catches display flips
+// from any class, an effective [hidden] attribute, and inherited
+// visibility:hidden) plus the layout box (catches display:none on an
+// ancestor, which the element's own computed display does not reflect).
+function _isElementShown(el) {
+  if (!el || !el.isConnected) return false;
+  let cs;
+  try { cs = window.getComputedStyle(el); } catch (_) { return false; }
+  if (cs.display === 'none' || cs.visibility === 'hidden') return false;
+  const r = el.getBoundingClientRect();
+  return r.width > 0 && r.height > 0;
+}
+
 function _hasOtherDockedWindow(side, owner) {
   const cls = _dockClassForSide(side);
   return Array.from(document.querySelectorAll(`.${cls}`)).some((el) => {
     if (!el || el === owner) return false;
     if (owner && el.contains && el.contains(owner)) return false;
     if (owner && owner.contains && owner.contains(el)) return false;
-    return true;
+    // Only a window the user can actually SEE may hold the side's body class
+    // + width var. A hidden/minimized/orphaned element still carrying the
+    // dock class must not block clearDockSide — that's the phantom dead
+    // strip: the workspace keeps reserving 420-640px of margin for a window
+    // that's gone. Suspended docks (suspendDock keeps the class on minimized
+    // windows) are deliberately skipped too: their body push was already
+    // released at suspend time, and resumeDock re-applies it via
+    // applyEdgeDock without consulting this check.
+    const content = _resolveDockNodes(el)?.content || el;
+    return _isElementShown(content);
   });
 }
 
@@ -57,6 +81,22 @@ export function clearDockSide(side, owner = null) {
     try { window._restoreSidebarIfRouteCollapsed?.(); } catch (_) {}
   }
   _positionEdgeDockResizeHandles();
+}
+
+// Safety net for close paths no per-modal watcher can see (e.g. a
+// class/style/[hidden] flip on an ANCESTOR of the docked window): if a
+// side's body class or width var is set while no visible docked window
+// remains on that side, tear the body-level state down. Only touches body
+// state — never a window's own dock class or inline geometry — so a
+// suspended (minimized) dock still restores intact via resumeDock.
+export function sweepStaleDockState() {
+  for (const side of ['left', 'right']) {
+    const activeCls = side === 'left' ? 'left-dock-active' : 'right-dock-active';
+    const widthVar = side === 'left' ? '--left-dock-w' : '--right-dock-w';
+    if (!document.body.classList.contains(activeCls)
+        && !document.documentElement.style.getPropertyValue(widthVar)) continue;
+    clearDockSide(side);
+  }
 }
 
 // Default dock width: ~38% of viewport, clamped to a reasonable band.
@@ -520,19 +560,41 @@ function _applyDockInternal(modal, side, dockClass) {
     // `display:none` (how the draggable modals — calendar, plan, workspace,
     // etc. — actually close), and parent removal. Without the `style` filter
     // a display:none close left the body's dock padding on, so the chat
-    // stayed shifted after the docked modal was closed.
-    const _isGone = () => !modal.isConnected
-      || modal.classList.contains('hidden')
-      || modal.style.display === 'none';
+    // stayed shifted after the docked modal was closed. Computed style is
+    // the fallback truth for everything the two inline checks miss: the
+    // [hidden] attribute (when no stronger display rule overrides it),
+    // display flips from a stylesheet class other than .hidden, and
+    // visibility-based hiding. Deliberately NO layout-box probe here — a
+    // transiently zero-sized rect mid-transition must not run the full
+    // teardown on a window that is still open.
+    const _isGone = () => {
+      if (!modal.isConnected) return true;
+      if (modal.classList.contains('hidden')) return true;
+      if (modal.style.display === 'none') return true;
+      const cs = window.getComputedStyle(modal);
+      return cs.display === 'none' || cs.visibility === 'hidden';
+    };
     const obs = new MutationObserver(() => { if (_isGone()) onGone(); });
-    obs.observe(modal, { attributes: true, attributeFilter: ['class', 'style'] });
-    // A second observer catches DOM removal — childList on the parent
-    // is the reliable signal for `.remove()` / `.removeChild()` calls.
+    obs.observe(modal, { attributes: true, attributeFilter: ['class', 'style', 'hidden'] });
+    // A second observer catches the modal disappearing INDIRECTLY. childList
+    // on every ancestor up to <body> (not just the direct parent) is the
+    // reliable signal for `.remove()` / `.removeChild()` at any level — the
+    // notes pane, for instance, is nested inside a backdrop, so removing the
+    // backdrop never mutates the watched parent's childList. Ancestor
+    // attribute flips (class/style/[hidden]) can also hide the window while
+    // the modal's own computed display stays clean; those route to the
+    // sweep, which decides from actual visibility and only clears body-level
+    // state — never the modal's own dock class — so a false alarm can't
+    // destroy a still-open window.
     if (modal.parentNode) {
       const parentObs = new MutationObserver(() => {
-        if (!modal.isConnected) onGone();
+        if (!modal.isConnected) { onGone(); return; }
+        sweepStaleDockState();
       });
-      parentObs.observe(modal.parentNode, { childList: true });
+      for (let node = modal.parentNode; node && node.nodeType === 1; node = node.parentNode) {
+        parentObs.observe(node, { childList: true, attributes: true, attributeFilter: ['class', 'style', 'hidden'] });
+        if (node === document.body) break;
+      }
       modal._dockCloseWatcher = { obs, parentObs };
     } else {
       modal._dockCloseWatcher = { obs };
@@ -819,14 +881,8 @@ export function makeEdgeDockController(modal, side = 'right', dockClass) {
   const _isUsableDockOwner = (owner) => {
     if (!owner || !owner.isConnected) return false;
     if (owner.classList?.contains('hidden')) return false;
-    if (owner.style?.display === 'none') return false;
-    const nodes = _resolveDockNodes(owner);
-    const content = nodes?.content;
-    if (!content || !content.isConnected) return false;
-    if (content.classList?.contains('hidden')) return false;
-    if (content.style?.display === 'none') return false;
-    const r = content.getBoundingClientRect();
-    return r.width > 0 && r.height > 0;
+    const content = _resolveDockNodes(owner)?.content;
+    return !!content && _isElementShown(content);
   };
 
   const _activeDockOwner = (side) => {
@@ -976,12 +1032,19 @@ export function makeEdgeDockController(modal, side = 'right', dockClass) {
     if (raf) return;
     raf = requestAnimationFrame(() => {
       raf = 0;
+      // Body children changing is how docked windows (and their backdrops)
+      // leave the DOM — sweep first so a stale body class/width var is gone
+      // before the handles are positioned against it.
+      sweepStaleDockState();
       _positionEdgeDockResizeHandles();
     });
   };
   new MutationObserver(schedulePosition).observe(document.body, { childList: true });
   window.addEventListener('resize', _positionEdgeDockResizeHandles);
   window.addEventListener('odysseus:modal-opened', _positionEdgeDockResizeHandles);
+  // Boot sweep: clear any dock state left over from a module that applied a
+  // dock during startup and then lost its window before first paint.
+  sweepStaleDockState();
   _positionEdgeDockResizeHandles();
 })();
 
