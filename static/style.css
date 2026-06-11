@@ -38494,10 +38494,9 @@ body.theme-frosted .modal {
   .today-date-label { display: none; }
 }
 
-/* File-tag chip — shared by the Library "Files" tab (documentLibrary.js).
-   Originally the (now-removed) Knowledge panel's tag chip; the chip skin is
-   still used to render file tags. */
-.kb-chip { font-size: 10px; padding: 1px 7px; border: 1px solid var(--border); border-radius: 10px; background: color-mix(in srgb, var(--fg) 10%, transparent); opacity: 0.8; }
+/* Small read-only tag pill for file tags in the Library "Files" tab
+   (documentLibrary.js). */
+.doclib-tag-chip { font-size: 10px; padding: 1px 7px; border: 1px solid var(--border); border-radius: 10px; background: color-mix(in srgb, var(--fg) 10%, transparent); opacity: 0.8; }
 /* ── Workspace picker ───────────────────────────────────────────── */
 /* Layout (width/flex column/max-height) inherited from base .modal-content. */
 /* Editable path/address bar: reuses .styled-prompt-input for border/bg/radius/

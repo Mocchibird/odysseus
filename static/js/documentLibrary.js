@@ -1995,7 +1995,7 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
       let html = '';
       for (const f of _filesItems) {
         const tags = [...(f.tags || []), ...(f.ai_tags || [])].slice(0, 6);
-        const tagHtml = tags.map(t => `<span class="kb-chip">${_esc(t)}</span>`).join('');
+        const tagHtml = tags.map(t => `<span class="doclib-tag-chip">${_esc(t)}</span>`).join('');
         const openLink = f.has_file
           ? `<a class="memory-item-btn" href="${_esc(f.url)}" target="_blank" rel="noopener" title="Open the original file" aria-label="Open"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg></a>`
           : '';
