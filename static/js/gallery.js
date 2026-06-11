@@ -462,7 +462,37 @@ function _renderAlbumsTab() {
   const container = document.getElementById('gallery-albums-container');
   if (!container) return;
   _ensureAlbumsToolbar(container);
+  _renderAlbumsFilterChips();
   _renderAlbumsGrid();
+}
+
+// All / Hidden filter chips for the Albums tab — mirrors the Photos/Videos
+// filter row for a consistent UI. (No favorites chip: albums have no favorite
+// concept, only a hidden flag.) `_showHidden` is the shared global, so toggling
+// it here keeps the Photos/Videos grids in sync too.
+function _renderAlbumsFilterChips() {
+  const c = document.getElementById('gallery-albums-filter-chips');
+  if (!c) return;
+  const eye = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:3px;"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>';
+  c.innerHTML =
+    `<button class="gallery-chip${!_showHidden ? ' active' : ''}" data-albums-all="true">All</button>` +
+    `<button class="gallery-chip gallery-chip-hidden${_showHidden ? ' active' : ''}" data-albums-show-hidden="true" title="${_showHidden ? 'Hiding hidden albums' : 'Show hidden albums'}">${eye}Hidden</button>`;
+  c.querySelector('[data-albums-all]')?.addEventListener('click', () => {
+    if (_showHidden) {
+      _showHidden = false;
+      _fetchAlbums();
+      _fetchLibrary(false);
+      _renderAlbums();
+    }
+    _renderAlbumsFilterChips();
+  });
+  c.querySelector('[data-albums-show-hidden]')?.addEventListener('click', () => {
+    _showHidden = !_showHidden;
+    _fetchAlbums();
+    _fetchLibrary(false);
+    _renderAlbums();
+    _renderAlbumsFilterChips();
+  });
 }
 
 function _filteredAlbums() {
@@ -478,8 +508,9 @@ function _ensureAlbumsToolbar(container) {
       <div class="gallery-search-wrap">
         <input type="text" class="gallery-search" id="gallery-albums-search" placeholder="Search albums..." />
       </div>
-      <button class="gallery-select-btn gallery-toolbar-action" id="gallery-albums-select-btn" title="Select for bulk actions" style="position:relative;top:2px;"><span style="position:relative;top:1px;">Select</span></button>
+      <button class="gallery-select-btn gallery-toolbar-action" id="gallery-albums-select-btn" title="Select for bulk actions"><span style="position:relative;top:1px;">Select</span></button>
     </div>
+    <div class="gallery-album-chips" id="gallery-albums-filter-chips" style="margin-top:0;"></div>
     <div class="memory-bulk-bar hidden" id="gallery-albums-bulk-bar">
       <label class="memory-bulk-check-all" style="position:relative;top:-1px;"><input type="checkbox" id="gallery-albums-bulk-all"> All</label>
       <span id="gallery-albums-bulk-count" style="position:relative;top:-1px;">0 selected</span>

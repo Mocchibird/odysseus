@@ -16870,9 +16870,11 @@ body:not(.email-doc-split-active) #email-lib-modal.email-lib-fullscreen:not(.mod
   align-items: center;
 }
 .gallery-toolbar-break { display: none; }
-/* Search input + its "↵ enter to tag" hint live in a relative wrapper that
-   carries the 2px down-shift, so input and hint move together. */
-.gallery-search-wrap { position: relative; flex: 1; min-width: 0; display: flex; top: 2px; }
+/* Search input + its "↵ enter to tag" hint live in a relative wrapper so the
+   hint can be absolutely positioned within it. (No vertical offset — every
+   toolbar control is a uniform 32px and the row is align-items:center, so the
+   search, the two selects and the Select button all line up on their own.) */
+.gallery-search-wrap { position: relative; flex: 1; min-width: 0; display: flex; }
 .gallery-search {
   flex: 1;
   width: 100%;
@@ -16904,7 +16906,7 @@ body:not(.email-doc-split-active) #email-lib-modal.email-lib-fullscreen:not(.mod
 }
 /* Show the hint only once the user has typed something (placeholder gone). */
 .gallery-search:not(:placeholder-shown) ~ .gallery-search-enter-hint { opacity: 0.95; }
-#gallery-select-btn { position: relative; top: 2px; font-size: 12px; padding: 10px 11px 12px; }
+#gallery-select-btn { font-size: 12px; padding: 10px 11px 12px; }
 .gallery-search:focus {
   border-color: var(--red);
 }
