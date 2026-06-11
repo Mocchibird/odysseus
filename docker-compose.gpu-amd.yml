@@ -59,6 +59,16 @@ services:
         condition: service_healthy
       chromadb:
         condition: service_started
+    # Liveness probe on the auth-exempt /api/health endpoint so a wedged-but-
+    # alive process (deadlocked loop) gets detected and restarted instead of
+    # silently hanging. start_period is generous because first boot may pip-
+    # install extra deps before the server binds.
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:7000/api/health', timeout=5).read(1)\""]
+      interval: 30s
+      timeout: 6s
+      retries: 5
+      start_period: 90s
     restart: unless-stopped
     devices:
     - /dev/kfd
