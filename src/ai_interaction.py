@@ -1746,9 +1746,12 @@ async def do_generate_image(content: str, session_id: Optional[str] = None, owne
                 image_id = _save_to_gallery(filename)
 
             elif img.get("url"):
-                # Download external URL and save locally (DALL-E returns temp URLs)
+                # Download external URL and save locally (DALL-E returns temp URLs).
+                # Use the ASYNC client so a slow image host doesn't block the
+                # event loop (and every other request) for up to 60s.
                 try:
-                    dl_resp = httpx.get(img["url"], timeout=60)
+                    async with httpx.AsyncClient(timeout=60) as _img_client:
+                        dl_resp = await _img_client.get(img["url"])
                     if dl_resp.status_code == 200:
                         img_dir = Path(GENERATED_IMAGES_DIR)
                         img_dir.mkdir(parents=True, exist_ok=True)

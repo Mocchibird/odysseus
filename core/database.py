@@ -36,7 +36,10 @@ DATABASE_URL = os.getenv("DATABASE_URL", f"sqlite:///{DATA_DIR}/app.db")
 # Create engine
 engine = create_engine(
     DATABASE_URL,
-    connect_args={"check_same_thread": False} if "sqlite" in DATABASE_URL else {}
+    connect_args={"check_same_thread": False} if "sqlite" in DATABASE_URL else {},
+    # Recycle dead/stale pooled connections instead of handing one out and
+    # erroring on first use — cheap insurance for a long-running server.
+    pool_pre_ping=True,
 )
 
 # Create session factory
@@ -52,6 +55,17 @@ def set_sqlite_pragma(dbapi_connection, connection_record):
     if isinstance(dbapi_connection, sqlite3.Connection):
         cursor = dbapi_connection.cursor()
         cursor.execute("PRAGMA foreign_keys=ON")
+        # WAL + a patient busy_timeout are what let concurrent writers (upload
+        # ingest, chat-message persistence, gallery inserts) coexist on the one
+        # SQLite file instead of one of them getting an instant
+        # "database is locked" — the root cause of intermittent upload/save
+        # failures under load. WAL also lets readers proceed during a write.
+        # synchronous=NORMAL is durable under WAL (only an OS-level crash can
+        # lose the last transaction, not an app crash) and far faster than the
+        # default FULL. All three are no-ops on an in-memory test DB.
+        cursor.execute("PRAGMA journal_mode=WAL")
+        cursor.execute("PRAGMA busy_timeout=5000")
+        cursor.execute("PRAGMA synchronous=NORMAL")
         cursor.close()
 
 

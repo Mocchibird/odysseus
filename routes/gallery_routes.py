@@ -1,5 +1,6 @@
 """Gallery routes — browsable library for photos and AI-generated images."""
 
+import asyncio
 import os
 import hashlib
 import logging
@@ -128,8 +129,10 @@ def setup_gallery_routes() -> APIRouter:
         album_id = form.get("album_id") or None
         content = await read_upload_limited(file, GALLERY_UPLOAD_MAX_BYTES, "Gallery upload")
 
-        # Duplicate detection via SHA-256
-        file_hash = hashlib.sha256(content).hexdigest()
+        # Duplicate detection via SHA-256. Hash off the event loop — for a
+        # large video this is tens of ms of CPU that would otherwise stall every
+        # other request (uploads are exactly the "many/large at once" case).
+        file_hash = await asyncio.to_thread(lambda: hashlib.sha256(content).hexdigest())
         db = SessionLocal()
         try:
             if album_id and user is not None:
@@ -160,12 +163,14 @@ def setup_gallery_routes() -> APIRouter:
             is_video = ext in VIDEO_EXTS
             filename = f"{uuid.uuid4().hex[:12]}.{ext}"
             img_path = img_dir / filename
-            img_path.write_bytes(content)
+            # Disk write + PIL EXIF decode off the loop — a 100 MB write or a
+            # large-image decode inline would block all concurrent requests.
+            await asyncio.to_thread(img_path.write_bytes, content)
 
             # Extract EXIF for images only — PIL can't parse video containers
             # and the failure path logs a noisy WARNING. We'll add ffprobe-based
             # video metadata extraction in a follow-up.
-            exif = {} if is_video else _extract_exif(content)
+            exif = {} if is_video else await asyncio.to_thread(_extract_exif, content)
             original_name = file.filename.rsplit(".", 1)[0] if "." in file.filename else file.filename
 
             img_id = str(uuid.uuid4())
