@@ -922,34 +922,11 @@ function initMermaid() {
 window.odysseusInitMermaid = initMermaid;
 initMermaid();
 
-// Persist which thinking sections were expanded across page refreshes.
-// IDs are render-generated (Date.now-based) so we key by a stable hash of
-// the inner text content instead — same content reproduces the same hash on
-// reload. LocalStorage holds a Set of expanded hashes; we observe the chat
-// history and re-expand matching sections as they're inserted.
-const THINK_EXPANDED_KEY = 'odysseus-thinking-expanded';
-function _loadExpandedSet() {
-  try { return new Set(JSON.parse(localStorage.getItem(THINK_EXPANDED_KEY) || '[]')); }
-  catch { return new Set(); }
-}
-function _saveExpandedSet(set) {
-  try {
-    const arr = [...set];
-    // Bound storage growth — keep the most recent 200 entries.
-    if (arr.length > 200) arr.splice(0, arr.length - 200);
-    localStorage.setItem(THINK_EXPANDED_KEY, JSON.stringify(arr));
-  } catch {}
-}
-function _hashThinkingContent(el) {
-  if (!el) return '';
-  const text = (el.textContent || '').trim();
-  if (!text) return '';
-  let h = 0;
-  for (let i = 0; i < text.length; i++) {
-    h = (h * 31 + text.charCodeAt(i)) | 0;
-  }
-  return String(h);
-}
+// Thinking folds are ALWAYS collapsed when (re)rendered — Claude/ChatGPT
+// style. Expansion is a transient per-render peek, never persisted: the old
+// content-hash localStorage re-expander made every previously-peeked thought
+// come back open on each reload, which read as "thinking prints expanded".
+try { localStorage.removeItem('odysseus-thinking-expanded'); } catch {}
 function _setThinkingExpanded(content, toggle, header, expanded) {
   if (!content || !toggle) return;
   content.classList.toggle('expanded', expanded);
@@ -990,59 +967,7 @@ document.addEventListener('click', function(e) {
 
   const willExpand = !content.classList.contains('expanded');
   _setThinkingExpanded(content, toggle, header, willExpand);
-
-  // Persist by content hash so the choice survives a refresh.
-  const hash = _hashThinkingContent(content);
-  if (!hash) return;
-  const set = _loadExpandedSet();
-  if (willExpand) set.add(hash);
-  else set.delete(hash);
-  _saveExpandedSet(set);
 });
-
-// Watch the chat history; whenever a thinking section appears, expand it if
-// its hash matches one the user previously expanded.
-(function _watchThinking() {
-  if (window._thinkingWatcherWired) return;
-  window._thinkingWatcherWired = true;
-  const _apply = (root) => {
-    if (!root || !root.querySelectorAll) return;
-    const sections = root.matches?.('.thinking-section')
-      ? [root]
-      : [...root.querySelectorAll('.thinking-section')];
-    if (!sections.length) return;
-    const set = _loadExpandedSet();
-    if (!set.size) return;
-    for (const sec of sections) {
-      const content = sec.querySelector('.thinking-content');
-      if (!content) continue;
-      if (content.classList.contains('expanded')) continue;
-      const hash = _hashThinkingContent(content);
-      if (!hash || !set.has(hash)) continue;
-      const header = sec.querySelector('.thinking-header[data-thinking-id]');
-      const id = header?.dataset.thinkingId;
-      const toggle = id ? document.getElementById(id + '-toggle') : null;
-      _setThinkingExpanded(content, toggle, header, true);
-    }
-  };
-  const start = () => {
-    const root = document.body;
-    if (!root) return;
-    _apply(root);
-    new MutationObserver((mutations) => {
-      for (const m of mutations) {
-        for (const node of m.addedNodes) {
-          if (node.nodeType === 1) _apply(node);
-        }
-      }
-    }).observe(root, { childList: true, subtree: true });
-  };
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', start, { once: true });
-  } else {
-    start();
-  }
-})();
 
 function _endpointNameFromUrl(url) {
   try {

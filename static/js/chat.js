@@ -1342,6 +1342,10 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
                   roundText = roundText.replace(/<think>/i, '<think time="' + _elapsedDone + '">');
                 }
                 if (_liveThinkHeader) _liveThinkHeader.textContent = 'View thinking process';
+                // Fold back any mid-stream peek — finished thinking is always
+                // collapsed (the header label above already says "View").
+                if (_liveThinkContent) _liveThinkContent.classList.remove('expanded');
+                if (_liveThinkToggle) _liveThinkToggle.classList.remove('expanded');
                 if (_liveThinkSpinnerSlot) _liveThinkSpinnerSlot.remove();
                 if (_liveThinkTimerEl && _elapsedDone) {
                   _liveThinkTimerEl.textContent = _elapsedDone + 's';
@@ -1511,7 +1515,9 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
                   thinkingStartTime = Date.now();
                   if (spinner && spinner.element) spinner.destroy();
 
-                  // Create a live thinking box — starts expanded so content streams visibly
+                  // Create a live thinking box — folded; the header shows an
+                  // animated "Thinking…" + spinner + live timer, and the user
+                  // can click to peek while it streams
                   var thinkBody = roundHolder.querySelector('.body');
                   var thinkContent = _ensureStreamLayout(thinkBody);
                   thinkContent.style.minHeight = '';
@@ -1593,7 +1599,7 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
                     continue;
                   }
 
-                  // Thinking ended — smooth transition: update header, pause, then collapse
+                  // Thinking ended — update header and fold back any mid-stream peek
                   // Stop live timer and spinner
                   cancelAnimationFrame(_thinkTimerRAF);
                   var elapsed = thinkingStartTime ? ((Date.now() - thinkingStartTime) / 1000).toFixed(1) : null;
@@ -1603,6 +1609,8 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
                     roundText = roundText.replace(/<think>/i, '<think time="' + elapsed + '">');
                   }
                   if (_liveThinkHeader) _liveThinkHeader.textContent = 'View thinking process';
+                  if (_liveThinkContent) _liveThinkContent.classList.remove('expanded');
+                  if (_liveThinkToggle) _liveThinkToggle.classList.remove('expanded');
                   if (_liveThinkSpinnerSlot) _liveThinkSpinnerSlot.remove();
                   // Move timer to right side of header
                   if (_liveThinkTimerEl && elapsed) {
@@ -2001,6 +2009,14 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
                   if (_liveThinkContent) _liveThinkContent.id = _thinkId2;
                   if (_liveThinkToggle) _liveThinkToggle.id = _thinkId2 + '-toggle';
                 }
+                // Close the stateful reasoning_content wrapper at the round
+                // boundary. DeepSeek-style models end a round reasoning→tool
+                // call with NO content delta, so the closing </think> (emitted
+                // by the first non-thinking delta) never fires: unclosed,
+                // round 1's reasoning is promoted to visible reply text by the
+                // stray-opener heuristic and rounds 2+ stream tag-less as
+                // plain chat bubbles between tool nodes.
+                if (_thinkOpen) { accumulated += '</think>'; roundText += '</think>'; _thinkOpen = false; }
                 _renderStream();
                 // --- Finalize current text bubble (only once per round) ---
                 if (!roundFinalized) {
@@ -2434,6 +2450,11 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
                 if (_isBg) continue;
                 _cancelThinkingTimer();
                 _removeThinkingSpinner();
+                // Round boundary without a tool_start (e.g. verifier step):
+                // close the reasoning wrapper so the next round re-opens its
+                // own <think> instead of streaming tag-less (must land before
+                // the render below and the roundText reset).
+                if (_thinkOpen) { accumulated += '</think>'; roundText += '</think>'; _thinkOpen = false; }
                 _renderStream();
                 // Mark thread as connected to bubble below
                 const _activeThread = document.querySelector('.agent-thread.streaming');
@@ -2504,6 +2525,7 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
                 roundText = '';
                 roundFinalized = false;
                 currentToolBubble = null;
+                _thinkOpen = false; // student bubble abandoned — don't leak its open <think> into the teacher's text
                 uiModule.scrollHistory();
 
               } else if (json.type === 'skill_saved') {
@@ -3396,6 +3418,10 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
           let json;
           try { json = JSON.parse(payload); } catch (_) { continue; }
           if (json.delta) {
+            // Reasoning deltas: this resume renderer has no fold support and
+            // reasoning is never persisted server-side — skip, matching what
+            // the post-stream history reload will show.
+            if (json.thinking) continue;
             roundText += json.delta;
             if (!gotDelta) { gotDelta = true; try { spinner.destroy(); } catch (_) {} }
             renderDelta();

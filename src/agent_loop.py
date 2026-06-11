@@ -2340,6 +2340,13 @@ async def stream_agent_loop(
         # persisted text either — otherwise it streams once and then disappears
         # on reload (#3222 follow-up).
         cleaned_round = strip_tool_blocks(round_response, skip_fenced=(_is_api_model and not used_native)).strip()
+        # reasoning_content models (DeepSeek / vLLM --reasoning-parser) carry
+        # their thinking OUTSIDE round_response, so without this the fold the
+        # user saw live vanishes on reload. Persist it as a <think> block —
+        # round_texts is render-only metadata (the _claimed_done/_intent/_real
+        # checks below all strip think blocks before judging content).
+        if round_reasoning.strip():
+            cleaned_round = ("<think>" + round_reasoning.strip() + "</think>\n\n" + cleaned_round).strip()
         round_texts.append(cleaned_round)
 
         if not tool_blocks:

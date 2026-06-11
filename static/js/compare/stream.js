@@ -165,6 +165,10 @@ async function streamToPane(paneIdx, sessionId, message, aiMsgEl, opts) {
   let timedOut = false;
   let streamOk = false;
   let currentToolBlock = null;  // track active agent tool block
+  // Stateful <think> wrapper for reasoning_content deltas ({delta, thinking:true})
+  // — same convention as chat.js, so processWithThinking folds the reasoning
+  // instead of concatenating it into the pane as plain text.
+  let _thinkOpen = false;
   // Idle timeout — abort only if no data is received for this many seconds.
   // Long generations (SVG, big code) are fine as long as the stream stays
   // active. opts.timeout may still tighten this for specific paths.
@@ -422,6 +426,8 @@ async function streamToPane(paneIdx, sessionId, message, aiMsgEl, opts) {
               // Reset text element so next deltas create a fresh container
               aiMsgEl._textEl = null;
               accumulated = '';
+              _thinkOpen = false; // next round's reasoning re-opens its own <think>
+
             }
             if (hist) hist.scrollTop = hist.scrollHeight;
           } else if (json.delta) {
@@ -450,7 +456,13 @@ async function streamToPane(paneIdx, sessionId, message, aiMsgEl, opts) {
               aiBody.appendChild(textEl);
               aiMsgEl._textEl = textEl;
             }
-            accumulated += json.delta;
+            let _delta = json.delta;
+            if (json.thinking) {
+              if (!_thinkOpen) { _delta = '<think>' + _delta; _thinkOpen = true; }
+            } else if (_thinkOpen) {
+              _delta = '</think>' + _delta; _thinkOpen = false;
+            }
+            accumulated += _delta;
             const target = aiMsgEl._textEl || aiBody;
             _scheduleLiveRender(target);
           }
