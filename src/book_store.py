@@ -1,17 +1,19 @@
-"""Books / E-Reader = a reading view over the Knowledge base's PDF/EPUB files.
+"""Books / E-Reader = the native PDF/EPUB store.
 
-A "book" IS a knowledge file (`KnowledgeFile`) whose type is PDF or EPUB, so the
-Books window and the Knowledge panel show the same files and stay in sync, and
-Iris can search book contents via `search_knowledge` (the KB already extracts +
-RAG-indexes pdf/epub text). This module adds only the Books-specific state on
-top — reading progress + bookmarks/highlights — keyed by the knowledge file id.
-There is no separate book file store; the bytes live in the KB-owned store.
+A book owns its bytes in BOOKS_DIR and its extracted text (RAG-indexed under
+kind="book", so Iris can search book contents via the unified search). This
+module is the file substrate (ingest / extract / search / open / rename /
+favorite / delete) PLUS the Books-specific reading state — progress +
+bookmarks/highlights — both keyed by the Book id. Reuses the shared extraction
+(src.content_extract) and RAG indexing (src.content_rag) so books are indexed
+exactly like every other content store.
 """
 from __future__ import annotations
 
 import logging
 import os
 import re
+import shutil
 import tempfile
 import uuid
 from pathlib import Path
@@ -19,15 +21,45 @@ from typing import Optional
 
 from fastapi import HTTPException
 
-from src import knowledge_base as kb
+from src import content_extract, content_rag
 
 logger = logging.getLogger(__name__)
 
 SUPPORTED_BOOK_EXTENSIONS = {".epub", ".pdf"}
+RAG_KIND = "book"
 
 
 # --------------------------------------------------------------------------- #
-# Identity: a book is a knowledge file whose type is pdf/epub                 #
+# Byte store (BOOKS_DIR, owner-sharded by id)                                 #
+# --------------------------------------------------------------------------- #
+
+def _books_dir() -> str:
+    from src.constants import BOOKS_DIR
+    return BOOKS_DIR
+
+
+def _owner_slug(owner) -> str:
+    raw = str(owner or "_anon")
+    return "".join(c if (c.isalnum() or c in "-_.@") else "_" for c in raw) or "_anon"
+
+
+def _copy_into_books(owner, book_id: str, src_path: str, filename: str) -> Optional[str]:
+    """Copy the source file into BOOKS_DIR; return the path relative to it
+    (stored on the row, resolved by resolve_book_file)."""
+    try:
+        ext = os.path.splitext(filename or src_path)[1].lower()
+        rel = os.path.join(_owner_slug(owner), book_id[:2], f"{book_id}{ext}")
+        dest = os.path.join(_books_dir(), rel)
+        os.makedirs(os.path.dirname(dest), exist_ok=True)
+        shutil.copy2(src_path, dest)
+        return rel
+    except Exception as e:
+        logger.warning("books: could not copy %s into store: %s", filename, e)
+        return None
+
+
+# --------------------------------------------------------------------------- #
+# Identity: a book is a pdf/epub                                              #
 # --------------------------------------------------------------------------- #
 
 def kind_of(filename: str) -> Optional[str]:
@@ -38,76 +70,109 @@ def is_book(filename: str) -> bool:
     return kind_of(filename) is not None
 
 
-def _book_dict(rec: dict) -> dict:
-    """Map a knowledge-file record to a book dict. The Books API identifier is the
-    knowledge id, carried as both `id` and `path` (the existing frontend passes a
-    book's `path` to /api/books/* — here that value is the knowledge id)."""
-    kid = rec["id"]
-    fname = rec.get("filename") or "Book"
+def _book_dict(row) -> dict:
+    """Map a Book row to a book dict. The Books API identifier is the Book id,
+    carried as both `id` and `path` (the frontend passes a book's `path` to
+    /api/books/* — that value is the Book id)."""
+    bid = row.id
+    fname = row.filename or "Book"
     return {
-        "id": kid,
-        "path": kid,
-        "kb_id": kid,
+        "id": bid,
+        "path": bid,
+        "kb_id": bid,
         "filename": fname,
         "title": os.path.splitext(fname)[0] or "Book",
         "kind": kind_of(fname),
-        "mime": rec.get("mime"),
-        "size": rec.get("file_size"),
-        "url": rec.get("url"),
-        "excerpt": rec.get("excerpt") or "",
-        "tags": rec.get("tags") or [],
-        "favorite": bool(rec.get("favorite")),
+        "mime": row.mime,
+        "size": row.file_size,
+        "url": f"/api/books/file?path={bid}",
+        "excerpt": (row.text or "")[:300],
+        "tags": content_extract.split_tags(row.tags),
+        "favorite": bool(row.favorite),
     }
 
 
 def get_book(owner: Optional[str], kb_id: str) -> Optional[dict]:
-    """The knowledge file as a book dict, or None if it isn't a readable book
-    (or not this owner's)."""
-    rec = kb.get(owner, kb_id)
-    if not rec or not is_book(rec.get("filename") or ""):
-        return None
-    return _book_dict(rec)
+    """The book row as a book dict, or None if missing / not this owner's."""
+    from core.database import SessionLocal, Book
+    db = SessionLocal()
+    try:
+        row = db.query(Book).filter(Book.id == kb_id).first()
+        if not row or (owner is not None and row.owner != owner):
+            return None
+        return _book_dict(row)
+    finally:
+        db.close()
 
 
 def resolve_book_file(owner: Optional[str], kb_id: str) -> Path:
-    """Absolute path to the book's bytes (owner-scoped), via the KB-owned store."""
-    p = kb.file_abspath(owner, kb_id)
-    if not p:
+    """Absolute path to the book's bytes (owner-scoped). 404 if missing/forbidden."""
+    from core.database import SessionLocal, Book
+    db = SessionLocal()
+    try:
+        row = db.query(Book).filter(Book.id == kb_id).first()
+        if not row or (owner is not None and row.owner != owner) or not row.path:
+            raise HTTPException(404, "Book file not found")
+        p = os.path.join(_books_dir(), row.path)
+    finally:
+        db.close()
+    if not os.path.exists(p):
         raise HTTPException(404, "Book file not found")
     return Path(p)
 
 
 def list_books(owner: Optional[str], query: str = "", limit: int = 50) -> list[dict]:
+    from core.database import SessionLocal, Book
     cap = max(1, int(limit or 50))
-    # KB search matches filename / extracted text / tags; keep only readable books.
-    files = kb.search(owner, q=query or "", limit=500)
-    books: list[dict] = []
-    for rec in files:
-        if not is_book(rec.get("filename") or ""):
-            continue
-        b = _book_dict(rec)
-        b["progress"] = get_progress(owner, b["id"], missing_ok=True)
-        books.append(b)
-    # Favourites first, then the search order (newest-first). Stable sort keeps
-    # the within-group order; cap AFTER sorting so a starred book never drops off.
+    db = SessionLocal()
+    try:
+        q = db.query(Book)
+        if owner is not None:
+            q = q.filter(Book.owner == owner)
+        query = (query or "").strip()
+        if query:
+            like = f"%{query}%"
+            q = q.filter(
+                Book.filename.ilike(like) | Book.text.ilike(like)
+                | Book.tags.ilike(like) | Book.ai_tags.ilike(like)
+            )
+        rows = q.order_by(Book.created_at.desc()).limit(500).all()
+        books = []
+        for row in rows:
+            b = _book_dict(row)
+            b["progress"] = get_progress(owner, b["id"], missing_ok=True)
+            books.append(b)
+    finally:
+        db.close()
+    # Favourites first, then newest-first. Stable sort keeps the within-group
+    # order; cap AFTER sorting so a starred book never drops off.
     books.sort(key=lambda b: 0 if b.get("favorite") else 1)
     return books[:cap]
 
 
 def set_favorite(owner: Optional[str], kb_id: str, favorite: bool) -> dict:
-    """Star/unstar a book (owner-scoped). Returns the updated book dict; 404 if
-    the file isn't this owner's readable book."""
-    rec = kb.set_favorite(owner, kb_id, bool(favorite))
-    if not rec or not is_book(rec.get("filename") or ""):
-        raise HTTPException(404, "Book not found")
-    b = _book_dict(rec)
-    b["progress"] = get_progress(owner, b["id"], missing_ok=True)
+    """Star/unstar a book (owner-scoped). 404 if not this owner's book."""
+    from core.database import SessionLocal, Book
+    db = SessionLocal()
+    try:
+        row = db.query(Book).filter(Book.id == kb_id).first()
+        if not row or (owner is not None and row.owner != owner):
+            raise HTTPException(404, "Book not found")
+        row.favorite = bool(favorite)
+        db.commit()
+        db.refresh(row)
+        b = _book_dict(row)
+    finally:
+        db.close()
+    b["progress"] = get_progress(owner, kb_id, missing_ok=True)
     return b
 
 
 def add_book(owner: Optional[str], filename: str, content: bytes, *, mime: str = "") -> dict:
-    """Add a book = ingest it into the Knowledge base (extract text + RAG-index),
-    so it shows up in BOTH Books and Knowledge and Iris can search its contents."""
+    """Add a book: store the bytes in BOOKS_DIR, extract text + RAG-index it
+    (kind="book") so Iris can search its contents. Dedupes by content hash per
+    owner (returns the existing book on a repeat upload)."""
+    from core.database import SessionLocal, Book
     ext = os.path.splitext(filename or "")[1].lower()
     if ext not in SUPPORTED_BOOK_EXTENSIONS:
         raise HTTPException(400, "Upload must be an .epub or .pdf file")
@@ -115,44 +180,90 @@ def add_book(owner: Optional[str], filename: str, content: bytes, *, mime: str =
     try:
         with open(tmp, "wb") as f:
             f.write(content)
-        rec = kb.ingest(owner, file_path=tmp, filename=filename or f"book{ext}",
-                        mime=mime or "", source="book")
+        sha = content_extract.sha256_file(tmp)
+        fname = filename or f"book{ext}"
+        db = SessionLocal()
+        try:
+            if sha:
+                existing = (
+                    db.query(Book)
+                    .filter(Book.owner == owner, Book.sha256 == sha)
+                    .first()
+                )
+                if existing:
+                    return _book_dict(existing)
+            try:
+                size = os.path.getsize(tmp)
+            except OSError:
+                size = None
+            text = content_extract.extract_text(tmp, fname, mime or "", owner=owner)
+            bid = uuid.uuid4().hex
+            rel = _copy_into_books(owner, bid, tmp, fname)
+            row = Book(
+                id=bid, owner=owner, filename=fname, mime=mime or None,
+                file_size=size, sha256=sha, path=rel, text=text, indexed=False,
+            )
+            db.add(row)
+            db.commit()
+            db.refresh(row)
+            if content_rag.index_text(owner, bid, text, RAG_KIND, filename=fname, source="book"):
+                row.indexed = True
+                db.commit()
+                db.refresh(row)
+            return _book_dict(row)
+        finally:
+            db.close()
     finally:
         try:
             os.remove(tmp)
         except OSError:
             pass
-    return _book_dict(rec)
 
 
 def set_title(owner: Optional[str], kb_id: str, title: str) -> dict:
-    """Rename the book — updates the underlying knowledge file's name (so the
-    rename appears in BOTH Books and Knowledge), preserving its extension."""
-    rec = kb.get(owner, kb_id)
-    if not rec or not is_book(rec.get("filename") or ""):
-        raise HTTPException(404, "Book not found")
+    """Rename the book (display filename), preserving its extension."""
+    from core.database import SessionLocal, Book
     clean = re.sub(r"\s+", " ", title or "").strip()[:200]
     if not clean:
         raise HTTPException(400, "Title is required")
-    ext = os.path.splitext(rec["filename"])[1].lower() or f".{kind_of(rec['filename']) or 'pdf'}"
-    kb.rename(owner, kb_id, f"{clean}{ext}")
+    db = SessionLocal()
+    try:
+        row = db.query(Book).filter(Book.id == kb_id).first()
+        if not row or (owner is not None and row.owner != owner):
+            raise HTTPException(404, "Book not found")
+        ext = os.path.splitext(row.filename or "")[1].lower() or f".{kind_of(row.filename or '') or 'pdf'}"
+        row.filename = f"{clean}{ext}"
+        kind = kind_of(row.filename)
+        db.commit()
+    finally:
+        db.close()
     _update_progress_title(owner, kb_id, clean)
-    return {"book_id": kb_id, "path": kb_id, "kind": kind_of(rec["filename"]), "title": clean}
+    return {"book_id": kb_id, "path": kb_id, "kind": kind, "title": clean}
 
 
 def delete_book(owner: Optional[str], kb_id: str) -> bool:
-    """Delete the book = delete the knowledge file (gone from both Books and
-    Knowledge) plus its reading progress + annotations."""
-    from core.database import SessionLocal, BookProgress, BookAnnotation
-    ok = kb.delete(owner, kb_id)
+    """Delete the book — its row, its bytes, its RAG chunks, and its reading
+    progress + annotations."""
+    from core.database import SessionLocal, Book, BookProgress, BookAnnotation
     db = SessionLocal()
     try:
+        row = db.query(Book).filter(Book.id == kb_id).first()
+        if not row or (owner is not None and row.owner != owner):
+            return False
+        rel = row.path
+        db.delete(row)
         db.query(BookProgress).filter(BookProgress.id == kb_id).delete()
         db.query(BookAnnotation).filter(BookAnnotation.book_id == kb_id).delete()
         db.commit()
     finally:
         db.close()
-    return ok
+    content_rag.deindex(kb_id)  # drop the book's vectors so deleted text can't resurface
+    if rel:
+        try:
+            os.remove(os.path.join(_books_dir(), rel))
+        except OSError:
+            pass
+    return True
 
 
 # --------------------------------------------------------------------------- #

@@ -41,11 +41,23 @@ def test_list_albums_count_and_cover_are_owner_scoped():
     fns = _function_sources()
     body = fns["list_albums"]
     # The album list, per-album image count, explicit cover, and cover-fallback
-    # queries should all share the same gallery owner policy.
+    # queries should all share the same gallery owner policy. (The owner filter
+    # is now composed inside the hidden-by-default `_visible(...)` wrapper, so we
+    # assert the owner-scoping call is present rather than its exact assignment.)
     assert "q = _owner_filter(q, user, GalleryAlbum)" in body
-    assert "_count_q = _owner_filter(_count_q, user)" in body
-    assert "cover = _owner_filter(cover_q, user).first()" in body
-    assert "_cover_q = _owner_filter(_cover_q, user)" in body
+    assert "_owner_filter(_count_q, user)" in body
+    assert "_owner_filter(cover_q, user)" in body
+    assert "_owner_filter(_cover_q, user)" in body
+
+
+def test_list_albums_hidden_by_default():
+    fns = _function_sources()
+    body = fns["list_albums"]
+    # Hidden albums are excluded from the listing, and hidden images never count
+    # toward an album's tally or cover, unless show_hidden was explicitly passed.
+    assert "show_hidden" in body
+    assert "GalleryAlbum.hidden" in body
+    assert "_visible(" in body
 
 
 def test_delete_album_cleanup_is_owner_scoped():

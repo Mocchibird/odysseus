@@ -3,6 +3,24 @@
 // them byte-identical to the source markup/JS, or the match silently fails.
 // Generated from the UI string extraction; hand-maintained from here on.
 export default {
+  // Library: Files tab (native Files store)
+  "Files": "파일",
+  "Search files…": "파일 검색…",
+  "Uploaded files (docs, spreadsheets, data, audio, archives) — searchable by Iris and openable here.": "업로드한 파일(문서, 스프레드시트, 데이터, 오디오, 압축파일) — Iris가 검색할 수 있고 여기서 열 수 있습니다.",
+  "No files yet. Use “Add files”, or ask Iris to save an attachment — docs, spreadsheets and data live here, searchable and openable.": "아직 파일이 없습니다. “파일 추가”를 사용하거나 Iris에게 첨부파일 저장을 요청하세요 — 문서, 스프레드시트, 데이터가 여기에 저장되어 검색·열람할 수 있습니다.",
+  // Gallery: video tab + hidden-by-default
+  "Photos": "사진",
+  "Videos": "동영상",
+  "Albums": "앨범",
+  "Hide": "숨기기",
+  "Unhide": "숨김 해제",
+  "Hidden": "숨김",
+  "Unhidden": "숨김 해제됨",
+  "Album hidden": "앨범 숨김",
+  "Album unhidden": "앨범 숨김 해제됨",
+  "Show hidden items": "숨긴 항목 표시",
+  "Hiding hidden items": "숨긴 항목 숨기는 중",
+  "Failed to update": "업데이트 실패",
   "! important": "! 중요",
   "#tag1 #tag2": "#태그1 #태그2",
   "(Endpoints)": "(엔드포인트)",
@@ -341,7 +359,6 @@ export default {
   "Keep": "보관",
   "Kept": "보관됨",
   "Keyboard Shortcuts": "키보드 단축키",
-  "Knowledge": "지식",
   "Language": "언어",
   "Last 14 days": "최근 14일",
   "Last 30 days": "최근 30일",
@@ -419,7 +436,7 @@ export default {
   "Next step from every goal": "각 목표의 다음 단계",
   "Next week": "다음 주",
   "No API endpoints yet.": "아직 API 엔드포인트가 없습니다.",
-  "No EPUB or PDF books yet — upload one above, or add a PDF/EPUB in the Knowledge panel.": "아직 EPUB이나 PDF 도서가 없습니다 — 위에서 업로드하거나 지식 패널에서 PDF/EPUB을 추가하세요.",
+  "No EPUB or PDF books yet — upload one above, or ask Iris to add a PDF/EPUB.": "아직 EPUB이나 PDF 도서가 없습니다 — 위에서 업로드하거나 Iris에게 PDF/EPUB 추가를 요청하세요.",
   "No albums yet.": "아직 앨범이 없습니다.",
   "No bookmarks or highlights yet. Select text to highlight, or use the bookmark button to save a spot.": "아직 북마크나 하이라이트가 없습니다. 텍스트를 선택해 하이라이트하거나, 북마크 버튼으로 위치를 저장하세요.",
   "No books match your search.": "검색과 일치하는 도서가 없습니다.",

@@ -1561,7 +1561,10 @@ const TOOL_META = {
   edit_document:     { name: 'Edit Document',    desc: 'Find & replace in documents',     cat: 'Documents',  ctx: '~200' },
   suggest_document:  { name: 'Suggest Changes',  desc: 'Propose document edits',          cat: 'Documents',  ctx: '~200' },
   manage_documents:  { name: 'Manage Documents', desc: 'List, delete, organize docs',     cat: 'Documents',  ctx: '~150' },
+  search_files:      { name: 'Search Files',     desc: 'Search files, books & documents', cat: 'Files',      ctx: '~200' },
+  manage_files:      { name: 'Manage Files',     desc: 'Store/tag/rename/delete files',   cat: 'Files',      ctx: '~200' },
   generate_image:    { name: 'Generate Image',   desc: 'Create images via AI',            cat: 'Media',      ctx: '~150' },
+  manage_gallery:    { name: 'Gallery',          desc: 'Tag/album/sort photos & videos',  cat: 'Media',      ctx: '~200' },
   manage_memory:     { name: 'Memory',           desc: 'Save and recall memories',        cat: 'Knowledge',  ctx: '~200' },
   manage_skills:     { name: 'Skills',           desc: 'Learn and use procedures',        cat: 'Knowledge',  ctx: '~200' },
   manage_rag:        { name: 'RAG / Docs',       desc: 'Query indexed documents',         cat: 'Knowledge',  ctx: '~150' },
@@ -1604,7 +1607,7 @@ async function loadBuiltinTools() {
     }
 
     // Category order
-    const catOrder = ['Code', 'Search', 'Documents', 'Media', 'Knowledge', 'Multi-Agent', 'Sessions', 'System', 'Other'];
+    const catOrder = ['Code', 'Search', 'Documents', 'Files', 'Media', 'Knowledge', 'Multi-Agent', 'Sessions', 'System', 'Other'];
     let html = '';
     for (const cat of catOrder) {
       const items = groups[cat];

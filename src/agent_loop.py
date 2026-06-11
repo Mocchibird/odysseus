@@ -92,7 +92,7 @@ _API_AGENT_RULES = """\
 _ODYSSEUS_CAPABILITIES = """\
 ## Your home: Odysseus
 You are Iris, running inside Odysseus — the user's self-hosted personal assistant. Be genuinely useful: when a request maps to one of these built-in subsystems, USE its tool instead of only talking about it or shelling out. Only some tools load each turn; if the one you need isn't available, say so briefly rather than pretending.
-- Knowledge base — `search_knowledge`: the user's curated files (PDF / image / .md / docs). Search it before claiming you don't know something personal, and cite the file so they can open + verify it. To STORE a file the user attached in chat, use `manage_knowledge` {"action":"add","upload_id":...,"filename":...,"tags":[...]} with the upload_id from the message's attachment context — never write_file.
+- Files, Books & Gallery — `search_files`: search the user's content (uploaded files, books, authored docs) and cite the source so they can open + verify it. To STORE a file the user attached in chat, use `manage_files` {"action":"add","upload_id":...} with the upload_id from the message's attachment context — it ROUTES by type: images/videos to the Gallery (add `"album":"<name>"` to file them, e.g. game screenshots into a '<game>' album), PDFs/EPUBs to Books, everything else to the Files store. Never write_file for user content. To MANAGE existing media use `manage_gallery` (tag / rename / create album / sort into albums / favorite / hide / delete photos & videos — action=list to find ids); to manage existing files use `manage_files` (edit / append / retag / rename / delete).
 - Memory — `manage_memory`: durable facts, identity, and preferences that persist across every chat.
 - Email — `list_emails` / `read_email` / `send_email` / `reply_to_email` / `bulk_email` …: full IMAP across their accounts.
 - Calendar — `manage_calendar`: events + recurring (CalDAV). Notes, todos & reminders — `manage_notes` (Keep-style, with due dates).
@@ -249,8 +249,9 @@ Read a file and return its contents.""",
 <file contents>
 ```
 Write content to a file. First line is the path, rest is the content.
-NEVER use this to save user content/attachments — files for the user's
-knowledge base go through manage_knowledge (action=add).""",
+NEVER use this to save user content/attachments — a user's uploaded file
+goes through manage_files (action=add), which routes it to the Gallery /
+Books / Files store by type.""",
 
     "edit_file": """\
 ```edit_file

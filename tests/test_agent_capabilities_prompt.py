@@ -8,7 +8,7 @@ def test_prompt_advertises_odysseus_subsystems():
     assert "Your home: Odysseus" in p
     # A representative spread of subsystem tools Iris should know it has.
     for tool in (
-        "search_knowledge", "manage_memory", "manage_calendar", "manage_notes",
+        "search_files", "manage_files", "manage_memory", "manage_calendar", "manage_notes",
         "manage_tasks", "manage_health", "manage_books", "send_email",
         "web_search", "trigger_research", "send_ping",
     ):
@@ -26,4 +26,4 @@ def test_capability_map_survives_narrow_tool_selection():
     # map stays in the prompt so Iris remains aware of everything it can do.
     p = agent_loop._assemble_prompt({"web_search"})
     assert "Your home: Odysseus" in p
-    assert "search_knowledge" in p  # mentioned in the map even though not selected
+    assert "search_files" in p  # mentioned in the map even though not selected

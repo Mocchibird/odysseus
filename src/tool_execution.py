@@ -95,18 +95,19 @@ def app_store_write_guard(resolved_path: str) -> "str | None":
     import os as _os
     stores = []
     try:
-        from src.knowledge_base import _kb_files_dir
-        stores.append((_kb_files_dir(),
-                       'the knowledge-base store. To save a file into the user\'s knowledge '
-                       'base use manage_knowledge {"action":"add","upload_id":...} with the '
-                       'upload_id from the message\'s attachment context — never write here.'))
+        from src.file_store import _files_dir
+        stores.append((_files_dir(),
+                       'the Files store. To save a file for the user use manage_files '
+                       '{"action":"add","upload_id":...} with the upload_id from the '
+                       'message\'s attachment context — never write here.'))
     except Exception:
         pass
     try:
-        from src.constants import BOOKS_DIR, CHROMA_DIR, UPLOAD_DIR
+        from src.constants import BOOKS_DIR, CHROMA_DIR, UPLOAD_DIR, GENERATED_IMAGES_DIR
         stores.append((str(CHROMA_DIR), "the vector-index store (app-managed; writing here corrupts recall)."))
         stores.append((str(UPLOAD_DIR), "the uploads store (files appear here when the user attaches them in chat)."))
-        stores.append((str(BOOKS_DIR), "the books store. Books are added via the Books window or manage_books."))
+        stores.append((str(BOOKS_DIR), 'the books store. Add books via the Books window or manage_files {"action":"add","upload_id":...} (.pdf/.epub route here).'))
+        stores.append((str(GENERATED_IMAGES_DIR), 'the gallery store. Add images/videos via the Gallery or manage_files {"action":"add","upload_id":...,"album":"..."}.'))
     except Exception:
         pass
     for root, hint in stores:
@@ -491,7 +492,7 @@ async def execute_tool_block(
         do_manage_skills, do_api_call, do_send_ping, do_manage_endpoints,
         do_manage_mcp, do_manage_webhooks, do_manage_tokens,
         do_manage_settings, do_manage_notes,
-        do_manage_health, do_search_knowledge, do_manage_knowledge,
+        do_manage_health, do_search_files, do_manage_files, do_manage_gallery,
         do_manage_calendar, do_manage_books,
         do_download_model, do_serve_model, do_list_served_models, do_stop_served_model,
         do_tail_serve_output,
@@ -727,12 +728,15 @@ async def execute_tool_block(
     elif tool == "manage_tokens":
         desc = "manage_tokens"
         result = await do_manage_tokens(content, owner=owner)
-    elif tool == "search_knowledge":
-        desc = "search_knowledge"
-        result = await do_search_knowledge(content, owner=owner)
-    elif tool == "manage_knowledge":
-        desc = "manage_knowledge"
-        result = await do_manage_knowledge(content, owner=owner)
+    elif tool == "search_files":
+        desc = "search_files"
+        result = await do_search_files(content, owner=owner)
+    elif tool == "manage_files":
+        desc = "manage_files"
+        result = await do_manage_files(content, owner=owner)
+    elif tool == "manage_gallery":
+        desc = "manage_gallery"
+        result = await do_manage_gallery(content, owner=owner)
     elif tool == "manage_settings":
         desc = "manage_settings"
         result = await do_manage_settings(content, owner=owner)

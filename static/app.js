@@ -3,7 +3,7 @@
 // ES6 module — entry point, no exports (wires all modules together)
 // ============================================
 // UI language layer first — its observer must be live before modules render.
-import './js/i18n.js?v=400';
+import './js/i18n.js?v=402';
 import Storage from './js/storage.js';
 import uiModule from './js/ui.js';
 import fileHandlerModule from './js/fileHandler.js';
@@ -26,12 +26,11 @@ import galleryModule from './js/gallery.js';
 import tasksModule from './js/tasks.js';
 import calendarModule from './js/calendar.js';
 import notesModule from './js/notes.js?v=402';
-import booksModule from './js/books.js?v=395';
+import booksModule from './js/books.js?v=396';
 import healthModule from './js/health.js?v=397';
 import pingsModule from './js/pings.js?v=395';
-import knowledgeModule from './js/knowledge.js?v=397';
 import todayModule from './js/today.js?v=395';
-import adminModule from './js/admin.js?v=392';
+import adminModule from './js/admin.js?v=393';
 import settingsModule from './js/settings.js?v=400';
 // Eagerly bind unified minimize/restore behavior across all tool modals.
 import './js/modalManager.js';
@@ -208,14 +207,17 @@ function initializeEventListeners() {
     requestAnimationFrame(() => { _touchThrottled = false; });
   }, { passive: true });
 
-  // Internal #session-id / #knowledge-id links from AI search results
+  // Internal links from AI search results: #session-id, plus content citations
+  // from search_files — #file-/#book-/#gallery- (and legacy #knowledge-). Matched
+  // by href so it works regardless of how the link is rendered.
   el('chat-history').addEventListener('click', (e) => {
-    // #knowledge-<id> citations from search_knowledge → open the file in the KB panel.
-    // Matched by href (not a class) so it works regardless of how it's rendered.
-    const kbLink = e.target.closest('a[href^="#knowledge-"]');
-    if (kbLink && knowledgeModule?.openKnowledge) {
+    const cite = e.target.closest('a[href^="#file-"], a[href^="#knowledge-"], a[href^="#book-"], a[href^="#gallery-"]');
+    if (cite) {
       e.preventDefault();
-      knowledgeModule.openKnowledge(kbLink.getAttribute('href').slice('#knowledge-'.length));
+      const href = cite.getAttribute('href');
+      if (href.startsWith('#book-')) booksModule?.openBooksPanel?.();
+      else if (href.startsWith('#gallery-')) galleryModule?.openGallery?.();
+      else documentModule?.openLibrary?.({ tab: 'files' });  // #file- / legacy #knowledge-
       return;
     }
     const link = e.target.closest('a.chat-link');
@@ -927,15 +929,6 @@ function initializeEventListeners() {
   const toolHabitsBtn = el('tool-habits-btn');
   if (toolHabitsBtn) {
     toolHabitsBtn.addEventListener('click', () => healthModule && healthModule.openHabits());
-  }
-
-  // Knowledge base — manually add files + browse/search/tag/open (toggles)
-  const toolKnowledgeBtn = el('tool-knowledge-btn');
-  if (toolKnowledgeBtn) {
-    toolKnowledgeBtn.addEventListener('click', () => {
-      if (!knowledgeModule) return;
-      knowledgeModule.isKnowledgeOpen() ? knowledgeModule.closeKnowledge() : knowledgeModule.openKnowledge();
-    });
   }
 
   // "Today" dashboard tool button (toggles open/closed)
@@ -3496,7 +3489,6 @@ function startOdysseusApp() {
   const _railToolMap = {
     'rail-today':     'tool-today-btn',
     'rail-books':     'tool-books-btn',
-    'rail-knowledge': 'tool-knowledge-btn',
     'rail-compare':   'tool-compare-btn',
     'rail-research':  'tool-research-btn',
     'rail-cookbook':   'tool-cookbook-btn',

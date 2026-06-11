@@ -63,10 +63,45 @@ from routes.document_helpers import (
 )
 
 
-def _mirror_document_to_vault(owner: str | None, doc: Document) -> None:
-    """No-op: the Obsidian vault was removed. Documents live in the native
-    documents store; nothing is mirrored to a vault anymore."""
-    return
+def _index_document_rag(owner: str | None, doc: Document) -> None:
+    """Index a document's body into the shared RAG store (kind="document") so
+    Iris can semantically recall authored docs alongside Files and Books. Runs
+    OFF the request path (fire-and-forget thread) so it never blocks a save,
+    strips the PDF-wrapper HTML-comment markers, and delete-before-readds so an
+    edit never leaves stale chunks. Best-effort — a RAG outage is ignored."""
+    import re as _re
+    try:
+        doc_id = doc.id
+        title = doc.title or ""
+        # Strip pdf_source/pdf_form_source (and any) HTML-comment markers.
+        content = _re.sub(r"<!--.*?-->", "", doc.current_content or "", flags=_re.DOTALL).strip()
+    except Exception:
+        return
+
+    def _work():
+        try:
+            from src import content_rag
+            content_rag.deindex(doc_id)
+            if content:
+                content_rag.index_text(owner, doc_id, content, "document", filename=title)
+        except Exception:
+            logger.debug("document RAG index failed for %s", doc_id, exc_info=True)
+
+    try:
+        import asyncio as _aio
+        _aio.get_running_loop()
+        _aio.create_task(_aio.to_thread(_work))
+    except RuntimeError:
+        _work()
+
+
+def _deindex_document_rag(doc_id: str) -> None:
+    """Drop a document's chunks from recall (on delete/archive). Best-effort."""
+    try:
+        from src import content_rag
+        content_rag.deindex(doc_id)
+    except Exception:
+        logger.debug("document RAG deindex failed for %s", doc_id, exc_info=True)
 
 
 def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
@@ -148,7 +183,7 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
             db.add(ver)
             db.commit()
             db.refresh(doc)
-            _mirror_document_to_vault(doc.owner or user, doc)
+            _index_document_rag(doc.owner or user, doc)
             try:
                 from src.event_bus import fire_event
                 fire_event("document_created", doc.owner)
@@ -268,7 +303,7 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
                 doc.owner = user
                 db.commit()
                 db.refresh(doc)
-            _mirror_document_to_vault(doc.owner or user, doc)
+            _index_document_rag(doc.owner or user, doc)
             return _doc_to_dict(doc)
         finally:
             db.close()
@@ -444,6 +479,10 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
             _verify_doc_owner(db, doc, user)
             doc.archived = bool(archived)
             db.commit()
+            if doc.archived:
+                _deindex_document_rag(doc_id)                 # archived → out of recall
+            else:
+                _index_document_rag(doc.owner or user, doc)   # un-archived → re-index
             return {"ok": True, "id": doc_id, "archived": doc.archived}
         finally:
             db.close()
@@ -504,6 +543,7 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
                 source="ocr",
             ))
             db.commit()
+            _index_document_rag(doc.owner, doc)
             return {"ok": True, "id": doc_id, "extracted": True, "chars": len(body_text)}
         finally:
             db.close()
@@ -624,7 +664,7 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
             doc.current_content = req.content
             db.commit()
             db.refresh(doc)
-            _mirror_document_to_vault(doc.owner or user, doc)
+            _index_document_rag(doc.owner or user, doc)
             return _doc_to_dict(doc)
         except HTTPException:
             raise
@@ -664,7 +704,7 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
                         pass
             db.commit()
             db.refresh(doc)
-            _mirror_document_to_vault(doc.owner or user, doc)
+            _index_document_rag(doc.owner or user, doc)
             return _doc_to_dict(doc)
         except HTTPException:
             raise
@@ -693,6 +733,7 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
             except Exception:
                 pass
             db.commit()
+            _deindex_document_rag(doc_id)
             return {"status": "deleted", "id": doc_id}
         except HTTPException:
             raise
@@ -780,6 +821,7 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
             db.add(ver)
             db.commit()
             db.refresh(doc)
+            _index_document_rag(doc.owner or user, doc)
             return _doc_to_dict(doc)
         except HTTPException:
             raise

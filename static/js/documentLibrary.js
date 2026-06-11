@@ -1607,6 +1607,7 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
         <div class="lib-tabs" id="doclib-lib-tabs" style="padding:0 10px;">
           <button class="lib-tab" data-doclib-tab="chats"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-1px;margin-right:3px;"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>Chats</button>
           <button class="lib-tab active" data-doclib-tab="documents"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-1px;margin-right:3px;"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="13" y2="17"/></svg>Documents</button>
+          <button class="lib-tab" data-doclib-tab="files"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-1px;margin-right:3px;"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>Files</button>
           <button class="lib-tab" data-doclib-tab="research"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-1px;margin-right:3px;"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg>Research</button>
           <button class="lib-tab" data-doclib-tab="archive"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-1px;margin-right:3px;"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg>Archive</button>
         </div>
@@ -1692,6 +1693,20 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
               <button class="memory-toolbar-btn" id="doclib-research-bulk-cancel" title="Cancel (Esc)" style="margin-left:4px;padding:3px 6px;position:relative;top:-2px;"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
             </div>
             <div id="doclib-research-grid" class="doclib-grid"></div>
+          </div>
+          <div id="doclib-panel-files" data-doclib-panel="files" class="admin-card" style="display:none;flex:1;flex-direction:column;overflow:hidden;">
+            <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:2px;margin-top:10px;">
+              <h2 style="margin:0;padding:0;line-height:1;">Files <span id="doclib-files-stats" class="memory-count" style="font-size:0.6em;opacity:0.6;font-weight:normal"></span></h2>
+            </div>
+            <p class="memory-desc doclib-desc" style="position:relative;top:-1px;">Uploaded files (docs, spreadsheets, data, audio, archives) — searchable by Iris and openable here.</p>
+            <div class="memory-toolbar">
+              <div class="memory-category-filters">
+                <button class="memory-toolbar-btn" id="doclib-files-add-btn" title="Upload files"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-1px;margin-right:3px;"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>Add files</button>
+              </div>
+              <input type="text" id="doclib-files-search" placeholder="Search files…" class="memory-search-input" />
+            </div>
+            <input type="file" id="doclib-files-input" multiple style="display:none">
+            <div id="doclib-files-grid" class="doclib-grid"></div>
           </div>
           <div data-doclib-panel="documents" class="admin-card" style="flex:1;display:flex;flex-direction:column;overflow:hidden;">
             <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:2px;">
@@ -1845,6 +1860,10 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
         label: 'Documents',
         svg: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="13" y2="17"/></svg>',
       },
+      files: {
+        label: 'Files',
+        svg: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>',
+      },
       research: {
         label: 'Research',
         svg: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg>',
@@ -1876,11 +1895,113 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
       if (tab === 'chats') _renderLibChats();
       else if (tab === 'archive') _renderLibArchive();
       else if (tab === 'research') _renderLibResearch();
+      else if (tab === 'files') _renderLibFiles();
     }
 
     _tabBtns.forEach(btn => {
       btn.addEventListener('click', () => _switchLibTab(btn.dataset.doclibTab));
     });
+
+    // ── Files tab (the native Files store: /api/files) ──
+    let _filesItems = [];
+    let _filesSearch = '';
+    let _filesWired = false;
+
+    async function _uploadLibFiles(fileList) {
+      const files = Array.from(fileList || []);
+      if (!files.length) return;
+      let errors = 0;
+      if (uiModule) uiModule.showToast(`Adding ${files.length} file${files.length > 1 ? 's' : ''}…`);
+      for (const f of files) {
+        try {
+          const fd = new FormData();
+          fd.append('files', f);
+          const up = await fetch('/api/upload', { method: 'POST', body: fd, credentials: 'same-origin' });
+          const upData = await up.json();
+          const id = upData.files && upData.files[0] && upData.files[0].id;
+          if (!id) { errors++; continue; }
+          const ing = await fetch('/api/files', {
+            method: 'POST', credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ upload_id: id }),
+          });
+          if (!ing.ok) errors++;
+        } catch (_) { errors++; }
+      }
+      if (uiModule) uiModule.showToast(`${files.length - errors} added${errors ? `, ${errors} failed` : ''}`);
+      _renderLibFiles();
+    }
+
+    async function _renderLibFiles() {
+      const grid = document.getElementById('doclib-files-grid');
+      const stats = document.getElementById('doclib-files-stats');
+      if (!_filesWired) {
+        _filesWired = true;
+        const search = document.getElementById('doclib-files-search');
+        let _deb = null;
+        if (search) search.addEventListener('input', () => {
+          clearTimeout(_deb);
+          _deb = setTimeout(() => { _filesSearch = search.value.trim(); _renderLibFiles(); }, 250);
+        });
+        const addBtn = document.getElementById('doclib-files-add-btn');
+        const input = document.getElementById('doclib-files-input');
+        if (addBtn && input) addBtn.addEventListener('click', () => input.click());
+        if (input) input.addEventListener('change', () => {
+          if (input.files && input.files.length) _uploadLibFiles(input.files);
+          input.value = '';
+        });
+      }
+      try {
+        const params = new URLSearchParams();
+        if (_filesSearch) params.set('q', _filesSearch);
+        const res = await fetch(`/api/files?${params}`, { credentials: 'same-origin' });
+        const data = await res.json();
+        _filesItems = Array.isArray(data.files) ? data.files : [];
+      } catch (_) { _filesItems = []; }
+      if (stats) stats.textContent = _filesItems.length ? String(_filesItems.length) : '';
+      if (!grid) return;
+      if (!_filesItems.length) {
+        grid.innerHTML = `<div class="memory-desc" style="padding:24px;text-align:center;opacity:0.6;">${_filesSearch ? 'No files match your search.' : 'No files yet. Use “Add files”, or ask Iris to save an attachment — docs, spreadsheets and data live here, searchable and openable.'}</div>`;
+        return;
+      }
+      let html = '';
+      for (const f of _filesItems) {
+        const tags = [...(f.tags || []), ...(f.ai_tags || [])].slice(0, 6);
+        const tagHtml = tags.map(t => `<span class="kb-chip">${_esc(t)}</span>`).join('');
+        const openLink = f.has_file
+          ? `<a class="memory-item-btn" href="${_esc(f.url)}" target="_blank" rel="noopener" title="Open the original file" aria-label="Open"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg></a>`
+          : '';
+        html += `<div class="memory-item doclib-file-row" data-file-id="${_esc(f.id)}">
+          <div class="doclib-chat-header" style="display:flex;align-items:center;width:100%;gap:6px;">
+            <div style="flex:1;min-width:0;">
+              <div class="memory-item-title" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:4px;opacity:0.4;flex-shrink:0;"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>${_esc(f.filename)}</div>
+              ${f.excerpt ? `<div class="memory-item-meta" style="font-size:10px;opacity:0.5;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${_esc(f.excerpt)}</div>` : ''}
+              ${tagHtml ? `<div style="margin-top:3px;">${tagHtml}</div>` : ''}
+            </div>
+            <div class="memory-item-actions" style="display:flex;gap:2px;flex-shrink:0;">
+              ${openLink}
+              <button class="memory-item-btn doclib-file-delete" data-file-id="${_esc(f.id)}" title="Delete"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg></button>
+            </div>
+          </div>
+        </div>`;
+      }
+      grid.innerHTML = html;
+      grid.querySelectorAll('.doclib-file-delete').forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          const id = btn.dataset.fileId;
+          const ok = uiModule && uiModule.styledConfirm
+            ? await uiModule.styledConfirm('Delete this file?', { confirmText: 'Delete', danger: true })
+            : confirm('Delete this file?');
+          if (!ok) return;
+          try {
+            const r = await fetch(`/api/files/${encodeURIComponent(id)}`, { method: 'DELETE', credentials: 'same-origin' });
+            if (r.ok) _renderLibFiles();
+            else if (uiModule) uiModule.showError('Delete failed');
+          } catch (_) { if (uiModule) uiModule.showError('Delete failed'); }
+        });
+      });
+    }
 
     // ── Chats tab state ──
     let _chatsSessions = [];

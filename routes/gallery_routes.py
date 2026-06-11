@@ -174,6 +174,7 @@ def setup_gallery_routes() -> APIRouter:
                 prompt=original_name,
                 model="imported",
                 owner=user,
+                media_type="video" if is_video else "image",
                 file_hash=file_hash,
                 file_size=len(content),
                 width=exif.get("width"),
@@ -440,6 +441,8 @@ def setup_gallery_routes() -> APIRouter:
         tag: Optional[str] = Query(None),
         model: Optional[str] = Query(None),
         album: Optional[str] = Query(None),
+        media_type: Optional[str] = Query(None),
+        show_hidden: bool = Query(False),
         favorites: bool = Query(False),
         sort: str = Query("recent"),
         seed: Optional[int] = Query(None),
@@ -448,12 +451,31 @@ def setup_gallery_routes() -> APIRouter:
     ) -> Dict[str, Any]:
         user = get_current_user(request)
         db = SessionLocal()
+
+        def _apply_media_filters(query):
+            """Shared media_type + hidden-by-default filtering, applied to the
+            main result query and to the tag/model facet queries so hidden
+            items never leak through any surface."""
+            if not show_hidden:
+                query = query.filter(
+                    (GalleryImage.hidden == False) | (GalleryImage.hidden == None)
+                )
+            if media_type == "video":
+                query = query.filter(GalleryImage.media_type == "video")
+            elif media_type == "image":
+                # NULL media_type predates the column → treat as image.
+                query = query.filter(
+                    (GalleryImage.media_type == "image") | (GalleryImage.media_type == None)
+                )
+            return query
+
         try:
             # Distinct tags for filter UI
             tag_q = db.query(GalleryImage.tags).filter(
                 GalleryImage.is_active == True, GalleryImage.tags != None, GalleryImage.tags != ""
             )
             tag_q = _owner_filter(tag_q, user)
+            tag_q = _apply_media_filters(tag_q)
             tag_rows = tag_q.all()
             all_tags = set()
             for (raw,) in tag_rows:
@@ -467,6 +489,7 @@ def setup_gallery_routes() -> APIRouter:
                 GalleryImage.is_active == True, GalleryImage.model != None
             )
             model_q = _owner_filter(model_q, user)
+            model_q = _apply_media_filters(model_q)
             model_rows = model_q.distinct().all()
             all_models = sorted([m for (m,) in model_rows if m])
 
@@ -477,6 +500,7 @@ def setup_gallery_routes() -> APIRouter:
                 .filter(GalleryImage.is_active == True)
             )
             q = _owner_filter(q, user)
+            q = _apply_media_filters(q)
 
             # Search filter (prompt + tags + ai_tags)
             if search:
@@ -573,37 +597,49 @@ def setup_gallery_routes() -> APIRouter:
     # ---- Album CRUD (must be before {image_id} catch-all) ----
 
     @router.get("/api/gallery/albums")
-    async def list_albums(request: Request):
+    async def list_albums(request: Request, show_hidden: bool = Query(False)):
         user = get_current_user(request)
         db = SessionLocal()
+
+        def _visible(query):
+            # Hidden images never count toward a cover or tally unless asked.
+            if not show_hidden:
+                query = query.filter(
+                    (GalleryImage.hidden == False) | (GalleryImage.hidden == None)
+                )
+            return query
+
         try:
             q = db.query(GalleryAlbum)
             q = _owner_filter(q, user, GalleryAlbum)
+            if not show_hidden:
+                q = q.filter((GalleryAlbum.hidden == False) | (GalleryAlbum.hidden == None))
             albums = q.order_by(GalleryAlbum.created_at.desc()).all()
             result = []
             for a in albums:
                 _count_q = db.query(GalleryImage).filter(
                     GalleryImage.album_id == a.id, GalleryImage.is_active == True
                 )
-                _count_q = _owner_filter(_count_q, user)
+                _count_q = _visible(_owner_filter(_count_q, user))
                 count = _count_q.count()
                 cover_url = None
                 if a.cover_id:
                     cover_q = db.query(GalleryImage).filter(GalleryImage.id == a.cover_id)
-                    cover = _owner_filter(cover_q, user).first()
+                    cover = _visible(_owner_filter(cover_q, user)).first()
                     if cover:
                         cover_url = f"/api/generated-image/{cover.filename}"
-                elif count > 0:
+                if not cover_url and count > 0:
                     _cover_q = db.query(GalleryImage).filter(
                         GalleryImage.album_id == a.id, GalleryImage.is_active == True
                     )
-                    _cover_q = _owner_filter(_cover_q, user)
+                    _cover_q = _visible(_owner_filter(_cover_q, user))
                     first = _cover_q.order_by(GalleryImage.created_at.desc()).first()
                     if first:
                         cover_url = f"/api/generated-image/{first.filename}"
                 result.append({
                     "id": a.id, "name": a.name, "description": a.description or "",
                     "cover_url": cover_url, "count": count,
+                    "hidden": bool(a.hidden),
                     "created_at": a.created_at.isoformat() if a.created_at else None,
                 })
             return {"albums": result}
@@ -728,6 +764,8 @@ def setup_gallery_routes() -> APIRouter:
                 img.tags = ', '.join(cleaned)
             if req.favorite is not None:
                 img.favorite = req.favorite
+            if req.hidden is not None:
+                img.hidden = req.hidden
             if req.album_id is not None:
                 if req.album_id:
                     # Validate the target album belongs to the caller before
@@ -1710,6 +1748,8 @@ def setup_gallery_routes() -> APIRouter:
                 if cover_id:
                     _get_or_404_image(db, cover_id, user)
                 album.cover_id = cover_id
+            if data.get("hidden") is not None:
+                album.hidden = bool(data["hidden"])
             db.commit()
             return {"ok": True}
         finally:

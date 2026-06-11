@@ -22,6 +22,7 @@ class GalleryPatch(BaseModel):
     tags: Optional[str] = None
     favorite: Optional[bool] = None
     album_id: Optional[str] = None
+    hidden: Optional[bool] = None
 
 
 # ---- EXIF extraction ----
@@ -110,6 +111,8 @@ def _image_to_dict(img: GalleryImage, session_name: str = None) -> Dict[str, Any
         "album_id": img.album_id,
         "is_active": img.is_active,
         "favorite": img.favorite or False,
+        "media_type": img.media_type or "image",
+        "hidden": bool(img.hidden),
         "taken_at": img.taken_at.isoformat() if img.taken_at else None,
         "camera": f"{img.camera_make or ''} {img.camera_model or ''}".strip() or None,
         "gps": {"lat": img.gps_lat, "lng": img.gps_lng} if img.gps_lat else None,

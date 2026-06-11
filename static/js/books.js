@@ -1,14 +1,14 @@
 // books.js — the Books reader, a standalone tool window.
 //
-// A "book" IS a PDF/EPUB in the Knowledge base (one store) — this window is a
-// reading VIEW over it: a library list (cover/title/progress + search), upload
+// A book is a PDF/EPUB in the native Books store — this window is a reading
+// VIEW over it: a library list (cover/title/progress + search), upload
 // EPUB/PDF, and a reader. PDFs render as continuous-scroll PDF.js canvases via
 // pdfReader.js; EPUBs render as chapters with a jump <select> and scroll-driven
 // chapter streaming. Reading progress + bookmarks/highlights persist through
-// /api/books/* (BookProgress/BookAnnotation, keyed by the Knowledge id). Deleting
-// a book is done from the Knowledge panel — they're the same file.
+// /api/books/* (BookProgress/BookAnnotation, keyed by the book id). Adding and
+// deleting books happens here (or via Iris's manage_files).
 //
-// Modal lifecycle mirrors knowledge.js / health.js (Modals.register +
+// Modal lifecycle mirrors health.js (Modals.register +
 // makeToolModalDraggable, Escape/close, minimize→dock, restore). The reader
 // logic was moved out of notes.js so Books is no longer a mode inside Notes.
 import * as Modals from './modalManager.js';
@@ -795,7 +795,7 @@ function _renderListInto() {
     return;
   }
   if (!_books.length) {
-    scroll.innerHTML = `<div class="notes-empty-msg">${_searchQuery ? 'No books match your search.' : 'No EPUB or PDF books yet — upload one above, or add a PDF/EPUB in the Knowledge panel.'}</div>`;
+    scroll.innerHTML = `<div class="notes-empty-msg">${_searchQuery ? 'No books match your search.' : 'No EPUB or PDF books yet — upload one above, or ask Iris to add a PDF/EPUB.'}</div>`;
     return;
   }
   let html = '<div class="notes-vault-list notes-books-list">';
@@ -898,7 +898,7 @@ function _renderListInto() {
   });
 }
 
-// Top-level render: library list vs. reader (mirrors knowledge.js list/detail).
+// Top-level render: library list vs. reader (mirrors health.js list/detail).
 function _render() {
   const modal = _modal();
   if (!modal) return;
@@ -963,7 +963,7 @@ function _wireToolbar() {
   }
 }
 
-// ── modal lifecycle (mirrors knowledge.js / health.js) ───────────────────────
+// ── modal lifecycle (mirrors health.js) ───────────────────────
 async function _refresh() {
   await _fetchBooks();
   if (!_bookOpenBook) _renderListInto();
@@ -971,7 +971,7 @@ async function _refresh() {
 
 export async function openBooksPanel(initialPath = '') {
   _pendingOpenPath = initialPath || null;
-  // Minimized → restore in place (consistent with knowledge/health/etc.).
+  // Minimized → restore in place (consistent with health/etc.).
   if (Modals.isRegistered('books-modal') && Modals.isMinimized('books-modal')) {
     Modals.restore('books-modal');
     if (_pendingOpenPath) { _openAndShow(_pendingOpenPath); _pendingOpenPath = null; }
@@ -1042,7 +1042,7 @@ export async function openBooksPanel(initialPath = '') {
   }
 }
 
-// Open a specific book (by knowledge path) and surface its reader — used for the
+// Open a specific book (by path) and surface its reader — used for the
 // citation deep-link (#book-…) path and re-entry while already open.
 async function _openAndShow(path) {
   _booksLoading = true;

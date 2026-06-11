@@ -882,16 +882,20 @@ async def do_manage_tokens(content: str, owner: Optional[str] = None) -> Dict:
         db.close()
 
 
-async def do_search_knowledge(content: str, owner: Optional[str] = None) -> Dict:
-    """Search the user's KNOWLEDGE BASE (uploaded files: pdf/image/md/docx/…).
+_CITE_ANCHOR = {"file": "file", "book": "book", "document": "document",
+                "image": "gallery", "knowledge": "file"}
+
+
+async def do_search_files(content: str, owner: Optional[str] = None) -> Dict:
+    """Search the user's content — Files (uploaded docs), Books (PDF/EPUB), and
+    authored Documents — by keyword/tag AND semantic recall.
 
     Combines DETERMINISTIC keyword+tag matching (the user's verifiable path) with
-    semantic (RAG) recall, and returns each hit with its filename + id so the
-    answer can CITE the source the user can open and verify — the model must never
-    present knowledge-base facts without naming the file they came from.
+    semantic (RAG) recall across every store, and returns each hit with its
+    filename + id so the answer can CITE the source the user can open and verify.
     """
     import json as _json
-    from src import knowledge_base as _kb
+    from src import file_store as _fs, book_store as _bs, content_rag as _rag
 
     try:
         try:
@@ -907,166 +911,182 @@ async def do_search_knowledge(content: str, owner: Optional[str] = None) -> Dict
         except (TypeError, ValueError):
             limit = 12
         if not query and not tags:
-            return {"error": "Provide a 'query' (and/or 'tags') to search the knowledge base.", "exit_code": 1}
+            return {"error": "Provide a 'query' (and/or 'tags') to search your files.", "exit_code": 1}
 
-        # Deterministic keyword + tag match.
-        results = _kb.search(owner, q=query, tags=tags or [], limit=limit)
-        seen = {f["id"] for f in results}
-        # Semantic recall (RAG) — fold in extra hits not already matched.
+        results, seen = [], set()
+
+        def _add(kid, name, excerpt, tag_list, kind):
+            if not kid or kid in seen:
+                return
+            seen.add(kid)
+            results.append({"id": kid, "filename": name, "excerpt": excerpt or "",
+                            "tags": tag_list or [], "kind": kind})
+
+        # Deterministic keyword + tag match over Files and Books.
+        for f in _fs.search(owner, q=query, tags=tags or [], limit=limit):
+            _add(f.get("id"), f.get("filename") or f.get("id"), f.get("excerpt"), f.get("tags"), "file")
+        for b in _bs.list_books(owner, query=query, limit=limit):
+            _add(b.get("id"), b.get("filename") or b.get("title"), b.get("excerpt"), b.get("tags"), "book")
+
+        # Semantic recall (RAG) across every store — fold in extra hits.
         if query:
-            for h in _kb.semantic_search(owner, query, k=6):
-                kid = h.get("kb_id")
-                if kid and kid not in seen:
-                    full = _kb.get(owner, kid)
-                    if full:
-                        seen.add(kid)
-                        results.append(full)
+            for h in _rag.semantic_search(owner, query, k=8):
+                _add(h.get("kb_id"), h.get("filename") or h.get("kb_id"),
+                     (h.get("text") or "").strip().replace("\n", " ")[:240],
+                     [], h.get("kind") or "file")
 
         if not results:
             label = query or ", ".join(tags or [])
-            return {"output": f"No knowledge-base files matched '{label}'.", "exit_code": 0, "files": []}
+            return {"output": f"No files matched '{label}'.", "exit_code": 0, "files": []}
 
         lines = [
-            f"Found {len(results)} knowledge-base file(s). CITE the source file(s) so the user "
-            f"can open and verify the original — link each as [filename](#knowledge-<id>):"
+            f"Found {len(results)} file(s). CITE the source so the user can open and "
+            f"verify the original — link each as [filename](#<kind>-<id>):"
         ]
         files = []
         for f in results[:limit]:
-            kid = f.get("id")
-            name = f.get("filename") or kid
+            kid, name = f["id"], f["filename"] or f["id"]
+            anchor = _CITE_ANCHOR.get(f.get("kind") or "file", "file")
             excerpt = (f.get("excerpt") or "").strip().replace("\n", " ")[:240]
             tag_str = ", ".join(f.get("tags") or []) or "—"
-            lines.append(f"• [{name}](#knowledge-{kid}) — tags: {tag_str}\n  {excerpt}")
-            files.append({"id": kid, "filename": name, "tags": f.get("tags") or []})
+            lines.append(f"• [{name}](#{anchor}-{kid}) — tags: {tag_str}\n  {excerpt}")
+            files.append({"id": kid, "filename": name, "kind": f.get("kind"), "tags": f.get("tags") or []})
         return {"output": "\n".join(lines), "exit_code": 0, "files": files}
     except Exception as e:
-        logger.error(f"search_knowledge error: {e}")
-        return {"error": f"search_knowledge failed: {e}", "exit_code": 1}
+        logger.error(f"search_files error: {e}")
+        return {"error": f"search_files failed: {e}", "exit_code": 1}
 
 
-async def do_manage_knowledge(content: str, owner: Optional[str] = None) -> Dict:
-    """MANAGE the user's KNOWLEDGE BASE (uploaded files): ADD an uploaded/attached
-    file to it, correct/replace a file's text, append to it, set tags, auto-tag,
-    or delete it. Reading/finding files is search_knowledge — use that first to
-    get the file id, then act here. To store a file the user attached in chat,
-    use action add with the upload_id from the message's attachment context.
-
-    For text files (.md/.txt/…) an edit rewrites the stored file; for binaries
-    (pdf/image) it corrects only the searchable extracted text. Every content
-    change re-indexes RAG so recall stays in sync."""
-    from src import knowledge_base as _kb
+async def do_manage_files(content: str, owner: Optional[str] = None) -> Dict:
+    """MANAGE the user's content stores. ADD a chat-attached/uploaded file by its
+    upload_id — routed by type: images/videos go to the Gallery (optionally into
+    a named `album`), PDFs/EPUBs to Books, everything else to the Files store.
+    For Files items you can also correct/replace text (edit), append, set tags
+    (retag), AI-generate tags (autotag), or delete. Find files first with
+    search_files to get an id."""
+    from src import file_store as _fs
 
     try:
         args = _parse_tool_args(content)
     except ValueError:
-        return {"error": "Invalid JSON arguments for manage_knowledge.", "exit_code": 1}
+        return {"error": "Invalid JSON arguments for manage_files.", "exit_code": 1}
 
     action = (args.get("action") or "").replace("-", "_").strip().lower()
     _aliases = {
         "update": "edit", "replace": "edit", "set_text": "edit", "edit_text": "edit",
         "add_text": "append", "tag": "retag", "set_tags": "retag", "tags": "retag",
         "suggest_tags": "autotag", "auto_tag": "autotag", "remove": "delete",
-        # Storing a user-attached/uploaded file IS "add" — it used to alias to
-        # append (which needs an existing file), which is why the agent fell
-        # back to write_file when asked to save chat images into knowledge.
         "store": "add", "save": "add", "ingest": "add", "upload": "add",
     }
+    _aliases["label"] = "rename"
     action = _aliases.get(action, action)
-    if action not in {"add", "edit", "append", "retag", "autotag", "delete"}:
-        return {"error": "manage_knowledge action must be one of: add, edit, append, retag, "
-                         "autotag, delete. (To read or find files, use search_knowledge.)",
+    if action not in {"add", "edit", "append", "retag", "autotag", "rename", "delete"}:
+        return {"error": "manage_files action must be one of: add, edit, append, retag, "
+                         "autotag, rename, delete. (To read or find files, use search_files.)",
                 "exit_code": 1}
 
     if action == "add":
-        # Ingest an already-uploaded file (e.g. a chat attachment) into the
-        # knowledge base — mirrors POST /api/knowledge, owner-scoped.
         upload_id = str(args.get("upload_id") or args.get("attachment_id") or "").strip()
         if not upload_id:
-            return {"error": "add requires 'upload_id' — the id of an uploaded/attached "
-                             "file (listed in the [user attachments] context of the "
-                             "message). To add plain text to an EXISTING file use append.",
-                    "exit_code": 1}
+            return {"error": "add requires 'upload_id' — the id of an uploaded/attached file "
+                             "(listed in the [user attachments] context of the message). To add "
+                             "plain text to an EXISTING file use append.", "exit_code": 1}
         try:
             from src.constants import BASE_DIR, UPLOAD_DIR
             from src.upload_handler import UploadHandler
             info = UploadHandler(BASE_DIR, UPLOAD_DIR).resolve_upload(upload_id, owner=owner)
             if not info or not info.get("path"):
-                return {"error": f"Upload '{upload_id}' not found (or not accessible).",
-                        "exit_code": 1}
+                return {"error": f"Upload '{upload_id}' not found (or not accessible).", "exit_code": 1}
             tags = args.get("tags") or ""
             if isinstance(tags, list):
                 tags = ",".join(str(t).strip() for t in tags if str(t).strip())
             original = str(info.get("name") or info.get("original_name") or upload_id)
             filename = str(args.get("filename") or args.get("title") or "").strip() or original
-            # A friendly title ("Cloud Tree") keeps the original extension so
-            # kind detection (image/pdf/...) stays correct.
             if "." not in filename and "." in original:
                 filename = f"{filename}.{original.rsplit('.', 1)[1]}"
-            # Store the row + bytes FAST (no extraction): image OCR can take
-            # minutes and an inline wait 504s the whole chat request through a
-            # reverse proxy. Extraction/indexing/auto-tagging run in the
-            # background right after.
+            ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+
+            # Route by type: media -> Gallery (optional album), books -> Books,
+            # everything else -> the Files store.
+            if ext in {"png", "jpg", "jpeg", "webp", "gif", "mp4", "mov", "webm", "mkv", "m4v"}:
+                from src import gallery_ingest
+                album = str(args.get("album") or "").strip() or None
+                res = await asyncio.to_thread(
+                    gallery_ingest.ingest_upload, owner, upload_id,
+                    album=album, tags=str(tags), title=str(args.get("title") or ""),
+                )
+                where = f" into album '{album}'" if album else " to the gallery"
+                dup = " (already there)" if res.get("duplicate") else ""
+                return {"output": f"Added '{filename}'{where}{dup}.", "exit_code": 0,
+                        "file": {"id": res.get("id"), "filename": filename, "album_id": res.get("album_id")}}
+
+            if ext in {"pdf", "epub"}:
+                from src import book_store
+                with open(info["path"], "rb") as fh:
+                    data = fh.read()
+                rec = await asyncio.to_thread(
+                    book_store.add_book, owner, filename, data, mime=info.get("mime") or "",
+                )
+                return {"output": f"Added '{rec.get('filename')}' to your Books.", "exit_code": 0,
+                        "file": {"id": rec.get("id"), "filename": rec.get("filename")}}
+
+            # Files store — store the row FAST (no extraction); extract + index +
+            # auto-tag in the background so a slow OCR never 504s the chat request.
             rec = await asyncio.to_thread(
-                _kb.ingest, owner,
-                file_path=info["path"], filename=filename, mime=info.get("mime"),
-                upload_id=upload_id, source="chat", tags=tags, extract=False,
+                _fs.ingest, owner, file_path=info["path"], filename=filename,
+                mime=info.get("mime"), upload_id=upload_id, source="chat", tags=tags, extract=False,
             )
             if not rec or not rec.get("id"):
-                return {"error": "Failed to ingest the file into the knowledge base.", "exit_code": 1}
-            kb_id = rec["id"]
-            already_extracted = bool((rec.get("excerpt") or "").strip())
+                return {"error": "Failed to add the file.", "exit_code": 1}
+            fid = rec["id"]
+            already = bool((rec.get("excerpt") or "").strip())
             wants_autotag = not str(tags).strip() and not rec.get("ai_tags")
 
-            async def _finish_ingest():
+            async def _finish():
                 try:
                     r2 = None
-                    if not already_extracted:
-                        r2 = await asyncio.to_thread(_kb.extract_and_index, owner, kb_id)
+                    if not already:
+                        r2 = await asyncio.to_thread(_fs.extract_and_index, owner, fid)
                     if wants_autotag and ((r2 or rec).get("excerpt") or "").strip():
-                        await asyncio.to_thread(_kb.generate_ai_tags, owner, kb_id)
+                        await asyncio.to_thread(_fs.generate_ai_tags, owner, fid)
                 except Exception as _bg_e:
-                    logger.warning(f"manage_knowledge add: background indexing failed: {_bg_e}")
+                    logger.warning(f"manage_files add: background indexing failed: {_bg_e}")
 
-            if not already_extracted or wants_autotag:
-                asyncio.create_task(_finish_ingest())
-            tag_note = f" (tags: {', '.join(rec.get('tags') or [])})" if rec.get("tags") else ""
-            indexing_note = (" Text extraction and indexing are finishing in the background — "
-                             "it will be searchable shortly." if not already_extracted else
-                             " It is stored, indexed, and searchable.")
-            return {"output": f"Added '{rec.get('filename')}' to the knowledge base{tag_note}.{indexing_note}",
-                    "exit_code": 0,
-                    "file": {"id": kb_id, "filename": rec.get("filename"),
-                             "tags": rec.get("tags")}}
+            if not already or wants_autotag:
+                asyncio.create_task(_finish())
+            note = (" Text extraction and indexing are finishing in the background." if not already
+                    else " It is stored, indexed, and searchable.")
+            return {"output": f"Added '{rec.get('filename')}' to your Files.{note}", "exit_code": 0,
+                    "file": {"id": fid, "filename": rec.get("filename"), "tags": rec.get("tags")}}
         except Exception as e:
-            return {"error": f"manage_knowledge add failed: {e}", "exit_code": 1}
+            return {"error": f"manage_files add failed: {e}", "exit_code": 1}
 
     try:
-        # Resolve the target file — explicit id preferred, else a unique match on
-        # query/filename (refuse ambiguous matches so we never edit the wrong file).
-        kb_id = str(args.get("id") or args.get("kb_id") or "").strip()
-        if not kb_id:
+        # Resolve the target Files item — explicit id, else a unique filename match.
+        fid = str(args.get("id") or args.get("file_id") or args.get("kb_id") or "").strip()
+        if not fid:
             query = str(args.get("query") or args.get("filename") or args.get("file") or "").strip()
             if not query:
-                return {"error": "Provide the file 'id' (from search_knowledge) or a "
+                return {"error": "Provide the file 'id' (from search_files) or a "
                                  "'query'/'filename' to identify the file.", "exit_code": 1}
-            matches = _kb.search(owner, q=query, limit=10)
+            matches = _fs.search(owner, q=query, limit=10)
             exact = [m for m in matches if (m.get("filename") or "").lower() == query.lower()]
             cands = exact or matches
             if not cands:
-                return {"error": f"No knowledge file matched '{query}'.", "exit_code": 1}
+                return {"error": f"No file matched '{query}'.", "exit_code": 1}
             if len(cands) > 1 and not exact:
                 listing = "; ".join(f"{m.get('filename')} (id {(m.get('id') or '')[:8]}…)" for m in cands[:6])
                 return {"error": f"'{query}' matched {len(cands)} files — say which by id: {listing}",
                         "exit_code": 1}
-            kb_id = cands[0].get("id")
+            fid = cands[0].get("id")
 
         if action == "edit":
             text = args.get("text")
             if text is None:
                 return {"error": "edit requires 'text' (the new full content).", "exit_code": 1}
-            rec = _kb.update_text(owner, kb_id, str(text), filename=args.get("filename"))
+            rec = _fs.update_text(owner, fid, str(text), filename=args.get("filename"))
             if not rec:
-                return {"error": "Knowledge file not found.", "exit_code": 1}
+                return {"error": "File not found.", "exit_code": 1}
             return {"output": f"Updated '{rec.get('filename')}' ({len(str(text))} chars) and re-indexed it.",
                     "exit_code": 0, "file": {"id": rec.get("id"), "filename": rec.get("filename")}}
 
@@ -1074,40 +1094,200 @@ async def do_manage_knowledge(content: str, owner: Optional[str] = None) -> Dict
             text = str(args.get("text") or "").strip()
             if not text:
                 return {"error": "append requires 'text' to add.", "exit_code": 1}
-            rec = _kb.append_text(owner, kb_id, text)
+            rec = _fs.append_text(owner, fid, text)
             if not rec:
-                return {"error": "Knowledge file not found.", "exit_code": 1}
+                return {"error": "File not found.", "exit_code": 1}
             return {"output": f"Appended to '{rec.get('filename')}' and re-indexed it.",
                     "exit_code": 0, "file": {"id": rec.get("id"), "filename": rec.get("filename")}}
 
         if action == "retag":
-            rec = _kb.set_tags(owner, kb_id, args.get("tags") or "")
+            rec = _fs.set_tags(owner, fid, args.get("tags") or "")
             if not rec:
-                return {"error": "Knowledge file not found.", "exit_code": 1}
+                return {"error": "File not found.", "exit_code": 1}
             return {"output": f"Set tags on '{rec.get('filename')}': "
                               f"{', '.join(rec.get('tags') or []) or '(none)'}.",
                     "exit_code": 0,
                     "file": {"id": rec.get("id"), "filename": rec.get("filename"), "tags": rec.get("tags")}}
 
         if action == "autotag":
-            rec = _kb.generate_ai_tags(owner, kb_id)
+            rec = _fs.generate_ai_tags(owner, fid)
             if not rec:
-                return {"error": "Knowledge file not found.", "exit_code": 1}
+                return {"error": "File not found.", "exit_code": 1}
             return {"output": f"AI tags for '{rec.get('filename')}': "
                               f"{', '.join(rec.get('ai_tags') or []) or '(none generated)'}.",
                     "exit_code": 0,
                     "file": {"id": rec.get("id"), "filename": rec.get("filename"), "ai_tags": rec.get("ai_tags")}}
 
+        if action == "rename":
+            new_name = str(args.get("filename") or args.get("name") or args.get("title") or "").strip()
+            if not new_name:
+                return {"error": "rename requires 'filename' (the new name).", "exit_code": 1}
+            rec = _fs.rename(owner, fid, new_name)
+            if not rec:
+                return {"error": "File not found.", "exit_code": 1}
+            return {"output": f"Renamed to '{rec.get('filename')}'.", "exit_code": 0,
+                    "file": {"id": rec.get("id"), "filename": rec.get("filename")}}
+
         # delete
-        rec = _kb.get(owner, kb_id)
-        name = (rec or {}).get("filename") or kb_id
-        ok = _kb.delete(owner, kb_id)
-        if not ok:
-            return {"error": "Knowledge file not found.", "exit_code": 1}
-        return {"output": f"Deleted '{name}' from the knowledge base.", "exit_code": 0}
+        rec = _fs.get(owner, fid)
+        name = (rec or {}).get("filename") or fid
+        if not _fs.delete(owner, fid):
+            return {"error": "File not found.", "exit_code": 1}
+        return {"output": f"Deleted '{name}' from your Files.", "exit_code": 0}
     except Exception as e:
-        logger.error(f"manage_knowledge error: {e}")
-        return {"error": f"manage_knowledge failed: {e}", "exit_code": 1}
+        logger.error(f"manage_files error: {e}")
+        return {"error": f"manage_files failed: {e}", "exit_code": 1}
+
+
+async def do_manage_gallery(content: str, owner: Optional[str] = None) -> Dict:
+    """MANAGE the user's Gallery (photos + videos): tag, rename, favorite/hide,
+    delete, create albums, and file media into them ("sort"). Find items with
+    action=list (by album/tag/recent). Identify an item by id (preferred, e.g.
+    from a manage_files add result or a list) or a unique name/keyword."""
+    from core.database import SessionLocal, GalleryImage, GalleryAlbum
+
+    try:
+        args = _parse_tool_args(content)
+    except ValueError:
+        return {"error": "Invalid JSON arguments for manage_gallery.", "exit_code": 1}
+
+    action = (args.get("action") or "").replace("-", "_").strip().lower()
+    _aliases = {
+        "tags": "tag", "set_tags": "tag", "retag": "tag", "label": "rename",
+        "title": "rename", "star": "favorite", "unstar": "unfavorite",
+        "album": "create_album", "new_album": "create_album",
+        "sort": "move", "organize": "move", "add_to_album": "move", "file": "move",
+        "remove": "delete", "search": "list", "find": "list",
+    }
+    action = _aliases.get(action, action)
+    _valid = {"list", "tag", "rename", "create_album", "move", "favorite",
+              "unfavorite", "hide", "unhide", "delete"}
+    if action not in _valid:
+        return {"error": f"manage_gallery action must be one of: {', '.join(sorted(_valid))}.",
+                "exit_code": 1}
+
+    def _img_dict(im):
+        return {"id": im.id, "name": im.prompt or im.filename, "media_type": im.media_type or "image",
+                "tags": [t.strip() for t in (im.tags or "").split(",") if t.strip()],
+                "album_id": im.album_id, "favorite": bool(im.favorite), "hidden": bool(im.hidden)}
+
+    def _find_or_create_album(db, name):
+        name = (name or "").strip()
+        if not name:
+            return None
+        import uuid as _uuid
+        q = db.query(GalleryAlbum).filter(GalleryAlbum.name == name)
+        if owner is not None:
+            q = q.filter(GalleryAlbum.owner == owner)
+        a = q.first()
+        if a:
+            return a.id
+        a = GalleryAlbum(id=str(_uuid.uuid4()), name=name, owner=owner)
+        db.add(a)
+        db.flush()
+        return a.id
+
+    db = SessionLocal()
+    try:
+        if action == "create_album":
+            name = str(args.get("name") or args.get("album") or "").strip()
+            if not name:
+                return {"error": "create_album requires 'name'.", "exit_code": 1}
+            aid = _find_or_create_album(db, name)
+            db.commit()
+            return {"output": f"Album '{name}' is ready.", "exit_code": 0, "album": {"id": aid, "name": name}}
+
+        if action == "list":
+            q = db.query(GalleryImage).filter(GalleryImage.is_active == True)
+            if owner is not None:
+                q = q.filter(GalleryImage.owner == owner)
+            mt = (args.get("media_type") or "").strip().lower()
+            if mt in ("image", "video"):
+                q = q.filter(GalleryImage.media_type == mt)
+            term = str(args.get("query") or args.get("q") or args.get("tag") or "").strip()
+            if term:
+                like = f"%{term}%"
+                q = q.filter(GalleryImage.prompt.ilike(like) | GalleryImage.tags.ilike(like)
+                             | GalleryImage.ai_tags.ilike(like))
+            album = str(args.get("album") or "").strip()
+            if album:
+                aq = db.query(GalleryAlbum).filter(GalleryAlbum.name == album)
+                if owner is not None:
+                    aq = aq.filter(GalleryAlbum.owner == owner)
+                a = aq.first()
+                q = q.filter(GalleryImage.album_id == (a.id if a else "__none__"))
+            rows = q.order_by(GalleryImage.created_at.desc()).limit(30).all()
+            return {"output": f"{len(rows)} item(s).", "exit_code": 0,
+                    "items": [_img_dict(im) for im in rows]}
+
+        # Item actions — resolve the target image (id preferred, else unique name/keyword).
+        img_id = str(args.get("id") or args.get("image_id") or "").strip()
+        img = None
+        if img_id:
+            img = db.query(GalleryImage).filter(GalleryImage.id == img_id).first()
+            if img and owner is not None and img.owner != owner:
+                img = None
+        else:
+            term = str(args.get("query") or args.get("name") or args.get("filename") or "").strip()
+            if not term:
+                return {"error": "Provide the item 'id' (from list) or a 'query'/'name' to identify it.",
+                        "exit_code": 1}
+            mq = db.query(GalleryImage).filter(GalleryImage.is_active == True)
+            if owner is not None:
+                mq = mq.filter(GalleryImage.owner == owner)
+            like = f"%{term}%"
+            cands = mq.filter(GalleryImage.prompt.ilike(like) | GalleryImage.tags.ilike(like)).limit(10).all()
+            if not cands:
+                return {"error": f"No photo/video matched '{term}'.", "exit_code": 1}
+            if len(cands) > 1:
+                listing = "; ".join(f"{(c.prompt or c.filename)} (id {c.id[:8]}…)" for c in cands[:6])
+                return {"error": f"'{term}' matched {len(cands)} items — say which by id: {listing}",
+                        "exit_code": 1}
+            img = cands[0]
+        if not img:
+            return {"error": "Gallery item not found.", "exit_code": 1}
+
+        if action == "tag":
+            tags = args.get("tags") or args.get("tag") or ""
+            if isinstance(tags, list):
+                tags = ", ".join(str(t).strip() for t in tags if str(t).strip())
+            seen, clean = set(), []
+            for t in str(tags).split(","):
+                t = t.strip()
+                if t and t.lower() not in seen:
+                    seen.add(t.lower())
+                    clean.append(t)
+            img.tags = ", ".join(clean)
+        elif action == "rename":
+            new_name = str(args.get("name") or args.get("filename") or args.get("title") or "").strip()
+            if not new_name:
+                return {"error": "rename requires 'name'.", "exit_code": 1}
+            img.prompt = new_name[:300]
+        elif action == "move":
+            album = str(args.get("album") or args.get("name") or "").strip()
+            img.album_id = _find_or_create_album(db, album) if album else None
+        elif action == "favorite":
+            img.favorite = True
+        elif action == "unfavorite":
+            img.favorite = False
+        elif action == "hide":
+            img.hidden = True
+        elif action == "unhide":
+            img.hidden = False
+        elif action == "delete":
+            img.is_active = False
+
+        db.commit()
+        db.refresh(img)
+        verb = {"tag": "Tagged", "rename": "Renamed", "move": "Filed", "favorite": "Favorited",
+                "unfavorite": "Unfavorited", "hide": "Hid", "unhide": "Unhid", "delete": "Deleted"}[action]
+        return {"output": f"{verb} '{img.prompt or img.filename}'.", "exit_code": 0, "item": _img_dict(img)}
+    except Exception as e:
+        db.rollback()
+        logger.error(f"manage_gallery error: {e}")
+        return {"error": f"manage_gallery failed: {e}", "exit_code": 1}
+    finally:
+        db.close()
 
 
 # ---------------------------------------------------------------------------

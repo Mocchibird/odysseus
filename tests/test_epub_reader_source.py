@@ -26,13 +26,14 @@ def test_epub_reader_backend_routes_and_progress_notes_exist():
     assert "PdfReader" in book_service
     assert "SUPPORTED_BOOK_EXTENSIONS" in book_service
     assert "def pdf_file_path" in book_service
-    # the store is a reading VIEW over the Knowledge base — a book IS a KB pdf/epub
-    # file (so Books + Knowledge stay in sync); only reading state lives here.
-    assert "knowledge_base" in store
-    assert "BookProgress" in store and "BookAnnotation" in store  # reading state only
+    # the store is the native Books store — it owns its bytes (BOOKS_DIR) and
+    # extracted text (RAG-indexed under kind="book"), decoupled from Knowledge.
+    assert "knowledge_base" not in store          # decoupled from the KB
+    assert "content_extract" in store             # shared text extraction
+    assert "content_rag" in store                 # shared RAG indexing (kind="book")
+    assert "BookProgress" in store and "BookAnnotation" in store  # reading state
     assert "def resolve_book_file" in store
-    assert "kb.ingest" in store      # adding a book ingests it into Knowledge
-    assert "kb.file_abspath" in store  # book bytes come from the KB-owned store
+    assert "BOOKS_DIR" in store                   # book bytes live in the native store
     # routes unchanged (still call book_reader, still serve PDFs inline).
     assert 'prefix="/api/books"' in book_routes
     assert '"/upload"' in book_routes

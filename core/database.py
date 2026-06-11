@@ -245,6 +245,7 @@ class GalleryAlbum(TimestampMixin, Base):
     description = Column(Text, default="")
     cover_id    = Column(String, nullable=True)  # GalleryImage.id for cover photo
     owner       = Column(String, nullable=True, index=True)
+    hidden      = Column(Boolean, default=False)  # hidden-by-default: excluded from listers unless show_hidden
 
     images = relationship("GalleryImage", back_populates="album")
 
@@ -266,6 +267,8 @@ class GalleryImage(TimestampMixin, Base):
     owner      = Column(String, nullable=True, index=True)
     is_active  = Column(Boolean, default=True)
     favorite   = Column(Boolean, default=False)
+    media_type = Column(String, nullable=True, default="image")  # "image" | "video"
+    hidden     = Column(Boolean, default=False)  # hidden-by-default: excluded from listers unless show_hidden
 
     # File integrity
     file_hash  = Column(String(64), nullable=True, index=True)  # SHA-256
@@ -290,44 +293,69 @@ class GalleryImage(TimestampMixin, Base):
     )
 
 
-class KnowledgeFile(TimestampMixin, Base):
-    """Native knowledge base: any uploaded file (pdf / image / md / docx / …)
-    indexed for keyword + RAG search, replacing the Obsidian-vault file index.
-    The bytes live in the uploads store (referenced by upload_id, served via
-    /api/upload/{id}); this row holds the extracted text, tags, and RAG state so
-    Iris can recall it AND the user can search/tag/browse it — no Obsidian/iris-mcp.
-    Tag pattern mirrors GalleryImage: `tags` (user) + `ai_tags` (LLM)."""
-    __tablename__ = "knowledge_files"
+class FileItem(TimestampMixin, Base):
+    """The native Files store: any uploaded file that isn't media (Gallery),
+    a book (Books), or authored text (Documents) — docx/xlsx/csv/json/txt/md/
+    audio/zip/… It owns its bytes (DATA_DIR/files) and extracted text
+    (RAG-indexed under kind="file"), so Iris can recall it and the user can
+    search/tag/browse/open it. Replaces the loose-file half of the retired
+    Knowledge base."""
+    __tablename__ = "files"
 
     id         = Column(String, primary_key=True, index=True)
     owner      = Column(String, nullable=True, index=True)
-    upload_id  = Column(String, nullable=True, index=True)      # uploads.json id (canonical bytes)
+    upload_id  = Column(String, nullable=True, index=True)      # uploads.json id (original bytes)
     filename   = Column(String, nullable=False, default="")
     mime       = Column(String, nullable=True)
-    file_size  = Column(Integer, nullable=True)                 # bytes
+    file_size  = Column(Integer, nullable=True)
     sha256     = Column(String(64), nullable=True, index=True)  # dedupe within an owner
-    path       = Column(String, nullable=True)                  # KB-owned copy, relative to DATA_DIR/knowledge_files (served at /api/knowledge/{id}/raw)
-    text       = Column(Text, nullable=True, default="")        # extracted text (search + preview)
+    path       = Column(String, nullable=True)                  # bytes, relative to DATA_DIR/files
+    text       = Column(Text, nullable=True, default="")        # extracted text (search + RAG)
     tags       = Column(String, nullable=True, default="")      # user tags (comma-separated)
-    ai_tags    = Column(Text, nullable=True, default="")        # LLM-generated tags (comma-separated)
-    source     = Column(String, nullable=True, default="upload")  # upload | vault-migration | …
+    ai_tags    = Column(Text, nullable=True, default="")        # LLM-generated tags
+    source     = Column(String, nullable=True, default="upload")
     indexed    = Column(Boolean, default=False)                 # RAG-indexed?
-    favorite   = Column(Boolean, default=False, index=True)     # starred (Books/Knowledge)
+    favorite   = Column(Boolean, default=False, index=True)     # starred
 
     __table_args__ = (
-        Index('ix_knowledge_files_owner_created', 'owner', 'created_at'),
-        Index('ix_knowledge_files_owner_sha', 'owner', 'sha256'),
-        Index('ix_knowledge_files_tags', 'tags'),
+        Index('ix_files_owner_created', 'owner', 'created_at'),
+        Index('ix_files_owner_sha', 'owner', 'sha256'),
+        Index('ix_files_tags', 'tags'),
+    )
+
+
+class Book(TimestampMixin, Base):
+    """A PDF/EPUB in the native Books store. Owns its bytes in BOOKS_DIR and its
+    extracted text (RAG-indexed under kind="book") — the Books reader, progress,
+    and annotations all key off this row's id. Replaces the old "a book is a
+    KnowledgeFile" coupling."""
+    __tablename__ = "books"
+
+    id         = Column(String, primary_key=True, index=True)
+    owner      = Column(String, nullable=True, index=True)
+    filename   = Column(String, nullable=False, default="")
+    mime       = Column(String, nullable=True)
+    file_size  = Column(Integer, nullable=True)
+    sha256     = Column(String(64), nullable=True, index=True)  # dedupe within an owner
+    path       = Column(String, nullable=True)                  # bytes, relative to BOOKS_DIR
+    text       = Column(Text, nullable=True, default="")        # extracted text (search + RAG)
+    tags       = Column(String, nullable=True, default="")      # user tags (comma-separated)
+    ai_tags    = Column(Text, nullable=True, default="")        # LLM-generated tags
+    indexed    = Column(Boolean, default=False)                 # RAG-indexed?
+    favorite   = Column(Boolean, default=False, index=True)     # starred
+
+    __table_args__ = (
+        Index('ix_books_owner_created', 'owner', 'created_at'),
+        Index('ix_books_owner_sha', 'owner', 'sha256'),
     )
 
 
 class BookProgress(TimestampMixin, Base):
-    """Per-book reading position (one row per book). A "book" is a PDF/EPUB in the
-    Knowledge base, so `id` = the KnowledgeFile id (Books is a reading view over
-    those files; this just adds the reading state)."""
+    """Per-book reading position (one row per book). `id` = the Book id (Books is
+    a reading view over the Book store; this just adds the reading state)."""
     __tablename__ = "book_progress"
 
-    id            = Column(String, primary_key=True, index=True)  # = KnowledgeFile id
+    id            = Column(String, primary_key=True, index=True)  # = Book id
     owner         = Column(String, nullable=True, index=True)
     rel_path      = Column(String, nullable=False, default="")
     title         = Column(String, nullable=False, default="")
@@ -807,23 +835,45 @@ def _migrate_add_meal_sugar_column():
         logging.getLogger(__name__).warning(f"meals.sugar_g migration failed: {e}")
 
 
-def _migrate_add_knowledge_favorite_column():
-    """Add `favorite` to knowledge_files (star a book/file). Guarded + idempotent."""
+def _migrate_add_gallery_media_columns():
+    """Add `media_type`/`hidden` to gallery_images and `hidden` to gallery_albums.
+
+    `media_type` discriminates photos from videos so the gallery can offer a
+    Videos tab without sniffing extensions on every row; it is backfilled to
+    'video' for existing files whose extension is a known video container.
+    `hidden` is the hidden-by-default flag (listers exclude it unless asked).
+    Guarded + idempotent."""
     import sqlite3
     db_path = DATABASE_URL.replace("sqlite:///", "")
     if not os.path.exists(db_path):
         return
+    conn = None
     try:
         conn = sqlite3.connect(db_path)
-        cursor = conn.execute("PRAGMA table_info(knowledge_files)")
-        columns = [row[1] for row in cursor.fetchall()]
-        if columns and "favorite" not in columns:
-            conn.execute("ALTER TABLE knowledge_files ADD COLUMN favorite BOOLEAN DEFAULT 0")
-            conn.commit()
-            logging.getLogger(__name__).info("Migrated: added 'favorite' to knowledge_files")
-        conn.close()
+        img_cols = [row[1] for row in conn.execute("PRAGMA table_info(gallery_images)").fetchall()]
+        if img_cols:
+            if "media_type" not in img_cols:
+                conn.execute("ALTER TABLE gallery_images ADD COLUMN media_type TEXT DEFAULT 'image'")
+                # Backfill existing video files (LIKE is case-insensitive for ASCII in sqlite).
+                conn.execute(
+                    "UPDATE gallery_images SET media_type='video' WHERE "
+                    "filename LIKE '%.mp4' OR filename LIKE '%.mov' OR filename LIKE '%.webm' "
+                    "OR filename LIKE '%.mkv' OR filename LIKE '%.m4v'"
+                )
+                logging.getLogger(__name__).info("Migrated: added 'media_type' to gallery_images")
+            if "hidden" not in img_cols:
+                conn.execute("ALTER TABLE gallery_images ADD COLUMN hidden BOOLEAN DEFAULT 0")
+                logging.getLogger(__name__).info("Migrated: added 'hidden' to gallery_images")
+        album_cols = [row[1] for row in conn.execute("PRAGMA table_info(gallery_albums)").fetchall()]
+        if album_cols and "hidden" not in album_cols:
+            conn.execute("ALTER TABLE gallery_albums ADD COLUMN hidden BOOLEAN DEFAULT 0")
+            logging.getLogger(__name__).info("Migrated: added 'hidden' to gallery_albums")
+        conn.commit()
     except Exception as e:
-        logging.getLogger(__name__).warning(f"knowledge_files.favorite migration failed: {e}")
+        logging.getLogger(__name__).warning(f"gallery media-column migration failed: {e}")
+    finally:
+        if conn is not None:
+            conn.close()
 
 
 def _migrate_add_meal_photo_column():
@@ -2039,7 +2089,7 @@ def init_db():
     _migrate_add_calendar_account_id()
     _migrate_add_meal_sugar_column()
     _migrate_add_meal_photo_column()
-    _migrate_add_knowledge_favorite_column()
+    _migrate_add_gallery_media_columns()
     _migrate_add_training_kcal_burned_column()
     _migrate_chat_messages_fts()
     _migrate_encrypt_email_passwords()

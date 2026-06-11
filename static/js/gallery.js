@@ -33,6 +33,13 @@ let _activeModel = null;
 let _activeAlbum = null;
 let _galleryCascaded = false;   // play the domino-in cascade once per open
 let _favoritesOnly = false;
+// Photos tab shows images, Videos tab shows videos — driven by a persisted
+// media_type column rather than sniffing extensions. 'image' is the default
+// view; the Videos tab flips it to 'video'.
+let _mediaFilter = 'image';
+// Hidden-by-default items are excluded from every lister until the user flips
+// this on; it drives both the library and the albums fetch.
+let _showHidden = false;
 let _sort = 'shuffle';
 let _shuffleSeed = Math.floor(Math.random() * 2 ** 31);
 let _offset = 0;
@@ -91,6 +98,8 @@ async function _fetchLibrary(append) {
   if (_activeModel) params.set('model', _activeModel);
   if (_activeAlbum) params.set('album', _activeAlbum);
   if (_favoritesOnly) params.set('favorites', 'true');
+  if (_mediaFilter) params.set('media_type', _mediaFilter);
+  if (_showHidden) params.set('show_hidden', 'true');
   try {
     const res = await fetch(`${API_BASE}/api/gallery/library?${params}`, { credentials: 'same-origin' });
     const data = await res.json();
@@ -102,7 +111,7 @@ async function _fetchLibrary(append) {
     // Cache an "empty" verdict so the next open of an empty gallery doesn't
     // flash skeleton tiles before the real "No photos yet" message.
     try {
-      const _noFilters = !_search && !_activeTags.length && !_activeModel && !_activeAlbum && !_favoritesOnly;
+      const _noFilters = !_search && !_activeTags.length && !_activeModel && !_activeAlbum && !_favoritesOnly && _mediaFilter !== 'video' && !_showHidden;
       if (_noFilters) {
         if (_items.length === 0) localStorage.setItem('gallery-known-empty', '1');
         else localStorage.removeItem('gallery-known-empty');
@@ -122,7 +131,10 @@ async function _fetchLibrary(append) {
 
 async function _fetchAlbums() {
   try {
-    const res = await fetch(`${API_BASE}/api/gallery/albums`, { credentials: 'same-origin' });
+    const aparams = new URLSearchParams();
+    if (_showHidden) aparams.set('show_hidden', 'true');
+    const qs = aparams.toString();
+    const res = await fetch(`${API_BASE}/api/gallery/albums${qs ? '?' + qs : ''}`, { credentials: 'same-origin' });
     const data = await res.json();
     _albums = data.albums || [];
     _renderAlbums();
@@ -390,7 +402,16 @@ function _renderAlbums() {
         fhtml += `<span class="gallery-chip gallery-chip-active-album" title="Currently showing this album — click X to clear"><span>${_esc(a.name)}</span><button class="gallery-chip-clear" data-clear="album" aria-label="Clear album filter">&times;</button></span>`;
       }
     }
+    // Reveal/hide the hidden-by-default items. Applies to the photo/video grid
+    // AND the albums tab (so hidden albums can be un-hidden from there).
+    fhtml += `<button class="gallery-chip gallery-chip-hidden${_showHidden ? ' active' : ''}" data-show-hidden="true" title="${_showHidden ? 'Hiding hidden items' : 'Show hidden items'}"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:3px;"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>Hidden</button>`;
     filterC.innerHTML = fhtml;
+    filterC.querySelector('.gallery-chip[data-show-hidden]')?.addEventListener('click', () => {
+      _showHidden = !_showHidden;
+      _renderAlbums();
+      _fetchLibrary(false);
+      _fetchAlbums();
+    });
     filterC.querySelector('.gallery-chip[data-album=""]')?.addEventListener('click', () => {
       _favoritesOnly = false;
       _activeAlbum = null;
@@ -593,6 +614,10 @@ function _renderAlbumsGrid() {
             <span class="dropdown-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg></span>
             <span>Rename</span>
           </div>
+          <div class="dropdown-item-compact" data-action="hide">
+            <span class="dropdown-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-10-7-10-7a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 10 7 10 7a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg></span>
+            <span>${a.hidden ? 'Unhide' : 'Hide'}</span>
+          </div>
           <div class="dropdown-item-compact dropdown-item-danger" data-action="delete">
             <span class="dropdown-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/></svg></span>
             <span>Delete</span>
@@ -707,6 +732,24 @@ function _wireAlbumsEvents(scope) {
         if (uiModule) uiModule.showToast('Album renamed');
       } else if (uiModule) {
         uiModule.showError('Rename failed');
+      }
+    });
+    pop.querySelector('[data-action="hide"]')?.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      pop.hidden = true;
+      const album = _albums.find(a => a.id === id);
+      const target = !(album && album.hidden);
+      const r = await fetch(`${API_BASE}/api/gallery/albums/${id}`, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin', body: JSON.stringify({ hidden: target }),
+      });
+      if (r.ok) {
+        await _fetchAlbums();
+        _renderAlbumsTab();
+        _renderAlbums();
+        if (uiModule) uiModule.showToast(target ? 'Album hidden' : 'Album unhidden');
+      } else if (uiModule) {
+        uiModule.showError('Failed to update');
       }
     });
     pop.querySelector('[data-action="delete"]')?.addEventListener('click', async (e) => {
@@ -1211,6 +1254,7 @@ function _renderGrid() {
         <button class="gallery-dl-btn" data-id="${_esc(img.id)}" data-url="${_esc(img.url)}" data-filename="${_esc(img.filename || '')}" title="Download">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
         </button>
+        ${img.hidden ? `<span class="gallery-card-hidden" title="Hidden" aria-label="Hidden"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-10-7-10-7a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 10 7 10 7a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg></span>` : ''}
         ${_isVideoUrl(img.url)
           ? `<video src="${_esc(img.url)}" preload="metadata" muted playsinline></video>
              <span class="gallery-card-play" aria-hidden="true">
@@ -1373,6 +1417,10 @@ function _openDetail(img) {
             <span class="dropdown-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg></span>
             Set as album cover
           </button>` : ''}
+          <button class="dropdown-item-compact" id="gallery-hide-btn">
+            <span class="dropdown-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-10-7-10-7a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 10 7 10 7a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg></span>
+            ${img.hidden ? 'Unhide' : 'Hide'}
+          </button>
           <button class="dropdown-item-compact dropdown-item-danger" id="gallery-delete-btn">
             <span class="dropdown-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/></svg></span>
             Delete
@@ -1767,6 +1815,22 @@ function _openDetail(img) {
     if (uiModule) uiModule.showToast('Photo deleted');
   });
 
+  document.getElementById('gallery-hide-btn')?.addEventListener('click', async () => {
+    const target = !img.hidden;
+    const ok = await _patchImage(img.id, { hidden: target });
+    if (!ok) { if (uiModule) uiModule.showError('Failed to update'); return; }
+    img.hidden = target;
+    // When hiding while not in show-hidden mode, the item drops out of the
+    // current grid — close the detail and prune it so the view stays honest.
+    if (target && !_showHidden) {
+      detail.style.display = 'none';
+      _items = _items.filter(i => i.id !== img.id);
+      _renderGrid();
+      _renderStats();
+    }
+    if (uiModule) uiModule.showToast(target ? 'Hidden' : 'Unhidden');
+  });
+
   // Tag input — Enter saves; also strips a leading '#' from each tag so
   // typing "#person, #beach" stores as "person, beach".
   // Rename input — saves to the prompt column on Enter/blur via the
@@ -1917,6 +1981,10 @@ export function openGallery() {
         <button class="gallery-tab active" data-tab="images">
           <span class="gallery-tab-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg></span>
           <span class="gallery-tab-label">Photos</span>
+        </button>
+        <button class="gallery-tab" data-tab="videos">
+          <span class="gallery-tab-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg></span>
+          <span class="gallery-tab-label">Videos</span>
         </button>
         <button class="gallery-tab" data-tab="albums">
           <span class="gallery-tab-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg></span>
@@ -2096,13 +2164,21 @@ export function openGallery() {
       const albumsContainer = document.getElementById('gallery-albums-container');
       const editorContainer = document.getElementById('gallery-editor-container');
       const settingsContainer = document.getElementById('gallery-settings-container');
-      if (imagesContainer) imagesContainer.style.display = target === 'images' ? '' : 'none';
+      // Photos and Videos share the one image grid — only the media_type
+      // filter differs, so both map to the images container.
+      const _isGridTab = (target === 'images' || target === 'videos');
+      if (imagesContainer) imagesContainer.style.display = _isGridTab ? '' : 'none';
       if (albumsContainer) albumsContainer.style.display = target === 'albums' ? '' : 'none';
       if (editorContainer) editorContainer.style.display = target === 'editor' ? 'flex' : 'none';
       if (settingsContainer) settingsContainer.style.display = target === 'settings' ? '' : 'none';
-      if (target === 'images') {
+      if (_isGridTab) {
         // Keep active edits alive when leaving the Edit tab. The edit
         // session is only torn down by the explicit Edit-tab close.
+        const want = target === 'videos' ? 'video' : 'image';
+        if (want !== _mediaFilter) {
+          _mediaFilter = want;
+          _fetchLibrary(false);
+        }
       } else if (target === 'albums') {
         _renderAlbumsTab();
       } else if (target === 'editor') {

@@ -72,10 +72,10 @@ ALWAYS_AVAILABLE = frozenset({
     # my habit / give it an emoji", "log my lunch", "did I work out" never miss
     # the tool and wrongly fall back to a checklist note or a vault search.
     "manage_health",
-    # The native knowledge base (uploaded files: pdf/image/md/…). Keep reachable
-    # so "what do my files say about X", "find my file on Y", "look up Z" hit
-    # search_knowledge instead of falling back to a vault search or web_search.
-    "search_knowledge",
+    # The user's content (Files / Books / Documents). Keep reachable so "what do
+    # my files say about X", "find my file/book on Y", "look up Z" hit
+    # search_files instead of falling back to a web_search.
+    "search_files",
     # Ask the user a multiple-choice question for a decision/clarification.
     # Always reachable so the agent can pause and ask at any point.
     "ask_user",
@@ -89,7 +89,7 @@ ASSISTANT_ALWAYS_AVAILABLE = frozenset({
     "list_email_accounts", "list_emails", "read_email", "send_email", "reply_to_email",
     "bulk_email", "archive_email", "delete_email", "mark_email_read",
     "manage_calendar", "manage_notes", "manage_tasks", "manage_health",
-    "search_knowledge",
+    "search_files",
     "manage_memory", "manage_books", "web_search", "read_file",
     "create_document", "update_document",
     "resolve_contact", "search_chats",
@@ -116,7 +116,7 @@ BUILTIN_TOOL_DESCRIPTIONS: Dict[str, str] = {
     "grep": "Search file CONTENTS for a regex across a directory tree (ripgrep-backed, honours .gitignore). Returns file:line:match. Use to find where code/symbols/strings live — prefer over bash grep.",
     "glob": "Find FILES by glob pattern (e.g. '**/*.py'), newest first. Use to locate files by name/extension — prefer over bash find/ls.",
     "ls": "List a directory's entries (folders then files with sizes). Use to see what's in a folder — prefer over bash ls.",
-    "write_file": "Write/create or fully rewrite a file ON DISK (source code, configs, project files). Use for new files or full rewrites — NOT create_document (editor panel) and NOT a bash heredoc. NEVER for saving user content/attachments: files for the user's knowledge base go through manage_knowledge (action=add with an upload_id), books through manage_books.",
+    "write_file": "Write/create or fully rewrite a file ON DISK (source code, configs, project files). Use for new files or full rewrites — NOT create_document (editor panel) and NOT a bash heredoc. NEVER for saving user content/attachments: a user's uploaded file goes through manage_files (action=add with an upload_id — it routes images/videos to the Gallery, PDFs/EPUBs to Books, and everything else to the Files store).",
     "edit_file": "Edit an existing file ON DISK by exact string replacement (fix a bug, change a function). Shows a diff. The tool for changing files on disk — NOT edit_document (editor panel) and NOT bash sed/heredoc.",
     "create_document": "Create a new document in the editor panel. For code, articles, text content longer than 15 lines, unless an already-open document/email draft is the obvious target. If an email compose draft is open, edit that draft instead of creating another document.",
     "edit_document": "Preferred tool for editing an existing document — targeted find-and-replace. Use for any small change: add a function, fix a bug, tweak a section, rename things.",
@@ -156,8 +156,9 @@ BUILTIN_TOOL_DESCRIPTIONS: Dict[str, str] = {
     "delete_email": "Delete an email — moves to Trash by default, or expunges permanently with permanent=true.",
     "mark_email_read": "Mark an email as read or unread by toggling the \\Seen flag.",
     "bulk_email": "Perform one action on many emails at once. Use for delete all those, archive these, mark all read, move spam to junk. Takes explicit UIDs from list_emails or all_unread=true. Always pass account for Gmail/work/custom mailbox results.",
-    "search_knowledge": "Search the user's KNOWLEDGE BASE — their uploaded files (PDFs, images, markdown, docs) — to recall facts/specs/notes (the native replacement for the vault search). Combines exact keyword/tag matching with semantic recall, and returns [filename](#knowledge-<id>) links — ALWAYS cite the source file so the user can open + verify the original. For 'what do my files/notes say about X', 'find my file about Y', 'look up Z in my knowledge'. Not for live web info (use web_search) and not the habit tracker (use manage_health).",
-    "manage_knowledge": "MANAGE the user's KNOWLEDGE BASE files: STORE a user-attached/uploaded file into the knowledge base (add + upload_id — use this when the user says 'save/store/remember this image/file/screenshot/document'), replace/correct a file's text (edit), add to it (append), set tags (retag), AI-generate tags (autotag), or delete it. Identify the file by id (from a search_knowledge #knowledge-<id> link) or a unique filename/keywords. For .md/.txt files an edit rewrites the file; for PDFs/images it corrects the searchable extracted text; every change re-indexes recall. Use after search_knowledge for 'fix/append to/tag/delete my file on X'. Not for reading (use search_knowledge) or authoring new documents (use the document tools).",
+    "search_files": "Search the user's content — their Files (uploaded docs), Books (PDF/EPUB), and authored Documents — to recall facts/specs/notes. Combines exact keyword/tag matching with semantic recall across every store, and returns [filename](#<kind>-<id>) links — ALWAYS cite the source so the user can open + verify the original. For 'what do my files/notes say about X', 'find my file/book about Y', 'look up Z in my docs'. Not for live web info (use web_search) and not the habit tracker (use manage_health).",
+    "manage_files": "STORE and MANAGE the user's files: STORE a user-attached/uploaded file (add + upload_id — use when the user says 'save/store/remember this image/file/screenshot/document/book'). It ROUTES by type: images/videos → the Gallery (optionally into a named album, e.g. game screenshots into a '<game>' album), PDFs/EPUBs → Books, everything else → the Files store. For Files items you can also replace/correct text (edit), append, set tags (retag), AI-generate tags (autotag), rename, or delete. Identify a Files item by id (from a search_files #file-<id> link) or a unique filename. Every change re-indexes recall. Not for reading (use search_files) or authoring new documents (use the document tools).",
+    "manage_gallery": "MANAGE the user's Gallery (photos + videos): tag them, rename them, favorite/unfavorite, hide/unhide, delete, create albums, and FILE media into an album ('sort' game screenshots into a '<game>' album). Use action=list (by album/tag/media_type) to find items + their ids first, then act by id (or a unique name/keyword). To store a NEW chat-attached photo/video, use manage_files add (it routes media into the Gallery). For files/docs use manage_files; for reading book/file contents use search_files.",
     "resolve_contact": "Look up a contact's email address by name. Searches CardDAV address book and sent email history. Use when the user says 'message [name]', 'email [name]', or 'send to [name]' without an email address.",
     "manage_contact": "Create, update, delete, or list CardDAV contacts. Use to save a new contact, change an existing one's email/phone, or remove one. Action=list returns uids needed for update/delete. Use when the user says 'save this contact', 'add [name] to contacts', 'update [name]'s email', 'delete [name] from contacts'. Do not use for user identity facts like 'my name is <name>'; those are memory.",
     "manage_notes": "Create and manage notes and checklists (Google Keep-style). ALWAYS use this for note/todo/checklist/reminder creation — NEVER hit /api/notes via app_api. BUT a recurring HABIT (one with streaks/a heatmap, e.g. 'add a habit', 'track meditation daily', 'rename my habit') is NOT a checklist — use manage_health for the habit tracker, not a note. Accepts natural-language `due_date` like 'tomorrow at 9am' or '11pm today' (parsed in the USER'S timezone). The due_date IS the reminder — it fires a notification at that time, so do NOT also create a calendar event for the same reminder. Set colors, labels, pin, archive. Do NOT use manage_memory for note content.",
@@ -395,14 +396,23 @@ class ToolIndex:
             {"manage_calendar"},
         frozenset({"note", "todo", "reminder", "remind", "checklist", "remember to"}):
             {"manage_notes"},
-        # The native knowledge base (uploaded files). "what do my files/notes say
-        # about X", "find my file on Y", "look up Z in my knowledge/docs".
+        # The user's content stores (Files / Books / Gallery / Documents). "what
+        # do my files/notes say about X", "find my file/book on Y", "save this
+        # screenshot to my <game> album", "add this pdf to my books".
         frozenset({"knowledge", "knowledge base", "my files", "my file", "my docs",
                    "my documents", "look up", "find my", "search my", "uploaded file",
                    "what do my notes say", "in my files", "in my notes",
-                   "edit my file", "edit my knowledge", "update my file", "fix the text",
+                   "save this", "store this", "add to my", "add this", "to my books",
+                   "add this book", "edit my file", "update my file", "fix the text",
                    "tag my file", "retag", "delete my file", "append to my"}):
-            {"search_knowledge", "manage_knowledge"},
+            {"search_files", "manage_files"},
+        # Gallery management: tag/rename/album/sort/hide photos + videos.
+        frozenset({"my photo", "my photos", "my picture", "my pictures", "my video",
+                   "my videos", "my gallery", "to my gallery", "to my album", "album",
+                   "screenshot", "screenshots", "tag this photo", "tag this picture",
+                   "tag this video", "rename this photo", "sort my photos", "sort my pictures",
+                   "create an album", "move to album", "hide this photo"}):
+            {"manage_gallery", "manage_files"},
         # Habit tracker + health/nutrition/training. Without this, "add a habit",
         # "rename my habit", "give it an emoji", "log my lunch" missed
         # manage_health (RAG ranked manage_notes higher) and the agent made a

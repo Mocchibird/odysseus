@@ -643,8 +643,8 @@ FUNCTION_TOOL_SCHEMAS = [
     {
         "type": "function",
         "function": {
-            "name": "search_knowledge",
-            "description": "Search the user's KNOWLEDGE BASE — their uploaded files (PDFs, images, markdown, docs) — to recall facts/specs/notes. Combines exact keyword/tag matching with semantic recall. ALWAYS CITE the source file(s) in your answer: the tool returns [filename](#knowledge-<id>) links, and the user must be able to open the original to verify — never state a knowledge-base fact without naming the file it came from. Use for 'what do my files/notes say about X', 'find my file about Y', 'look up Z in my knowledge base'. NOT for live web info (use web_search) and NOT for the habit tracker (use manage_health).",
+            "name": "search_files",
+            "description": "Search the user's content — their Files (uploaded docs), Books (PDF/EPUB), and authored Documents — to recall facts/specs/notes. Combines exact keyword/tag matching with semantic recall across every store. ALWAYS CITE the source in your answer: the tool returns [filename](#<kind>-<id>) links, and the user must be able to open the original to verify — never state a fact from their files without naming the file it came from. Use for 'what do my files/notes say about X', 'find my file/book about Y', 'look up Z in my docs'. NOT for live web info (use web_search) and NOT for the habit tracker (use manage_health).",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -659,18 +659,39 @@ FUNCTION_TOOL_SCHEMAS = [
     {
         "type": "function",
         "function": {
-            "name": "manage_knowledge",
-            "description": "MANAGE the user's KNOWLEDGE BASE files (uploaded PDFs/images/markdown/docs): ADD a user-attached/uploaded file to the knowledge base (action add + the upload_id from the message's attachment context), correct or replace a file's text, append to it, set or AI-generate tags, or delete it. For edits, find the file with search_knowledge first to get its id. For text files (.md/.txt) an edit rewrites the stored file; for PDFs/images it corrects only the searchable extracted text. Every change re-indexes recall so search stays in sync. NOT for reading/finding files (use search_knowledge), NOT for authoring long new documents (document tools / Library), and NEVER write_file for user files.",
+            "name": "manage_files",
+            "description": "STORE and MANAGE the user's files. ADD a user-attached/uploaded file by its upload_id (from the message's attachment context) — routed by type: images/videos go to the GALLERY (optionally into a named `album`, e.g. game screenshots into a '<game>' album), PDFs/EPUBs go to BOOKS, everything else (docx/xlsx/csv/txt/md/…) to the FILES store. For Files items you can also correct/replace text (edit), append, set or AI-generate tags (retag/autotag), or delete. For edits, find the file with search_files first to get its id. Every change re-indexes recall so search stays in sync. NOT for reading/finding (use search_files), NOT for authoring long new documents (document tools / Library), and NEVER write_file for user files.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "action": {"type": "string", "enum": ["add", "edit", "append", "retag", "autotag", "delete"], "description": "add = store an uploaded/attached file in the knowledge base (requires upload_id); edit = replace full text; append = add text; retag = set user tags; autotag = AI-generate tags from the text; delete = remove the file."},
+                    "action": {"type": "string", "enum": ["add", "edit", "append", "retag", "autotag", "delete"], "description": "add = store an uploaded/attached file (requires upload_id; routed to Gallery/Books/Files by type); edit = replace a Files item's full text; append = add text; retag = set user tags; autotag = AI-generate tags; delete = remove the file."},
                     "upload_id": {"type": "string", "description": "For add: the attachment/upload id (listed in the [user attachments] context of the user's message)."},
-                    "id": {"type": "string", "description": "The knowledge file id (from a search_knowledge #knowledge-<id> link). Preferred."},
+                    "album": {"type": "string", "description": "For add of an image/video: the Gallery album name to file it under (created if it doesn't exist), e.g. a game name for screenshots."},
+                    "id": {"type": "string", "description": "The file id (from a search_files #file-<id> link). Preferred for edit/append/retag/autotag/delete (Files items)."},
                     "query": {"type": "string", "description": "Alternative to id: a filename or keywords that identify exactly ONE file."},
                     "text": {"type": "string", "description": "For edit: the new FULL content. For append: the text to add."},
-                    "tags": {"type": "array", "items": {"type": "string"}, "description": "For retag: the tags to set (replaces the existing user tags)."},
-                    "filename": {"type": "string", "description": "For add: a friendly name/title for the stored file (extension kept automatically). For edit: optional rename."}
+                    "tags": {"type": "array", "items": {"type": "string"}, "description": "For retag: the tags to set; for add: initial tags."},
+                    "filename": {"type": "string", "description": "For add: a friendly name/title (extension kept automatically). For edit: optional rename."}
+                },
+                "required": ["action"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "manage_gallery",
+            "description": "MANAGE the user's Gallery (photos + videos): tag them, rename them, set/unset favorite, hide/unhide, delete, create albums, and FILE media into an album ('sort'). Use action=list (optionally by album/tag/media_type) to find items and their ids first; identify an item by id (e.g. from a manage_files add result or a list) or a unique name/keyword. To store a NEW chat-attached image/video into the gallery, use manage_files add (it routes media to the Gallery). NOT for documents/files (use manage_files).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string", "enum": ["list", "tag", "rename", "create_album", "move", "favorite", "unfavorite", "hide", "unhide", "delete"], "description": "list = find photos/videos (by album/tag/media_type); tag = set tags; rename = set the label; create_album = make an album; move = file an item into an album (created if needed); favorite/unfavorite; hide/unhide; delete."},
+                    "id": {"type": "string", "description": "The gallery item id (from a list result or a manage_files add). Preferred for item actions."},
+                    "query": {"type": "string", "description": "For list: filter by keyword/tag. For item actions without an id: a unique name/keyword identifying ONE item."},
+                    "name": {"type": "string", "description": "For rename: the new label. For create_album/move: the album name."},
+                    "album": {"type": "string", "description": "For move: the album to file the item into (created if it doesn't exist). For list: filter to this album."},
+                    "media_type": {"type": "string", "enum": ["image", "video"], "description": "For list: restrict to photos or videos."},
+                    "tags": {"type": "array", "items": {"type": "string"}, "description": "For tag: the tags to set (replaces existing)."}
                 },
                 "required": ["action"]
             }

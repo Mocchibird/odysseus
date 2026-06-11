@@ -3,6 +3,24 @@
 // them byte-identical to the source markup/JS, or the match silently fails.
 // Generated from the UI string extraction; hand-maintained from here on.
 export default {
+  // Library: Files tab (native Files store)
+  "Files": "Dateien",
+  "Search files…": "Dateien suchen…",
+  "Uploaded files (docs, spreadsheets, data, audio, archives) — searchable by Iris and openable here.": "Hochgeladene Dateien (Dokumente, Tabellen, Daten, Audio, Archive) — von Iris durchsuchbar und hier zu öffnen.",
+  "No files yet. Use “Add files”, or ask Iris to save an attachment — docs, spreadsheets and data live here, searchable and openable.": "Noch keine Dateien. Nutze „Dateien hinzufügen“ oder bitte Iris, einen Anhang zu speichern — Dokumente, Tabellen und Daten leben hier, durchsuchbar und zu öffnen.",
+  // Gallery: video tab + hidden-by-default
+  "Photos": "Fotos",
+  "Videos": "Videos",
+  "Albums": "Alben",
+  "Hide": "Ausblenden",
+  "Unhide": "Einblenden",
+  "Hidden": "Ausgeblendet",
+  "Unhidden": "Eingeblendet",
+  "Album hidden": "Album ausgeblendet",
+  "Album unhidden": "Album eingeblendet",
+  "Show hidden items": "Ausgeblendete anzeigen",
+  "Hiding hidden items": "Ausgeblendete verbergen",
+  "Failed to update": "Aktualisierung fehlgeschlagen",
   "! important": "! wichtig",
   "(Endpoints)": "(Endpunkte)",
   "(No folder)": "(Kein Ordner)",
@@ -331,7 +349,6 @@ export default {
   "Keep": "Behalten",
   "Kept": "Behalten",
   "Keyboard Shortcuts": "Tastenkürzel",
-  "Knowledge": "Wissen",
   "Language": "Sprache",
   "Last 14 days": "Letzte 14 Tage",
   "Last 30 days": "Letzte 30 Tage",
@@ -408,7 +425,7 @@ export default {
   "Next step from every goal": "Nächster Schritt aus jedem Ziel",
   "Next week": "Nächste Woche",
   "No API endpoints yet.": "Noch keine API-Endpunkte.",
-  "No EPUB or PDF books yet — upload one above, or add a PDF/EPUB in the Knowledge panel.": "Noch keine EPUB- oder PDF-Bücher — lade oben eins hoch oder füge ein PDF/EPUB im Wissens-Panel hinzu.",
+  "No EPUB or PDF books yet — upload one above, or ask Iris to add a PDF/EPUB.": "Noch keine EPUB- oder PDF-Bücher — lade oben eins hoch oder bitte Iris, ein PDF/EPUB hinzuzufügen.",
   "No albums yet.": "Noch keine Alben.",
   "No bookmarks or highlights yet. Select text to highlight, or use the bookmark button to save a spot.": "Noch keine Lesezeichen oder Markierungen. Wähle Text aus, um ihn zu markieren, oder speichere eine Stelle mit dem Lesezeichen-Button.",
   "No books match your search.": "Keine Bücher entsprechen deiner Suche.",

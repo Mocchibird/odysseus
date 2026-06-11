@@ -150,7 +150,7 @@ if (_lang !== 'en') {
   try {
     // ?v versions the dictionaries like every other module import — bump it
     // (and this file's own ?v in app.js) when a dictionary changes.
-    const mod = await import(`./i18n/${_lang}.js?v=400`);
+    const mod = await import(`./i18n/${_lang}.js?v=402`);
     _dict = mod.default || null;
   } catch (e) {
     console.warn('i18n: failed to load dictionary', _lang, e);
