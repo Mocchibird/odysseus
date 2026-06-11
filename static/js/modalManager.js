@@ -1539,6 +1539,23 @@ window.addEventListener('modal-dismissed', (e) => {
   e.stopImmediatePropagation();
 });
 
+// Every other REGISTERED tool: a swipe-dismiss is a full close. The swipe
+// handler (ui.js) only hides the modal node — it can't reach the module's
+// internal open flag, so without this the tool's toggle-style open() sees a
+// stale "open" and spends the next button tap "closing" the already-hidden
+// window (tap once after a swipe: nothing; tap twice: opens). Routing through
+// close() runs the registered closeFn (flag reset + DOM/handler teardown),
+// identical to tapping the ✖. Allowlisted minimize tools never get here —
+// the listener above stops propagation for them.
+window.addEventListener('modal-dismissed', (e) => {
+  const id = e.detail?.id;
+  if (!id) return;
+  if (_SWIPE_DOWN_MINIMIZES.has(id) || _SWIPE_DOWN_MINIMIZES_PREFIX.some(p => id.startsWith(p))) return;
+  const s = _state.get(id);
+  if (!s || s.isMinimized) return;
+  try { close(id); } catch (err) { console.warn('close on swipe-dismiss failed', err); }
+});
+
 // Capture-phase intercept: if user clicks a sidebar/rail button whose
 // associated modal is currently MINIMIZED, restore it and stop the click
 // before the tool's own toggle handler runs (which would try to re-open or

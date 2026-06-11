@@ -25,7 +25,7 @@ import censorModule from './js/censor.js';
 import galleryModule from './js/gallery.js';
 import tasksModule from './js/tasks.js';
 import calendarModule from './js/calendar.js';
-import notesModule from './js/notes.js?v=387';
+import notesModule from './js/notes.js?v=402';
 import booksModule from './js/books.js?v=395';
 import healthModule from './js/health.js?v=397';
 import pingsModule from './js/pings.js?v=395';

@@ -6724,6 +6724,7 @@ pre { background: var(--code-bg, var(--hl-bg, #282c34)) !important; }
       /* Hide close X on mobile — swipe down to dismiss */
       .modal-content .close-btn,
       .modal-content .modal-close,
+      .notes-pane-header .close-btn,
       #theme-popup .close-btn {
         display: none !important;
       }
