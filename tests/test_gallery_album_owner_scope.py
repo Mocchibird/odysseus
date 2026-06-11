@@ -70,6 +70,31 @@ def test_delete_album_cleanup_is_owner_scoped():
 
 def test_get_or_404_album_enforces_owner():
     # Guard the precedent we rely on: the helper rejects another user's album.
+    # Owner enforcement now delegates to the shared `_verify_owner` helper
+    # (fails closed for the auth-enabled null-user state; behavior verified in
+    # test_verify_owner_semantics) so single-user mode can still mutate.
     fns = _function_sources()
     helper = fns["_get_or_404_album"]
-    assert "album.owner != user" in helper
+    assert "_verify_owner(album, user)" in helper
+
+
+def test_verify_owner_semantics(monkeypatch):
+    """`_verify_owner` must allow owner-match + single-user (auth-disabled)
+    null-user, and FAIL CLOSED for cross-user and auth-enabled null-user — so
+    relaxing the per-row checks for single-user mode never weakens multi-user
+    owner-scoping."""
+    from routes import gallery_helpers as gh
+
+    class _Row:
+        def __init__(self, owner):
+            self.owner = owner
+
+    assert gh._verify_owner(_Row("alice"), "alice") is True   # owner match
+    assert gh._verify_owner(_Row("alice"), "bob") is False    # cross-user denied
+    assert gh._verify_owner(None, "alice") is False           # missing row denied
+
+    # Null user (get_current_user → None) is allowed ONLY in auth-disabled mode.
+    monkeypatch.setattr(gh, "_auth_disabled", lambda: True)
+    assert gh._verify_owner(_Row("alice"), None) is True
+    monkeypatch.setattr(gh, "_auth_disabled", lambda: False)
+    assert gh._verify_owner(_Row("alice"), None) is False

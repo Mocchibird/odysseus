@@ -138,6 +138,23 @@ def _owner_filter(q, user, model_cls=GalleryImage):
     return q.filter(False)
 
 
+def _verify_owner(row, user) -> bool:
+    """True if ``user`` may act on a single gallery row (image or album).
+
+    Mirrors ``_owner_filter``: a matching owner always passes; a null user
+    passes ONLY in auth-disabled single-user mode. Fail closed for the
+    auth-enabled null-user state so one user can't touch another's media.
+    Replaces the inline ``if not user or row.owner != user`` checks, which
+    hard-404'd every per-row mutation (hide/favorite/rename/rotate/delete)
+    in single-user mode even though the list endpoints used ``_owner_filter``.
+    """
+    if row is None:
+        return False
+    if user is not None:
+        return row.owner == user
+    return _auth_disabled()
+
+
 
 def _human_size(nbytes):
     for unit in ['B', 'KB', 'MB', 'GB', 'TB']:

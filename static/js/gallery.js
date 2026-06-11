@@ -353,9 +353,16 @@ async function _handleGalleryDrop(e) {
 
 // ---- Render helpers ----
 
+// Singular/plural noun for the active media tab so the count, empty state and
+// search placeholder read "videos" on the Videos tab and "photos" elsewhere.
+function _mediaNoun(plural) {
+  if (_mediaFilter === 'video') return plural ? 'videos' : 'video';
+  return plural ? 'photos' : 'photo';
+}
+
 function _renderStats() {
   const el = document.getElementById('gallery-stats');
-  if (el) el.textContent = `${_total} photo${_total !== 1 ? 's' : ''}`;
+  if (el) el.textContent = `${_total} ${_mediaNoun(_total !== 1)}`;
 }
 
 function _renderTags(tags) {
@@ -1224,7 +1231,7 @@ function _renderGrid() {
     </div>`;
 
   if (_items.length === 0) {
-    grid.innerHTML = uploadTile + '<div class="gallery-empty">No photos yet. Click Upload or drag-and-drop to get started!</div>';
+    grid.innerHTML = uploadTile + `<div class="gallery-empty">No ${_mediaNoun(true)} yet. Click Upload or drag-and-drop to get started!</div>`;
     _wireUploadTile();
     if (loadMore) loadMore.style.display = 'none';
     return;
@@ -1253,6 +1260,9 @@ function _renderGrid() {
         <button class="gallery-fav-btn${favCls}" data-id="${_esc(img.id)}" title="Favorite">&#9829;</button>
         <button class="gallery-dl-btn" data-id="${_esc(img.id)}" data-url="${_esc(img.url)}" data-filename="${_esc(img.filename || '')}" title="Download">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        </button>
+        <button class="gallery-card-menu-btn" data-id="${_esc(img.id)}" title="More actions" aria-label="More actions">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg>
         </button>
         ${img.hidden ? `<span class="gallery-card-hidden" title="Hidden" aria-label="Hidden"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-10-7-10-7a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 10 7 10 7a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg></span>` : ''}
         ${_isVideoUrl(img.url)
@@ -1290,6 +1300,7 @@ function _renderGrid() {
     card.addEventListener('click', (e) => {
       if (e.target.closest('.gallery-fav-btn')) return;
       if (e.target.closest('.gallery-dl-btn')) return;
+      if (e.target.closest('.gallery-card-menu-btn')) return;
       const selectBtn = document.getElementById('gallery-select-btn');
       if (selectBtn && selectBtn.classList.contains('active')) return;
       const img = _items.find(i => i.id === card.dataset.id);
@@ -1341,6 +1352,100 @@ function _renderGrid() {
       }
     });
   });
+
+  // Per-card "⋮" actions menu — quick Edit / Hide / Delete without opening the
+  // detail view. Mirrors the album-card kebab and the bulk-actions dropdown.
+  grid.querySelectorAll('.gallery-card-menu-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const img = _items.find(i => i.id === btn.dataset.id);
+      if (img) _showCardMenu(btn, img);
+    });
+  });
+}
+
+// Per-card actions dropdown. Built fixed-positioned at the button (same as the
+// bulk-actions menu) so it never clips inside the grid's scroll container.
+function _showCardMenu(anchor, img) {
+  document.querySelectorAll('.gallery-card-menu').forEach(d => d.remove());
+  const dropdown = document.createElement('div');
+  dropdown.className = 'dropdown gallery-card-menu';
+  const rect = anchor.getBoundingClientRect();
+  const left = Math.min(rect.left, window.innerWidth - 200);
+  dropdown.style.cssText = `position:fixed;display:block;z-index:10001;top:${rect.bottom + 6}px;left:${Math.max(8, left)}px;right:auto;min-width:160px;background:var(--panel,var(--bg));border:1px solid var(--border);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,0.3);padding:6px;font-size:11px;`;
+  const _editIco = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>';
+  const _hideIco = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-10-7-10-7a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 10 7 10 7a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>';
+  const _eyeIco = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>';
+  const _delIco = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>';
+  const items = [];
+  if (!_isVideoUrl(img.url)) items.push({ label: 'Edit', icon: _editIco, action: () => _cardEdit(img) });
+  items.push({ label: img.hidden ? 'Unhide' : 'Hide', icon: img.hidden ? _eyeIco : _hideIco, action: () => _cardToggleHidden(img) });
+  items.push({ label: 'Delete', icon: _delIco, danger: true, action: () => _cardDelete(img) });
+  for (const a of items) {
+    const it = document.createElement('div');
+    it.className = 'dropdown-item-compact' + (a.danger ? ' dropdown-item-danger' : '');
+    it.innerHTML = `<span class="dropdown-icon">${a.icon}</span><span>${a.label}</span>`;
+    it.addEventListener('click', (e) => { e.stopPropagation(); dropdown.remove(); a.action(); });
+    dropdown.appendChild(it);
+  }
+  document.body.appendChild(dropdown);
+  const close = (ev) => {
+    if (!dropdown.contains(ev.target) && ev.target !== anchor && !anchor.contains(ev.target)) {
+      dropdown.remove();
+      document.removeEventListener('click', close, true);
+    }
+  };
+  setTimeout(() => document.addEventListener('click', close, true), 10);
+}
+
+// Hide / unhide a single photo from the card menu. When hiding while the grid
+// isn't showing hidden items, the photo drops out of the current view.
+function _cardToggleHidden(img) {
+  const target = !img.hidden;
+  _patchImage(img.id, { hidden: target }).then(ok => {
+    if (!ok) { if (uiModule) uiModule.showError('Failed to update'); return; }
+    img.hidden = target;
+    if (target && !_showHidden) {
+      _items = _items.filter(i => i.id !== img.id);
+      _total = Math.max(0, _total - 1);
+    }
+    _renderGrid();
+    _renderStats();
+    if (uiModule) uiModule.showToast(target ? 'Hidden' : 'Unhidden');
+  });
+}
+
+async function _cardDelete(img) {
+  if (!await uiModule.styledConfirm('Delete this photo? This cannot be undone.', { confirmText: 'Delete', danger: true })) return;
+  const ok = await _deleteImage(img.id);
+  if (!ok) { uiModule.showError('Failed to delete photo'); return; }
+  _items = _items.filter(i => i.id !== img.id);
+  _total = Math.max(0, _total - 1);
+  _renderGrid();
+  _renderStats();
+  if (uiModule) uiModule.showToast('Photo deleted');
+}
+
+// Open this photo straight in the image editor (same target as the detail
+// view's Edit), switching the gallery to the Edit tab.
+function _cardEdit(img) {
+  const modal = document.getElementById('gallery-modal');
+  if (modal) {
+    modal.querySelectorAll('.gallery-tab').forEach(t => t.classList.remove('active'));
+    modal.querySelector('.gallery-tab[data-tab="editor"]')?.classList.add('active');
+  }
+  const imagesC = document.getElementById('gallery-images-container');
+  const albumsC = document.getElementById('gallery-albums-container');
+  const settingsC = document.getElementById('gallery-settings-container');
+  if (imagesC) imagesC.style.display = 'none';
+  if (albumsC) albumsC.style.display = 'none';
+  if (settingsC) settingsC.style.display = 'none';
+  const editorC = document.getElementById('gallery-editor-container');
+  if (editorC) editorC.style.display = 'flex';
+  const baseFilename = (img.filename || '').replace(/\.[^.]+$/, '');
+  const label = img.prompt?.trim() || baseFilename || 'Photo';
+  try { openEditor(img.url, img.id, null, label); }
+  catch (e) { if (uiModule) uiModule.showError('Failed to open editor'); }
 }
 
 // ---- Detail overlay ----
@@ -2175,6 +2280,9 @@ export function openGallery() {
         // Keep active edits alive when leaving the Edit tab. The edit
         // session is only torn down by the explicit Edit-tab close.
         const want = target === 'videos' ? 'video' : 'image';
+        // Keep the search placeholder in sync with the active media tab.
+        const _si = document.getElementById('gallery-search');
+        if (_si) _si.placeholder = want === 'video' ? 'Search videos, tags...' : 'Search photos, tags...';
         if (want !== _mediaFilter) {
           _mediaFilter = want;
           _fetchLibrary(false);
@@ -2605,10 +2713,14 @@ export function openGallery() {
     const _dlIco = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>';
     const _delIco = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>';
     const _cancelIco = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
+    const _hideIco = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-10-7-10-7a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 10 7 10 7a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>';
+    const _eyeIco = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>';
     const items = [
       { label: 'Favorite', icon: _favIco, action: () => _bulkFavorite(_selectedIds()) },
       { label: 'Add tag…', icon: _tagIco, action: () => _bulkTag(_selectedIds()) },
       { label: 'Download', icon: _dlIco, action: () => _bulkDownload(_selectedIds()) },
+      { label: 'Hide', icon: _hideIco, action: () => _bulkHide(_selectedIds(), true) },
+      { label: 'Unhide', icon: _eyeIco, action: () => _bulkHide(_selectedIds(), false) },
       { label: 'Delete', icon: _delIco, danger: true, action: () => _bulkDelete(_selectedIds()) },
       { separator: true },
       { label: 'Cancel', icon: _cancelIco, action: () => _exitSelectMode() },
@@ -2736,6 +2848,28 @@ export function openGallery() {
     }
     _renderGrid(); _exitSelectMode();
     if (uiModule) uiModule.showToast(`Favorited ${n} photo${n > 1 ? 's' : ''}`);
+  }
+
+  // Bulk hide / unhide the selection — lets the user hide many photos at once
+  // without opening each one's detail view.
+  async function _bulkHide(ids, hidden) {
+    if (!ids.length) return;
+    let n = 0;
+    for (const id of ids) {
+      if (await _patchImage(id, { hidden })) {
+        n++;
+        const it = _items.find(i => i.id === id); if (it) it.hidden = hidden;
+      }
+    }
+    _exitSelectMode();
+    // Hiding while the grid isn't showing hidden items drops them from view.
+    if (hidden && !_showHidden) {
+      _items = _items.filter(i => !ids.includes(i.id));
+      _total = Math.max(0, _total - n);
+    }
+    _renderGrid();
+    _renderStats();
+    if (uiModule) uiModule.showToast(`${n} photo${n === 1 ? '' : 's'} ${hidden ? 'hidden' : 'unhidden'}`);
   }
 
   async function _bulkTag(ids) {
