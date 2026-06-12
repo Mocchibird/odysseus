@@ -6,6 +6,7 @@ import uiModule from './ui.js';
 import { openEditor, closeEditor, isEditorOpen } from './galleryEditor.js';
 import spinnerModule from './spinner.js';
 import { makeWindowDraggable } from './windowDrag.js';
+import * as video360 from './video360.js';
 
 const API_BASE = window.location.origin;
 let _open = false;
@@ -1657,6 +1658,9 @@ function _cardSetAlbum(img, albumId) {
 function _openDetail(img) {
   const detail = document.getElementById('gallery-detail');
   if (!detail) return;
+  // Tear down any 360 viewer from the previously-shown media before this
+  // render replaces the DOM (frees the WebGL context; navigation re-attaches).
+  video360.detach();
   // Drop any face-overlay resize listener from the previous photo
   // before the new render attaches its own.
 
@@ -1807,7 +1811,15 @@ function _openDetail(img) {
   `;
   detail.style.display = 'flex';
 
+  // 360°/VR video: add the manual "360" toggle to the player frame.
+  if (_isVideoUrl(img.url)) {
+    const _vid = document.getElementById('gallery-detail-img');
+    const _frame = _vid && _vid.closest('.gallery-detail-img-frame');
+    if (_vid && _frame) video360.attach(_vid, _frame);
+  }
+
   document.getElementById('gallery-detail-back').addEventListener('click', () => {
+    video360.detach();
     detail.style.display = 'none';
   });
 
@@ -3212,6 +3224,7 @@ function _doCloseGallery() {
     return;
   }
   _open = false;
+  video360.detach();
   clearTimeout(_searchDebounce);
   if (_galleryResizeHandler) {
     window.removeEventListener('resize', _galleryResizeHandler);
