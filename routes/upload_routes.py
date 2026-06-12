@@ -13,7 +13,13 @@ from src.upload_handler import count_recent_uploads
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/upload", tags=["upload"])
-UPLOAD_RESPONSE_HEADERS = {"X-Content-Type-Options": "nosniff"}
+# Content-Encoding: identity opts uploaded media/thumbnails out of
+# GZipMiddleware — they're already-compressed bytes (images/video), so gzip
+# would only burn CPU (Starlette skips responses carrying a Content-Encoding).
+UPLOAD_RESPONSE_HEADERS = {
+    "X-Content-Type-Options": "nosniff",
+    "Content-Encoding": "identity",
+}
 
 def setup_upload_routes(upload_handler):
     """Setup upload routes with the provided handler"""

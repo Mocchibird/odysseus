@@ -89,7 +89,13 @@ def setup_book_routes() -> APIRouter:
         return FileResponse(
             file_path,
             media_type="application/pdf",
-            headers={"Content-Disposition": f'inline; filename="{safe_name}"'},
+            # identity = opt out of GZipMiddleware: PDF streams are mostly
+            # pre-compressed, and the continuous-scroll reader fetches the
+            # whole file — gzipping it is pure CPU burn on the server.
+            headers={
+                "Content-Disposition": f'inline; filename="{safe_name}"',
+                "Content-Encoding": "identity",
+            },
         )
 
     @router.get("/chapter")
@@ -129,7 +135,8 @@ def setup_book_routes() -> APIRouter:
         if not cover:
             raise HTTPException(404, "No cover available")
         data, content_type = cover
-        return Response(content=data, media_type=content_type, headers={"Cache-Control": "public, max-age=86400"})
+        # identity = skip GZipMiddleware for already-compressed cover images.
+        return Response(content=data, media_type=content_type, headers={"Cache-Control": "public, max-age=86400", "Content-Encoding": "identity"})
 
     @router.get("/annotations")
     async def list_annotations(request: Request, path: str):

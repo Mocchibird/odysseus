@@ -1418,9 +1418,10 @@ async def llm_call_async(
         h = {"Content-Type": "application/json"}
         if headers:
             h.update(headers)
+        _num_ctx = await asyncio.to_thread(get_context_length, url, model)
         payload = _build_ollama_payload(
             model, messages_copy, temperature, max_tokens,
-            stream=False, num_ctx=get_context_length(url, model),
+            stream=False, num_ctx=_num_ctx,
         )
     else:
         target_url = url
@@ -1534,9 +1535,10 @@ async def stream_llm(url: str, model: str, messages: List[Dict], temperature: fl
         h = {"Content-Type": "application/json"}
         if headers:
             h.update(headers)
+        _num_ctx = await asyncio.to_thread(get_context_length, url, model)
         payload = _build_ollama_payload(
             model, messages_copy, temperature, max_tokens,
-            stream=True, tools=tools, num_ctx=get_context_length(url, model),
+            stream=True, tools=tools, num_ctx=_num_ctx,
         )
     elif provider == "chatgpt-subscription":
         target_url = _normalize_chatgpt_subscription_url(url)

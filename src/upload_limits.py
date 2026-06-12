@@ -1,5 +1,7 @@
 """Small helpers for route-local upload size caps."""
 
+import asyncio
+import hashlib
 import os
 
 from fastapi import HTTPException, UploadFile
@@ -38,8 +40,12 @@ def get_chat_upload_max_bytes() -> int:
 # ODYSSEUS_*_MAX_BYTES env var to an integer byte count to tune it; an invalid
 # value fails fast at import rather than crashing mid-request. Defaults match
 # the prior per-route values, so behavior is unchanged unless an env var is set.
+# 4 GiB: the gallery accepts phone/camera videos, which routinely run into the
+# gigabytes. Safe to allow now that gallery_upload STREAMS to disk in chunks
+# (stream_upload_to_path below) instead of buffering the whole body in RAM —
+# the cap protects disk space, not memory. Tune via the env var.
 GALLERY_UPLOAD_MAX_BYTES = read_byte_limit_env(
-    "ODYSSEUS_GALLERY_UPLOAD_MAX_BYTES", 100 * 1024 * 1024
+    "ODYSSEUS_GALLERY_UPLOAD_MAX_BYTES", 4 * 1024 * 1024 * 1024
 )
 GALLERY_TRANSFORM_UPLOAD_MAX_BYTES = read_byte_limit_env(
     "ODYSSEUS_GALLERY_TRANSFORM_UPLOAD_MAX_BYTES", 25 * 1024 * 1024
@@ -62,7 +68,12 @@ ICS_MAX_BYTES = read_byte_limit_env(
 
 
 async def read_upload_limited(upload: UploadFile, limit: int, label: str = "Upload") -> bytes:
-    """Read an UploadFile with a hard byte cap."""
+    """Read an UploadFile with a hard byte cap.
+
+    Buffers the WHOLE body in memory — fine for small uploads (attachments,
+    covers, replacements), an OOM hazard for multi-GB media. Anything that
+    accepts large files should use stream_upload_to_path instead.
+    """
     data = await upload.read(limit + 1)
     if len(data) > limit:
         raise HTTPException(
@@ -70,3 +81,52 @@ async def read_upload_limited(upload: UploadFile, limit: int, label: str = "Uplo
             detail=f"{label} exceeds {format_byte_limit(limit)} limit",
         )
     return data
+
+
+UPLOAD_STREAM_CHUNK = 1024 * 1024  # 1 MiB per read — flat memory at any file size
+
+
+async def stream_upload_to_path(upload: UploadFile, dest_path, limit: int,
+                                label: str = "Upload") -> tuple:
+    """Stream an UploadFile to ``dest_path`` in chunks with a hard byte cap.
+
+    Returns ``(sha256_hex, total_bytes)``. Memory stays ~one chunk regardless
+    of file size, so multi-GB videos upload without ballooning RSS the way
+    read_upload_limited's whole-body buffer would.
+
+    The entire copy runs in ONE worker thread: by the time a handler runs,
+    Starlette has fully parsed the multipart body into ``upload.file`` (a
+    SpooledTemporaryFile, rolled to disk past its small spool), so synchronous
+    reads from it are safe and keep the event loop completely untouched.
+
+    On overflow a 413 is raised; on overflow or any error the partial
+    destination file is removed.
+    """
+
+    def _copy():
+        hasher = hashlib.sha256()
+        total = 0
+        try:
+            upload.file.seek(0)
+            with open(dest_path, "wb") as out:
+                while True:
+                    chunk = upload.file.read(UPLOAD_STREAM_CHUNK)
+                    if not chunk:
+                        break
+                    total += len(chunk)
+                    if total > limit:
+                        raise HTTPException(
+                            status_code=413,
+                            detail=f"{label} exceeds {format_byte_limit(limit)} limit",
+                        )
+                    hasher.update(chunk)
+                    out.write(chunk)
+        except BaseException:
+            try:
+                os.unlink(dest_path)
+            except OSError:
+                pass
+            raise
+        return hasher.hexdigest(), total
+
+    return await asyncio.to_thread(_copy)

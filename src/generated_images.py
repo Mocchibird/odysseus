@@ -14,6 +14,10 @@ GENERATED_IMAGE_RE = re.compile(
 GENERATED_IMAGE_HEADERS = {
     "Cache-Control": "public, max-age=31536000, immutable",
     "X-Content-Type-Options": "nosniff",
+    # Already-compressed media (JPEG/PNG/WebP/MP4) — opt out of GZipMiddleware,
+    # which would otherwise burn CPU re-deflating incompressible bytes on every
+    # cold fetch (Starlette skips responses that carry a Content-Encoding).
+    "Content-Encoding": "identity",
 }
 
 

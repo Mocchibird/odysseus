@@ -16,6 +16,7 @@ from core.database import Session as DbSession
 from src.auth_helpers import get_current_user, owner_filter, require_privilege
 from src.upload_limits import (
     read_upload_limited,
+    stream_upload_to_path,
     GALLERY_UPLOAD_MAX_BYTES,
     GALLERY_TRANSFORM_UPLOAD_MAX_BYTES,
 )
@@ -127,78 +128,102 @@ def setup_gallery_routes() -> APIRouter:
 
         user = get_current_user(request)
         album_id = form.get("album_id") or None
-        content = await read_upload_limited(file, GALLERY_UPLOAD_MAX_BYTES, "Gallery upload")
 
-        # Duplicate detection via SHA-256. Hash off the event loop — for a
-        # large video this is tens of ms of CPU that would otherwise stall every
-        # other request (uploads are exactly the "many/large at once" case).
-        file_hash = await asyncio.to_thread(lambda: hashlib.sha256(content).hexdigest())
-        db = SessionLocal()
-        try:
-            if album_id and user is not None:
+        # Validate the extension BEFORE touching disk — cheap reject.
+        ext = file.filename.rsplit(".", 1)[-1].lower() if "." in file.filename else "png"
+        VIDEO_EXTS = {"mp4", "mov", "webm", "mkv", "m4v"}
+        IMAGE_EXTS = {"png", "jpg", "jpeg", "webp", "gif"}
+        if ext not in VIDEO_EXTS and ext not in IMAGE_EXTS:
+            raise HTTPException(400, f"Unsupported file type: .{ext}")
+        is_video = ext in VIDEO_EXTS
+
+        # Validate the target album in its OWN short session — the streaming
+        # copy below can take minutes for a multi-GB video, and holding a
+        # pooled DB connection across it would starve concurrent requests.
+        if album_id and user is not None:
+            db = SessionLocal()
+            try:
                 _get_or_404_album(db, album_id, user)
+            finally:
+                db.close()
 
-            # SECURITY: scope the dup-detect to THIS user — otherwise a
-            # caller can probe whether someone else uploaded the same
-            # file (the response leaks the existing row's id+filename).
-            _dup_q = db.query(GalleryImage).filter(
-                GalleryImage.file_hash == file_hash,
-                GalleryImage.is_active == True,
-            )
-            if user:
-                _dup_q = _dup_q.filter(GalleryImage.owner == user)
-            existing = _dup_q.first()
-            if existing:
-                return {"ok": False, "duplicate": True, "filename": existing.filename,
-                        "id": existing.id, "message": "Duplicate photo skipped"}
+        img_dir = Path(GENERATED_IMAGES_DIR)
+        img_dir.mkdir(parents=True, exist_ok=True)
+        filename = f"{uuid.uuid4().hex[:12]}.{ext}"
+        img_path = img_dir / filename
+        # Stream into a temp file in the SAME directory (same filesystem →
+        # os.replace below is atomic), hashing as we go. Flat ~1 MiB memory
+        # regardless of file size — the old whole-body buffer made multi-GB
+        # videos an OOM hazard on a shared box. The leading dot keeps the temp
+        # name from ever matching the served-filename pattern.
+        tmp_path = img_dir / f".upload-{uuid.uuid4().hex[:12]}.tmp"
+        file_hash, total_size = await stream_upload_to_path(
+            file, tmp_path, GALLERY_UPLOAD_MAX_BYTES, "Gallery upload"
+        )
 
-            img_dir = Path(GENERATED_IMAGES_DIR)
-            img_dir.mkdir(parents=True, exist_ok=True)
-
-            ext = file.filename.rsplit(".", 1)[-1].lower() if "." in file.filename else "png"
-            VIDEO_EXTS = {"mp4", "mov", "webm", "mkv", "m4v"}
-            IMAGE_EXTS = {"png", "jpg", "jpeg", "webp", "gif"}
-            if ext not in VIDEO_EXTS and ext not in IMAGE_EXTS:
-                raise HTTPException(400, f"Unsupported file type: .{ext}")
-            is_video = ext in VIDEO_EXTS
-            filename = f"{uuid.uuid4().hex[:12]}.{ext}"
-            img_path = img_dir / filename
-            # Disk write + PIL EXIF decode off the loop — a 100 MB write or a
-            # large-image decode inline would block all concurrent requests.
-            await asyncio.to_thread(img_path.write_bytes, content)
-
+        try:
             # Extract EXIF for images only — PIL can't parse video containers
-            # and the failure path logs a noisy WARNING. We'll add ffprobe-based
-            # video metadata extraction in a follow-up.
-            exif = {} if is_video else await asyncio.to_thread(_extract_exif, content)
+            # and the failure path logs a noisy WARNING. Images are small
+            # enough to read back whole; videos (the multi-GB case) skip this.
+            exif = {} if is_video else await asyncio.to_thread(
+                lambda: _extract_exif(tmp_path.read_bytes())
+            )
             original_name = file.filename.rsplit(".", 1)[0] if "." in file.filename else file.filename
 
-            img_id = str(uuid.uuid4())
-            db.add(GalleryImage(
-                id=img_id,
-                filename=filename,
-                prompt=original_name,
-                model="imported",
-                owner=user,
-                media_type="video" if is_video else "image",
-                file_hash=file_hash,
-                file_size=len(content),
-                width=exif.get("width"),
-                height=exif.get("height"),
-                taken_at=exif.get("taken_at"),
-                camera_make=exif.get("camera_make"),
-                camera_model=exif.get("camera_model"),
-                gps_lat=exif.get("gps_lat"),
-                gps_lng=exif.get("gps_lng"),
-                album_id=album_id,
-            ))
-            db.commit()
-            resp = {"ok": True, "filename": filename, "id": img_id}
-            if exif.get("exif_error"):
-                resp["exif_warning"] = exif["exif_error"]
-            return resp
+            db = SessionLocal()
+            try:
+                # SECURITY: scope the dup-detect to THIS user — otherwise a
+                # caller can probe whether someone else uploaded the same
+                # file (the response leaks the existing row's id+filename).
+                _dup_q = db.query(GalleryImage).filter(
+                    GalleryImage.file_hash == file_hash,
+                    GalleryImage.is_active == True,
+                )
+                if user:
+                    _dup_q = _dup_q.filter(GalleryImage.owner == user)
+                existing = _dup_q.first()
+                if existing:
+                    return {"ok": False, "duplicate": True, "filename": existing.filename,
+                            "id": existing.id, "message": "Duplicate photo skipped"}
+
+                # Atomic publish: the served filename appears only when the
+                # bytes are fully on disk.
+                await asyncio.to_thread(os.replace, tmp_path, img_path)
+
+                img_id = str(uuid.uuid4())
+                db.add(GalleryImage(
+                    id=img_id,
+                    filename=filename,
+                    prompt=original_name,
+                    model="imported",
+                    owner=user,
+                    media_type="video" if is_video else "image",
+                    file_hash=file_hash,
+                    file_size=total_size,
+                    width=exif.get("width"),
+                    height=exif.get("height"),
+                    taken_at=exif.get("taken_at"),
+                    camera_make=exif.get("camera_make"),
+                    camera_model=exif.get("camera_model"),
+                    gps_lat=exif.get("gps_lat"),
+                    gps_lng=exif.get("gps_lng"),
+                    album_id=album_id,
+                ))
+                db.commit()
+                resp = {"ok": True, "filename": filename, "id": img_id}
+                if exif.get("exif_error"):
+                    resp["exif_warning"] = exif["exif_error"]
+                return resp
+            finally:
+                db.close()
         finally:
-            db.close()
+            # Duplicate return or any failure: drop the temp (replace() above
+            # already moved it on the success path, so this is a no-op there).
+            try:
+                if tmp_path.exists():
+                    tmp_path.unlink()
+            except OSError:
+                pass
 
     # ---- POST /api/gallery/{id}/replace ----
     @router.post("/api/gallery/{image_id}/replace")
@@ -224,18 +249,24 @@ def setup_gallery_routes() -> APIRouter:
             img_dir = Path(GENERATED_IMAGES_DIR)
             img_dir.mkdir(parents=True, exist_ok=True)
             img_path = img_dir / _sanitize_gallery_filename(img.filename)
-            img_path.write_bytes(content)
 
-            # Refresh dimensions in case the editor resized the canvas.
-            # updated_at auto-bumps via TimestampMixin's onupdate hook.
-            try:
-                from PIL import Image
-                from io import BytesIO
-                with Image.open(BytesIO(content)) as new_im:
-                    img.width = new_im.width
-                    img.height = new_im.height
-            except Exception:
-                pass
+            # Disk write + PIL dimension probe off the loop — a large replacement
+            # write or image decode inline would block all concurrent requests.
+            def _write_and_probe():
+                img_path.write_bytes(content)
+                # Refresh dimensions in case the editor resized the canvas.
+                # updated_at auto-bumps via TimestampMixin's onupdate hook.
+                try:
+                    from PIL import Image
+                    from io import BytesIO
+                    with Image.open(BytesIO(content)) as new_im:
+                        return (new_im.width, new_im.height)
+                except Exception:
+                    return None
+
+            dims = await asyncio.to_thread(_write_and_probe)
+            if dims:
+                img.width, img.height = dims
             try:
                 db.commit()
             except Exception as e:
@@ -301,28 +332,35 @@ def setup_gallery_routes() -> APIRouter:
             if not img_path.exists():
                 raise HTTPException(404, "Image file not found")
 
-            # PIL rotates counter-clockwise; the API takes "clockwise"
-            # convention so we negate to match user expectation.
-            with Image.open(img_path) as pil:
-                rotated = pil.rotate(-angle, expand=True)
-                # Recompute hash so dedupe stays accurate.
-                buf = BytesIO()
-                ext = img.filename.rsplit(".", 1)[-1].lower()
-                save_kwargs = {}
-                if ext in ("jpg", "jpeg"):
-                    save_kwargs["quality"] = 95
-                    fmt = "JPEG"
-                elif ext == "webp":
-                    fmt = "WEBP"
-                    save_kwargs["quality"] = 95
-                else:
-                    fmt = "PNG"
-                rotated.save(buf, format=fmt, **save_kwargs)
-                content = buf.getvalue()
-                img_path.write_bytes(content)
-                img.file_hash = hashlib.sha256(content).hexdigest()
-                img.file_size = len(content)
-                img.width, img.height = rotated.size
+            # PIL decode + rotate + re-encode + disk write + sha256 off the
+            # loop — for a large photo this is hundreds of ms of CPU that
+            # would otherwise stall every other request.
+            def _rotate_on_disk():
+                # PIL rotates counter-clockwise; the API takes "clockwise"
+                # convention so we negate to match user expectation.
+                with Image.open(img_path) as pil:
+                    rotated = pil.rotate(-angle, expand=True)
+                    # Recompute hash so dedupe stays accurate.
+                    buf = BytesIO()
+                    ext = img.filename.rsplit(".", 1)[-1].lower()
+                    save_kwargs = {}
+                    if ext in ("jpg", "jpeg"):
+                        save_kwargs["quality"] = 95
+                        fmt = "JPEG"
+                    elif ext == "webp":
+                        fmt = "WEBP"
+                        save_kwargs["quality"] = 95
+                    else:
+                        fmt = "PNG"
+                    rotated.save(buf, format=fmt, **save_kwargs)
+                    content = buf.getvalue()
+                    img_path.write_bytes(content)
+                    return (hashlib.sha256(content).hexdigest(), len(content), rotated.size)
+
+            file_hash_hex, size_bytes, (w, h) = await asyncio.to_thread(_rotate_on_disk)
+            img.file_hash = file_hash_hex
+            img.file_size = size_bytes
+            img.width, img.height = w, h
             db.commit()
             return {"ok": True, "width": img.width, "height": img.height}
         finally:
@@ -341,7 +379,9 @@ def setup_gallery_routes() -> APIRouter:
         scale = int(form.get("scale", "2"))
 
         image_bytes = await read_upload_limited(file, GALLERY_TRANSFORM_UPLOAD_MAX_BYTES, "Image upload")
-        b64 = base64.b64encode(image_bytes).decode()
+        # Base64-encode off the loop — for a large upload this is CPU-bound
+        # work that would otherwise stall every other request.
+        b64 = await asyncio.to_thread(lambda: base64.b64encode(image_bytes).decode())
 
         # Find image endpoint
         db = SessionLocal()
@@ -385,7 +425,9 @@ def setup_gallery_routes() -> APIRouter:
         if not file: raise HTTPException(400, "No image")
 
         image_bytes = await read_upload_limited(file, GALLERY_TRANSFORM_UPLOAD_MAX_BYTES, "Image upload")
-        b64 = base64.b64encode(image_bytes).decode()
+        # Base64-encode off the loop — for a large upload this is CPU-bound
+        # work that would otherwise stall every other request.
+        b64 = await asyncio.to_thread(lambda: base64.b64encode(image_bytes).decode())
 
         db = SessionLocal()
         try:
@@ -621,27 +663,55 @@ def setup_gallery_routes() -> APIRouter:
             if not show_hidden:
                 q = q.filter((GalleryAlbum.hidden == False) | (GalleryAlbum.hidden == None))
             albums = q.order_by(GalleryAlbum.created_at.desc()).all()
-            result = []
-            for a in albums:
-                _count_q = db.query(GalleryImage).filter(
-                    GalleryImage.album_id == a.id, GalleryImage.is_active == True
+
+            # Three fixed queries instead of up-to-3-per-album (N+1):
+            # batched counts, batched explicit covers, batched fallback covers.
+            from sqlalchemy import func
+            album_ids = [a.id for a in albums]
+            cover_ids = [a.cover_id for a in albums if a.cover_id]
+
+            # 1) Per-album visible-image counts in one GROUP BY.
+            counts = {}
+            if album_ids:
+                _count_q = db.query(GalleryImage.album_id, func.count(GalleryImage.id)).filter(
+                    GalleryImage.album_id.in_(album_ids), GalleryImage.is_active == True
                 )
                 _count_q = _visible(_owner_filter(_count_q, user))
-                count = _count_q.count()
-                cover_url = None
-                if a.cover_id:
-                    cover_q = db.query(GalleryImage).filter(GalleryImage.id == a.cover_id)
-                    cover = _visible(_owner_filter(cover_q, user)).first()
-                    if cover:
-                        cover_url = f"/api/generated-image/{cover.filename}"
-                if not cover_url and count > 0:
-                    _cover_q = db.query(GalleryImage).filter(
-                        GalleryImage.album_id == a.id, GalleryImage.is_active == True
-                    )
-                    _cover_q = _visible(_owner_filter(_cover_q, user))
-                    first = _cover_q.order_by(GalleryImage.created_at.desc()).first()
-                    if first:
-                        cover_url = f"/api/generated-image/{first.filename}"
+                counts = dict(_count_q.group_by(GalleryImage.album_id).all())
+
+            # 2) Explicit covers (album.cover_id -> filename) in one IN query.
+            cover_by_id = {}
+            if cover_ids:
+                cover_q = db.query(GalleryImage.id, GalleryImage.filename).filter(
+                    GalleryImage.id.in_(cover_ids)
+                )
+                cover_q = _visible(_owner_filter(cover_q, user))
+                cover_by_id = dict(cover_q.all())
+
+            # 3) Fallback covers: newest visible image per album in ONE query.
+            # SQLite's bare-column-with-max() semantics pick the filename from
+            # the row that holds max(created_at) within each group.
+            fallback = {}
+            if album_ids:
+                _cover_q = db.query(
+                    GalleryImage.album_id,
+                    func.max(GalleryImage.created_at),
+                    GalleryImage.filename,
+                ).filter(
+                    GalleryImage.album_id.in_(album_ids), GalleryImage.is_active == True
+                )
+                _cover_q = _visible(_owner_filter(_cover_q, user))
+                fallback = {
+                    aid: fn for aid, _ts, fn in _cover_q.group_by(GalleryImage.album_id).all()
+                }
+
+            result = []
+            for a in albums:
+                count = counts.get(a.id, 0)
+                fn = (cover_by_id.get(a.cover_id) if a.cover_id else None) or (
+                    fallback.get(a.id) if count > 0 else None
+                )
+                cover_url = f"/api/generated-image/{fn}" if fn else None
                 result.append({
                     "id": a.id, "name": a.name, "description": a.description or "",
                     "cover_url": cover_url, "count": count,
@@ -1453,15 +1523,20 @@ def setup_gallery_routes() -> APIRouter:
         from PIL import Image, ImageFilter
         import base64, io
 
-        img_bytes = base64.b64decode(image_b64)
-        img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
+        # Base64 decode + PIL filter + re-encode off the event loop — this is
+        # pure CPU work that would otherwise stall every other request.
+        def _work():
+            img_bytes = base64.b64decode(image_b64)
+            img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
 
-        # Unsharp mask: radius=2, percent=amount*200, threshold=3
-        sharpened = img.filter(ImageFilter.UnsharpMask(radius=2, percent=int(amount * 200), threshold=3))
+            # Unsharp mask: radius=2, percent=amount*200, threshold=3
+            sharpened = img.filter(ImageFilter.UnsharpMask(radius=2, percent=int(amount * 200), threshold=3))
 
-        buf = io.BytesIO()
-        sharpened.save(buf, format="PNG")
-        return {"image": base64.b64encode(buf.getvalue()).decode()}
+            buf = io.BytesIO()
+            sharpened.save(buf, format="PNG")
+            return {"image": base64.b64encode(buf.getvalue()).decode()}
+
+        return await asyncio.to_thread(_work)
 
     # ---- POST /api/image/denoise ----
     # AI denoise via Real-ESRGAN with the realesr-general-x4v3 weights at
@@ -1485,34 +1560,40 @@ def setup_gallery_routes() -> APIRouter:
             import numpy as np
         except ImportError as e:
             raise HTTPException(500, f"Server missing dependency: {e}")
-        # Decode source image (RGB; Real-ESRGAN doesn't preserve alpha).
-        img_bytes = base64.b64decode(image_b64)
-        src = Image.open(io.BytesIO(img_bytes)).convert("RGB")
-        try:
-            from realesrgan import RealESRGANer
-        except ImportError:
-            return {"error": "realesrgan not installed. Install it from Cookbook → Dependencies (search 'realesrgan')."}
-        try:
-            # General-purpose lightweight model with denoise control.
-            from realesrgan.archs.srvgg_arch import SRVGGNetCompact
-            model = SRVGGNetCompact(num_in_ch=3, num_out_ch=3, num_feat=64,
-                                    num_conv=32, upscale=4, act_type='prelu')
-            upsampler = RealESRGANer(
-                scale=4,
-                model_path='https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.5.0/realesr-general-x4v3.pth',
-                dni_weight=[strength, 1.0 - strength],
-                model=model,
-                tile=400, tile_pad=10, pre_pad=0, half=False,
-            )
-            arr = np.array(src)
-            output, _ = upsampler.enhance(arr, outscale=1)
-            out_img = Image.fromarray(output)
-            buf = io.BytesIO()
-            out_img.save(buf, format="PNG")
-            return {"image": base64.b64encode(buf.getvalue()).decode()}
-        except Exception as e:
-            logger.warning(f"Denoise failed: {e}")
-            return {"error": f"Denoise failed: {e}"}
+        # Base64 decode + Real-ESRGAN inference + re-encode off the event
+        # loop — model inference is seconds of CPU that would otherwise
+        # stall every other request.
+        def _work():
+            # Decode source image (RGB; Real-ESRGAN doesn't preserve alpha).
+            img_bytes = base64.b64decode(image_b64)
+            src = Image.open(io.BytesIO(img_bytes)).convert("RGB")
+            try:
+                from realesrgan import RealESRGANer
+            except ImportError:
+                return {"error": "realesrgan not installed. Install it from Cookbook → Dependencies (search 'realesrgan')."}
+            try:
+                # General-purpose lightweight model with denoise control.
+                from realesrgan.archs.srvgg_arch import SRVGGNetCompact
+                model = SRVGGNetCompact(num_in_ch=3, num_out_ch=3, num_feat=64,
+                                        num_conv=32, upscale=4, act_type='prelu')
+                upsampler = RealESRGANer(
+                    scale=4,
+                    model_path='https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.5.0/realesr-general-x4v3.pth',
+                    dni_weight=[strength, 1.0 - strength],
+                    model=model,
+                    tile=400, tile_pad=10, pre_pad=0, half=False,
+                )
+                arr = np.array(src)
+                output, _ = upsampler.enhance(arr, outscale=1)
+                out_img = Image.fromarray(output)
+                buf = io.BytesIO()
+                out_img.save(buf, format="PNG")
+                return {"image": base64.b64encode(buf.getvalue()).decode()}
+            except Exception as e:
+                logger.warning(f"Denoise failed: {e}")
+                return {"error": f"Denoise failed: {e}"}
+
+        return await asyncio.to_thread(_work)
 
     # ---- POST /api/image/upscale-local ----
     # Local Real-ESRGAN upscale (2× or 4×). Self-contained — no diffusion
@@ -1535,31 +1616,37 @@ def setup_gallery_routes() -> APIRouter:
             import numpy as np
         except ImportError as e:
             raise HTTPException(500, f"Server missing dependency: {e}")
-        img_bytes = base64.b64decode(image_b64)
-        src = Image.open(io.BytesIO(img_bytes)).convert("RGB")
-        try:
-            from basicsr.archs.rrdbnet_arch import RRDBNet
-            from realesrgan import RealESRGANer
-        except ImportError:
-            return {"error": "realesrgan not installed. Install it from Cookbook → Dependencies (search 'realesrgan')."}
-        try:
-            model = RRDBNet(num_in_ch=3, num_out_ch=3, num_feat=64,
-                            num_block=23, num_grow_ch=32, scale=4)
-            upsampler = RealESRGANer(
-                scale=4,
-                model_path='https://github.com/xinntao/Real-ESRGAN/releases/download/v0.1.0/RealESRGAN_x4plus.pth',
-                model=model,
-                tile=400, tile_pad=10, pre_pad=0, half=False,
-            )
-            arr = np.array(src)
-            output, _ = upsampler.enhance(arr, outscale=scale)
-            out_img = Image.fromarray(output)
-            buf = io.BytesIO()
-            out_img.save(buf, format="PNG")
-            return {"image": base64.b64encode(buf.getvalue()).decode()}
-        except Exception as e:
-            logger.warning(f"Upscale failed: {e}")
-            return {"error": f"Upscale failed: {e}"}
+        # Base64 decode + Real-ESRGAN inference + re-encode off the event
+        # loop — a 4x upscale is seconds of CPU that would otherwise stall
+        # every other request.
+        def _work():
+            img_bytes = base64.b64decode(image_b64)
+            src = Image.open(io.BytesIO(img_bytes)).convert("RGB")
+            try:
+                from basicsr.archs.rrdbnet_arch import RRDBNet
+                from realesrgan import RealESRGANer
+            except ImportError:
+                return {"error": "realesrgan not installed. Install it from Cookbook → Dependencies (search 'realesrgan')."}
+            try:
+                model = RRDBNet(num_in_ch=3, num_out_ch=3, num_feat=64,
+                                num_block=23, num_grow_ch=32, scale=4)
+                upsampler = RealESRGANer(
+                    scale=4,
+                    model_path='https://github.com/xinntao/Real-ESRGAN/releases/download/v0.1.0/RealESRGAN_x4plus.pth',
+                    model=model,
+                    tile=400, tile_pad=10, pre_pad=0, half=False,
+                )
+                arr = np.array(src)
+                output, _ = upsampler.enhance(arr, outscale=scale)
+                out_img = Image.fromarray(output)
+                buf = io.BytesIO()
+                out_img.save(buf, format="PNG")
+                return {"image": base64.b64encode(buf.getvalue()).decode()}
+            except Exception as e:
+                logger.warning(f"Upscale failed: {e}")
+                return {"error": f"Upscale failed: {e}"}
+
+        return await asyncio.to_thread(_work)
 
     # ---- POST /api/image/remove-bg ----
     @router.post("/api/image/remove-bg")
@@ -1584,75 +1671,81 @@ def setup_gallery_routes() -> APIRouter:
         from PIL import Image
         import base64, io
 
-        img_bytes = base64.b64decode(image_b64)
-        img = Image.open(io.BytesIO(img_bytes)).convert("RGBA")
-        W, H = img.size
+        # Base64 decode + rembg/segmentation inference + compositing +
+        # re-encode off the event loop — model inference is seconds of CPU
+        # that would otherwise stall every other request.
+        def _work():
+            img_bytes = base64.b64decode(image_b64)
+            img = Image.open(io.BytesIO(img_bytes)).convert("RGBA")
+            W, H = img.size
 
-        hint = None
-        bbox = None
-        if hint_b64:
+            hint = None
+            bbox = None
+            if hint_b64:
+                try:
+                    hint_bytes = base64.b64decode(hint_b64)
+                    hint = Image.open(io.BytesIO(hint_bytes)).convert("L")
+                    # Resize the hint to match if dimensions disagree
+                    if hint.size != img.size:
+                        hint = hint.resize(img.size, Image.NEAREST)
+                    # Bounding box of any non-zero pixel (with 8 px padding)
+                    bbox = hint.getbbox()
+                    if bbox:
+                        pad = 8
+                        bbox = (
+                            max(0, bbox[0] - pad), max(0, bbox[1] - pad),
+                            min(W, bbox[2] + pad), min(H, bbox[3] + pad),
+                        )
+                except Exception:
+                    hint = None
+                    bbox = None
+
+            # Crop to the bbox if a hint was supplied so rembg sees just the
+            # user's region of interest. Otherwise process the whole image.
+            if bbox:
+                crop = img.crop(bbox)
+            else:
+                crop = img
+
             try:
-                hint_bytes = base64.b64decode(hint_b64)
-                hint = Image.open(io.BytesIO(hint_bytes)).convert("L")
-                # Resize the hint to match if dimensions disagree
-                if hint.size != img.size:
-                    hint = hint.resize(img.size, Image.NEAREST)
-                # Bounding box of any non-zero pixel (with 8 px padding)
-                bbox = hint.getbbox()
-                if bbox:
-                    pad = 8
-                    bbox = (
-                        max(0, bbox[0] - pad), max(0, bbox[1] - pad),
-                        min(W, bbox[2] + pad), min(H, bbox[3] + pad),
-                    )
-            except Exception:
-                hint = None
-                bbox = None
+                from rembg import remove
+                cut = remove(crop)
+            except ImportError:
+                try:
+                    from transformers import pipeline
+                    pipe = pipeline("image-segmentation", model="briaai/RMBG-1.4", trust_remote_code=True)
+                    mask_img = pipe(crop, return_mask=True).convert("L")
+                    tmp = crop.copy()
+                    tmp.putalpha(mask_img)
+                    cut = tmp
+                except Exception:
+                    return {"error": "No background removal model available. Install rembg: pip install rembg"}
 
-        # Crop to the bbox if a hint was supplied so rembg sees just the
-        # user's region of interest. Otherwise process the whole image.
-        if bbox:
-            crop = img.crop(bbox)
-        else:
-            crop = img
+            # Compose the cropped result back into a full-size transparent canvas.
+            if bbox:
+                result = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+                result.paste(cut, (bbox[0], bbox[1]), cut)
+            else:
+                result = cut.convert("RGBA")
 
-        try:
-            from rembg import remove
-            cut = remove(crop)
-        except ImportError:
-            try:
-                from transformers import pipeline
-                pipe = pipeline("image-segmentation", model="briaai/RMBG-1.4", trust_remote_code=True)
-                mask_img = pipe(crop, return_mask=True).convert("L")
-                tmp = crop.copy()
-                tmp.putalpha(mask_img)
-                cut = tmp
-            except Exception:
-                return {"error": "No background removal model available. Install rembg: pip install rembg"}
+            # Final alpha = result.alpha * hint (normalised). Anything outside
+            # the user's hint is forced transparent.
+            if hint is not None:
+                r, g, b, a = result.split()
+                # Multiply alphas — use ImageChops to stay in PIL-pure code.
+                from PIL import ImageChops
+                a = ImageChops.multiply(a, hint)
+                result = Image.merge("RGBA", (r, g, b, a))
 
-        # Compose the cropped result back into a full-size transparent canvas.
-        if bbox:
-            result = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-            result.paste(cut, (bbox[0], bbox[1]), cut)
-        else:
-            result = cut.convert("RGBA")
+            # Edge cleanup (feather / grow) moved to the client so the user
+            # can re-tune live without re-running the model. Server returns
+            # the pristine cutout.
 
-        # Final alpha = result.alpha * hint (normalised). Anything outside
-        # the user's hint is forced transparent.
-        if hint is not None:
-            r, g, b, a = result.split()
-            # Multiply alphas — use ImageChops to stay in PIL-pure code.
-            from PIL import ImageChops
-            a = ImageChops.multiply(a, hint)
-            result = Image.merge("RGBA", (r, g, b, a))
+            buf = io.BytesIO()
+            result.save(buf, format="PNG")
+            return {"image": base64.b64encode(buf.getvalue()).decode()}
 
-        # Edge cleanup (feather / grow) moved to the client so the user
-        # can re-tune live without re-running the model. Server returns
-        # the pristine cutout.
-
-        buf = io.BytesIO()
-        result.save(buf, format="PNG")
-        return {"image": base64.b64encode(buf.getvalue()).decode()}
+        return await asyncio.to_thread(_work)
 
     # ---- POST /api/image/enhance-face ----
     @router.post("/api/image/enhance-face")
@@ -1668,57 +1761,63 @@ def setup_gallery_routes() -> APIRouter:
         from PIL import Image, ImageFilter, ImageEnhance
         import numpy as np
 
-        img_bytes = base64.b64decode(image_b64)
-        img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
+        # Base64 decode + GFPGAN inference (or PIL fallback) + re-encode off
+        # the event loop — face restoration is seconds of CPU that would
+        # otherwise stall every other request.
+        def _work():
+            img_bytes = base64.b64decode(image_b64)
+            img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
 
-        # Try GFPGAN first (AI face restoration)
-        try:
-            from gfpgan import GFPGANer
-            import cv2
+            # Try GFPGAN first (AI face restoration)
+            try:
+                from gfpgan import GFPGANer
+                import cv2
 
-            model_path = os.path.join(tempfile.gettempdir(), "gfpgan_models")
-            os.makedirs(model_path, exist_ok=True)
+                model_path = os.path.join(tempfile.gettempdir(), "gfpgan_models")
+                os.makedirs(model_path, exist_ok=True)
 
-            restorer = GFPGANer(
-                model_path="https://github.com/TencentARC/GFPGAN/releases/download/v1.3.0/GFPGANv1.4.pth",
-                upscale=1,
-                arch="clean",
-                channel_multiplier=2,
-                bg_upsampler=None,
-                model_rootpath=model_path,
-            )
+                restorer = GFPGANer(
+                    model_path="https://github.com/TencentARC/GFPGAN/releases/download/v1.3.0/GFPGANv1.4.pth",
+                    upscale=1,
+                    arch="clean",
+                    channel_multiplier=2,
+                    bg_upsampler=None,
+                    model_rootpath=model_path,
+                )
 
-            img_bgr = cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)
-            _, _, output = restorer.enhance(
-                img_bgr,
-                has_aligned=False,
-                only_center_face=False,
-                paste_back=True,
-            )
+                img_bgr = cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)
+                _, _, output = restorer.enhance(
+                    img_bgr,
+                    has_aligned=False,
+                    only_center_face=False,
+                    paste_back=True,
+                )
 
-            # Convert back to RGB
-            result_rgb = cv2.cvtColor(output, cv2.COLOR_BGR2RGB)
-            result_img = Image.fromarray(result_rgb)
+                # Convert back to RGB
+                result_rgb = cv2.cvtColor(output, cv2.COLOR_BGR2RGB)
+                result_img = Image.fromarray(result_rgb)
 
-            buf = io.BytesIO()
-            result_img.save(buf, format="PNG")
-            return {"image": base64.b64encode(buf.getvalue()).decode()}
+                buf = io.BytesIO()
+                result_img.save(buf, format="PNG")
+                return {"image": base64.b64encode(buf.getvalue()).decode()}
 
-        except ImportError:
-            # GFPGAN not available — use PIL-based enhancement (no AI, but works everywhere)
-            logger.info("GFPGAN not available — using PIL enhancement fallback")
-            # Multi-step enhancement: denoise → sharpen → contrast → color boost
-            enhanced = img.filter(ImageFilter.MedianFilter(size=3))  # light denoise
-            enhanced = enhanced.filter(ImageFilter.UnsharpMask(radius=2, percent=150, threshold=3))  # sharpen
-            enhanced = ImageEnhance.Contrast(enhanced).enhance(1.15)  # slight contrast boost
-            enhanced = ImageEnhance.Color(enhanced).enhance(1.1)  # subtle color boost
-            enhanced = ImageEnhance.Brightness(enhanced).enhance(1.05)  # slight brightness lift
+            except ImportError:
+                # GFPGAN not available — use PIL-based enhancement (no AI, but works everywhere)
+                logger.info("GFPGAN not available — using PIL enhancement fallback")
+                # Multi-step enhancement: denoise → sharpen → contrast → color boost
+                enhanced = img.filter(ImageFilter.MedianFilter(size=3))  # light denoise
+                enhanced = enhanced.filter(ImageFilter.UnsharpMask(radius=2, percent=150, threshold=3))  # sharpen
+                enhanced = ImageEnhance.Contrast(enhanced).enhance(1.15)  # slight contrast boost
+                enhanced = ImageEnhance.Color(enhanced).enhance(1.1)  # subtle color boost
+                enhanced = ImageEnhance.Brightness(enhanced).enhance(1.05)  # slight brightness lift
 
-            buf = io.BytesIO()
-            enhanced.save(buf, format="PNG")
-            return {"image": base64.b64encode(buf.getvalue()).decode(), "method": "pil"}
-        except Exception as e:
-            raise HTTPException(500, f"Face enhancement failed: {str(e)}")
+                buf = io.BytesIO()
+                enhanced.save(buf, format="PNG")
+                return {"image": base64.b64encode(buf.getvalue()).decode(), "method": "pil"}
+            except Exception as e:
+                raise HTTPException(500, f"Face enhancement failed: {str(e)}")
+
+        return await asyncio.to_thread(_work)
 
     # ---- Album management (path-param routes) ----
 

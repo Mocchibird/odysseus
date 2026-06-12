@@ -304,6 +304,7 @@ class GalleryImage(TimestampMixin, Base):
         Index('ix_gallery_images_tags', 'tags'),
         Index('ix_gallery_images_model', 'model'),
         Index('ix_gallery_images_active', 'is_active', 'created_at'),
+        Index('ix_gallery_owner_active_created', 'owner', 'is_active', 'created_at'),
     )
 
 
@@ -1559,6 +1560,19 @@ def _migrate_add_doc_source_email_cols():
     except Exception as e:
         logging.getLogger(__name__).warning(f"doc source-email migration: {e}")
 
+def _migrate_add_gallery_owner_index():
+    """Composite index for the gallery hot path: list/library queries filter
+    on owner + is_active and sort by created_at on every request."""
+    try:
+        with engine.connect() as conn:
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_gallery_owner_active_created "
+                "ON gallery_images (owner, is_active, created_at)"
+            ))
+            conn.commit()
+    except Exception as e:
+        logging.getLogger(__name__).warning(f"gallery owner-index migration: {e}")
+
 def _migrate_add_task_automation_columns():
     """Add automation columns to scheduled_tasks table if missing."""
     new_cols = {
@@ -2104,6 +2118,7 @@ def init_db():
     _migrate_add_meal_sugar_column()
     _migrate_add_meal_photo_column()
     _migrate_add_gallery_media_columns()
+    _migrate_add_gallery_owner_index()
     _migrate_add_training_kcal_burned_column()
     _migrate_chat_messages_fts()
     _migrate_encrypt_email_passwords()

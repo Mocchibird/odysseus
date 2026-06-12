@@ -12,6 +12,7 @@ import json
 import logging
 import uuid
 import time
+import asyncio
 from typing import Dict, Optional, Tuple
 
 from src.constants import GENERATED_IMAGES_DIR
@@ -178,7 +179,7 @@ async def do_chat_with_model(content: str, session_id: Optional[str] = None, own
         return {"error": "No message provided (line 2+ is the message)"}
 
     try:
-        url, model, headers = _resolve_model(model_spec, owner=owner)
+        url, model, headers = await asyncio.to_thread(lambda: _resolve_model(model_spec, owner=owner))
     except ValueError as e:
         return {"error": str(e)}
 
@@ -231,7 +232,7 @@ async def do_ask_teacher(content: str, session_id: Optional[str] = None, owner: 
             return {"error": "No teacher model configured. Specify a model name or set teacher_model in settings."}
 
     try:
-        url, model, headers = _resolve_model(model_spec, owner=owner)
+        url, model, headers = await asyncio.to_thread(lambda: _resolve_model(model_spec, owner=owner))
     except ValueError as e:
         return {"error": str(e)}
 
@@ -251,150 +252,6 @@ async def do_ask_teacher(content: str, session_id: Optional[str] = None, owner: 
     except Exception as e:
         logger.error(f"ask_teacher failed: {e}")
         return {"error": f"Teacher call failed ({model_spec}): {e}"}
-
-
-async def do_second_opinion(content: str, session_id: Optional[str] = None, owner: Optional[str] = None) -> Dict:
-    """Get a second opinion from another model, then have the original model
-    evaluate the feedback and produce a unified version.
-
-    Content format:
-      Line 1: model_name (or model_name@endpoint_name)
-      Line 2+ (optional): specific question or focus area
-
-    Flow:
-      1. Pull recent conversation context
-      2. Send to reviewer model → get honest feedback
-      3. Send feedback back to the session's own model → evaluate & unify
-      4. Return both the review and the unified response
-    """
-    from src.llm_core import llm_call_async
-
-    lines = content.strip().split("\n", 1)
-    if not lines or not lines[0].strip():
-        return {"error": "First line must be the model name"}
-
-    model_spec = lines[0].strip()
-    focus = lines[1].strip() if len(lines) > 1 else ""
-
-    try:
-        reviewer_url, reviewer_model, reviewer_headers = _resolve_model(model_spec, owner=owner)
-    except ValueError as e:
-        return {"error": str(e)}
-
-    # Pull recent conversation context from current session
-    context_text = ""
-    sess = None
-    if session_id and _session_manager:
-        sess = _session_manager.get_session(session_id)
-        if sess:
-            messages = sess.get_context_messages()
-            recent = messages[-15:] if len(messages) > 15 else messages
-            parts = []
-            for m in recent:
-                role = m.get("role", "unknown").upper()
-                text = m.get("content", "")
-                if isinstance(text, list):
-                    text = " ".join(
-                        p.get("text", "") for p in text if isinstance(p, dict)
-                    )
-                if text:
-                    parts.append(f"[{role}]: {text[:2000]}")
-            context_text = "\n\n".join(parts)
-
-    if not context_text:
-        return {"error": "No conversation context found to review"}
-
-    # ── Step 1: Get the reviewer's feedback ──
-    reviewer_system = (
-        "You are giving a second opinion on a conversation between a user and an AI assistant. "
-        "Your job is to be genuinely helpful and honest — not a yes-man, but not a contrarian either.\n\n"
-        "Guidelines:\n"
-        "- If the plan/idea is solid, say so clearly. Don't manufacture problems that aren't there.\n"
-        "- If you spot a real flaw, blind spot, or simpler approach — call it out directly.\n"
-        "- Be practical. Don't over-engineer or over-analyze. Real-world tradeoffs matter.\n"
-        "- If there's a meaningfully better way to do something, suggest it concretely.\n"
-        "- Give credit where it's due — highlight what's working well.\n"
-        "- Keep it concise and actionable. No fluff.\n"
-        "- You're a second pair of eyes, not a professor grading a paper."
-    )
-
-    reviewer_message = f"Here's the conversation so far:\n\n{context_text}"
-    if focus:
-        reviewer_message += f"\n\n---\nSpecifically, I want your take on: {focus}"
-    else:
-        reviewer_message += "\n\n---\nGive me your honest second opinion on what's being discussed."
-
-    try:
-        review = await llm_call_async(
-            reviewer_url, reviewer_model,
-            [
-                {"role": "system", "content": reviewer_system},
-                {"role": "user", "content": reviewer_message},
-            ],
-            headers=reviewer_headers,
-            timeout=AI_CHAT_TIMEOUT,
-        )
-        if len(review) > 8000:
-            review = review[:8000] + "\n... (truncated)"
-    except Exception as e:
-        logger.error(f"second_opinion reviewer call failed: {e}")
-        return {"error": f"Failed to get second opinion from {model_spec}: {e}"}
-
-    # ── Step 2: Send review back to session's own model for evaluation ──
-    unified = ""
-    original_model = "unknown"
-    if sess:
-        original_url = sess.endpoint_url
-        original_model = sess.model
-        original_headers = getattr(sess, "headers", None) or {}
-
-        unify_system = (
-            "Another AI model just reviewed the conversation you've been having with the user. "
-            "Read their feedback carefully, then respond with:\n\n"
-            "1. **What you agree with** — acknowledge valid points honestly.\n"
-            "2. **What you disagree with** — explain why, briefly.\n"
-            "3. **Unified version** — produce an updated/refined version of whatever was being discussed, "
-            "incorporating the feedback you found valid. Don't accept every note blindly — "
-            "use your judgment on what actually improves things vs what's unnecessary.\n\n"
-            "Be concise and practical. The user wants a better result, not a meta-discussion."
-        )
-
-        unify_message = (
-            f"Here's the conversation context:\n\n{context_text}\n\n"
-            f"---\n\n"
-            f"**Review from {reviewer_model}:**\n\n{review}\n\n"
-            f"---\n\n"
-            f"Evaluate this feedback and produce a unified improved version."
-        )
-
-        try:
-            unified = await llm_call_async(
-                original_url, original_model,
-                [
-                    {"role": "system", "content": unify_system},
-                    {"role": "user", "content": unify_message},
-                ],
-                headers=original_headers,
-                timeout=AI_CHAT_TIMEOUT,
-            )
-            if len(unified) > 10000:
-                unified = unified[:10000] + "\n... (truncated)"
-        except Exception as e:
-            logger.error(f"second_opinion unify call failed: {e}")
-            unified = f"(Failed to get unified response: {e})"
-
-    # Build combined result
-    combined = (
-        f"## Second Opinion from {reviewer_model}\n\n{review}"
-        f"\n\n---\n\n"
-        f"## {original_model}'s Response\n\n{unified}"
-    )
-
-    return {
-        "model": reviewer_model,
-        "response": combined,
-        "instruction": "Present these results to the user exactly as they are. Do NOT call second_opinion again. The user can continue the conversation from here.",
-    }
 
 
 async def do_create_session(content: str, session_id: Optional[str] = None, owner: Optional[str] = None) -> Dict:
@@ -418,7 +275,7 @@ async def do_create_session(content: str, session_id: Optional[str] = None, owne
         return {"error": "Session name cannot be empty"}
 
     try:
-        url, model, headers = _resolve_model(model_spec, owner=owner)
+        url, model, headers = await asyncio.to_thread(lambda: _resolve_model(model_spec, owner=owner))
     except ValueError as e:
         return {"error": str(e)}
 
@@ -595,13 +452,6 @@ async def do_send_to_session(content: str, session_id: Optional[str] = None, own
         return {"error": f"Failed to send to session: {e}"}
 
 
-async def stream_ai_tool(tool: str, content: str, session_id: Optional[str] = None, owner: Optional[str] = None):
-    """Dispatcher for streaming AI tools. Yields events as async generator."""
-    # Fallback: run non-streaming and yield final result
-    desc, result = await dispatch_ai_tool(tool, content, session_id, owner=owner)
-    yield {"_final": True, "desc": desc, "result": result}
-
-
 async def do_pipeline(content: str, session_id: Optional[str] = None, owner: Optional[str] = None) -> Dict:
     """Execute a multi-step pipeline where each model's output feeds the next.
 
@@ -656,7 +506,7 @@ async def do_pipeline(content: str, session_id: Optional[str] = None, owner: Opt
         if not model_spec or not instruction:
             return {"error": f"Step {i + 1}: both 'model' and 'instruction' are required"}
         try:
-            url, model, headers = _resolve_model(model_spec, owner=owner)
+            url, model, headers = await asyncio.to_thread(lambda: _resolve_model(model_spec, owner=owner))
             resolved.append((url, model, headers, instruction))
         except ValueError as e:
             return {"error": f"Step {i + 1}: {e}"}
@@ -1148,7 +998,7 @@ async def do_list_models(content: str, session_id: Optional[str] = None, owner: 
                 try:
                     models_url = build_models_url(base)
                     if models_url:
-                        r = httpx.get(models_url, headers=headers, timeout=5)
+                        r = await asyncio.to_thread(httpx.get, models_url, headers=headers, timeout=5)
                         r.raise_for_status()
                         data = r.json()
                         model_ids = [m.get("id") for m in (data.get("data") or []) if m.get("id")]
@@ -1354,7 +1204,7 @@ async def do_ui_control(content: str, session_id: Optional[str] = None, owner: O
 
         # Resolve the model to validate it exists
         try:
-            url, model_id, headers = _resolve_model(model_spec, owner=owner)
+            url, model_id, headers = await asyncio.to_thread(lambda: _resolve_model(model_spec, owner=owner))
         except ValueError as e:
             return {"error": str(e)}
 
@@ -1609,7 +1459,7 @@ async def do_generate_image(content: str, session_id: Optional[str] = None, owne
     if not model_spec:
         for candidate in ("gpt-image-1.5", "gpt-image-1", "dall-e-3"):
             try:
-                _resolve_model(candidate, owner=owner)
+                await asyncio.to_thread(lambda: _resolve_model(candidate, owner=owner))
                 model_spec = candidate
                 break
             except ValueError:
@@ -1634,7 +1484,7 @@ async def do_generate_image(content: str, session_id: Optional[str] = None, owne
                         if not _ibase.endswith("/v1"):
                             _ibase += "/v1"
                         try:
-                            _r = _req.get(_ibase + "/models", timeout=3)
+                            _r = await asyncio.to_thread(_req.get, _ibase + "/models", timeout=3)
                             _r.raise_for_status()
                             _mids = [m.get("id") for m in (_r.json().get("data") or []) if m.get("id")]
                             if _mids:
@@ -1651,7 +1501,7 @@ async def do_generate_image(content: str, session_id: Optional[str] = None, owne
 
     # Resolve the model to find the right endpoint
     try:
-        url, model_id, headers = _resolve_model(model_spec, owner=owner)
+        url, model_id, headers = await asyncio.to_thread(lambda: _resolve_model(model_spec, owner=owner))
     except ValueError:
         return {"error": f"No endpoint found with image model '{model_spec}'. "
                 "Configure an OpenAI-compatible endpoint with image generation support."}
