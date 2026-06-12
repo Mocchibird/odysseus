@@ -2,7 +2,7 @@
 // Admin-only: users, endpoints, MCP, RAG, embeddings, tokens, webhooks, features
 
 import uiModule from './ui.js';
-import settingsModule from './settings.js?v=400';
+import settingsModule from './settings.js?v=420';
 import { providerLogo } from './providers.js';
 import { sortModelObjects } from './modelSort.js';
 import { PROVIDER_DEVICE_FLOWS, formatDeviceFlowError, runProviderDeviceFlow } from './providerDeviceFlow.js';
@@ -1092,7 +1092,7 @@ function initEndpointForm() {
                 '<code class="adm-copilot-code">' + esc(start.user_code) + '</code>' +
                 '<button type="button" class="admin-btn-sm adm-device-auth-copy">Copy</button>' +
               '</div>' +
-              '<a class="admin-btn-add adm-copilot-auth" href="' + encodeURI(authUrl || '') + '" target="_blank" rel="noopener">' + esc(authLabel) + ' ↗</a>' +
+              '<a class="admin-btn-add adm-copilot-auth" href="' + encodeURI(authUrl || '') + '" target="_blank" rel="noopener">' + esc(authLabel) + ' <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-1px;"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg></a>' +
             '</div>';
           const copyBtn = status.querySelector('.adm-device-auth-copy');
           if (copyBtn) copyBtn.addEventListener('click', async () => {

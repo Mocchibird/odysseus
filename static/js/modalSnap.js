@@ -790,15 +790,6 @@ export function resumeDock(modal) {
   return true;
 }
 
-// Wire right-edge snap detection into a drag session. Call this once per
-// modal that should support docking. Returns an object the caller's drag
-// handler can poll: { hovering(): boolean, commit(): void, release(): void }.
-// The drag handler is responsible for calling onMove(clientX, clientY)
-// during mousemove and commit() at mouseup if hovering().
-export function makeRightDockController(modal, dockClass = 'modal-right-docked') {
-  return makeEdgeDockController(modal, 'right', dockClass);
-}
-
 // Read the current visible left-nav edge for snap detection. Use measured
 // geometry instead of CSS vars because the sidebar can auto-collapse during a
 // dock operation while --sidebar-w is still settling.

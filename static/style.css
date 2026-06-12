@@ -17874,10 +17874,8 @@ body.gallery-selecting .gallery-card-menu-btn,
     max-width: 100px;
     font-size: 11px;
     padding: 4px 6px;
-    /* Nudge down 2px to baseline with the search input (which carries a
-       2px down-shift via its wrapper). */
-    position: relative;
-    top: 2px;
+    /* No vertical nudge: the search wrapper's old 2px down-shift is gone, so
+       align-items:center now lines everything up on its own. */
   }
   .gallery-select-btn {
     padding: 6px 8px 8px;
@@ -37990,6 +37988,10 @@ body.theme-frosted .modal {
   padding: 10px 12px 8px;
 }
 .books-toolbar .books-search { flex: 1 1 auto; min-width: 0; }
+/* .notes-select-trigger ships a top:3px nudge for its Notes-search-bar home;
+   in this align-items:center row the nudge breaks centering against the 32px
+   search input (button sat 3px low). Neutralize it here only. */
+.books-toolbar .notes-select-trigger { top: 0; }
 .books-upload-slot:not(:empty) { padding: 0 12px 8px; flex-shrink: 0; }
 .books-list-scroll {
   flex: 1 1 auto;

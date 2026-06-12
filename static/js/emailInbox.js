@@ -519,7 +519,7 @@ function _createEmailItem(em) {
     : '';
 
   const spamTag = em.is_spam_verdict
-    ? `<span class="email-tag email-tag-spam" title="AI flagged as spam — click ✓ to unflag">spam <button class="email-spam-unflag" data-uid="${em.uid}" title="Not spam">\u2713</button></span>`
+    ? `<span class="email-tag email-tag-spam" title="AI flagged as spam — click the check to unflag">spam <button class="email-spam-unflag" data-uid="${em.uid}" title="Not spam"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-1px;"><polyline points="20 6 9 17 4 12"/></svg></button></span>`
     : '';
 
   const senderAddr = (em.from_address || '').toLowerCase();

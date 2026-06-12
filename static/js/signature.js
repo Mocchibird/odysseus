@@ -449,7 +449,8 @@ export function capture(opts = {}) {
         setLastUsed(out);
         close(out);
       } catch (e) {
-        alert('Failed to save signature: ' + e.message);
+        if (window.uiModule && window.uiModule.showError) window.uiModule.showError('Failed to save signature: ' + e.message);
+        else alert('Failed to save signature: ' + e.message);
         saveBtn.disabled = false;
       }
     };

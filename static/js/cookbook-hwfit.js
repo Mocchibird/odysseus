@@ -409,7 +409,7 @@ function _hwfitShowError(list, host, detail) {
   div.innerHTML =
     `<div style="color:var(--red);font-weight:600;">Couldn't scan ${where}</div>`
     + (detail ? `<div style="opacity:0.6;font-size:11px;max-width:340px;line-height:1.4;">${esc(detail)}</div>` : '')
-    + `<button type="button" class="hwfit-gpu-btn" id="hwfit-retry" style="margin-top:2px;height:26px;">↻ Retry</button>`;
+    + `<button type="button" class="hwfit-gpu-btn" id="hwfit-retry" style="margin-top:2px;height:26px;"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-1px;margin-right:3px;"><path d="M1 4v6h6"/><path d="M23 20v-6h-6"/><path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15"/></svg>Retry</button>`;
   list.innerHTML = '';
   list.appendChild(div);
   const rb = div.querySelector('#hwfit-retry');
@@ -1935,8 +1935,10 @@ export function _hwfitInit() {
     }
     // Model dir add/remove
     const addDirBtn = entry.querySelector('.cookbook-modeldir-add');
-    if (addDirBtn) addDirBtn.addEventListener('click', () => {
-      const raw = prompt('Model directory path:', '/data/models');
+    if (addDirBtn) addDirBtn.addEventListener('click', async () => {
+      const raw = (uiModule && uiModule.styledPrompt)
+        ? await uiModule.styledPrompt('Add a model directory on this server.', { title: 'Model directory', defaultValue: '/data/models', placeholder: '/path/to/models', confirmText: 'Add' })
+        : prompt('Model directory path:', '/data/models');
       if (!raw) return;
       const dir = raw.replaceAll('\u2715', '').replaceAll('\u2716', '').trim();
       if (!dir) return;

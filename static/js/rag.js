@@ -98,7 +98,7 @@ async function _deleteFile(filepath, displayName) {
     await loadPersonalDocs();
   } catch (e) {
     console.error('Delete failed:', e);
-    alert('Failed to delete file: ' + e.message);
+    uiModule.showError('Failed to delete file: ' + e.message);
   }
 }
 
@@ -132,7 +132,7 @@ export async function uploadRagFiles(fileList) {
   } catch (e) {
     console.error('Upload failed:', e);
     if (zone) zone.textContent = 'Drop files here or click to upload';
-    alert('Upload failed: ' + e.message);
+    uiModule.showError('Upload failed: ' + e.message);
   }
 }
 

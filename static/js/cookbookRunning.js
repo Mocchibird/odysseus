@@ -132,7 +132,7 @@ async function _openDownloadForGgufTask(task) {
       quant.dispatchEvent(new Event('change', { bubbles: true }));
     }
     try {
-      const hwfit = await import('./cookbook-hwfit.js?v=414');
+      const hwfit = await import('./cookbook-hwfit.js?v=420');
       if (typeof hwfit._hwfitFetch === 'function') hwfit._hwfitFetch(true);
     } catch {}
   }, 80);
@@ -2845,7 +2845,7 @@ async function _reconnectTask(el, task) {
               // Already auto-restarted once and stalled again — make the badge a
               // one-click retry (resumes from the cached partial files) so the
               // user doesn't have to dig into the ⋮ menu.
-              badge.textContent = `stalled ${mins}m ↻`;
+              badge.textContent = `stalled ${mins}m — retry`;
               badge.className = 'cookbook-task-status cookbook-task-error';
               badge.title = 'Click to retry — resumes where it stopped';
               badge.style.cursor = 'pointer';
@@ -3168,12 +3168,12 @@ async function _reconnectTask(el, task) {
               } else if (res && !res.ok) {
                 const body = await res.text().catch(() => '');
                 console.warn('Endpoint auto-add failed', res.status, body);
-                uiModule.showError(`Auto-register endpoint failed (${res.status}). Use ⋮ → Register endpoint to retry.`);
+                uiModule.showError(`Auto-register endpoint failed (${res.status}). Use the task's actions menu, then Register endpoint, to retry.`);
               }
             })
             .catch((e) => {
               console.warn('Endpoint auto-add error', e);
-              uiModule.showError(`Auto-register endpoint error: ${e.message || e}. Use ⋮ → Register endpoint to retry.`);
+              uiModule.showError(`Auto-register endpoint error: ${e.message || e}. Use the task's actions menu, then Register endpoint, to retry.`);
             })
             .finally(() => { task._endpointAddInFlight = false; });
           _updateTask(task.sessionId, { status: 'running' });
