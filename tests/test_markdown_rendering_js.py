@@ -237,3 +237,42 @@ def test_raw_quiz_reveal_button_with_skill_pseudo_call_is_repaired(node_availabl
     assert 'quiz-spoiler-markdown' not in html
     assert 'data-hidden-label="Answer"' in html
     assert '<span class="quiz-reveal-text">B) Die Erschaffung des Lichts</span>' in html
+
+
+def test_callout_info_renders_with_title_and_icon(node_available):
+    html = _run_markdown_case("> [!info] Heads up\n> body line one\n> body line two")
+
+    assert 'class="md-callout md-callout-note"' in html
+    assert 'class="md-callout-title"' in html
+    assert "<span>Heads up</span>" in html
+    assert "<svg" in html  # icon
+    assert "<p>body line one</p>" in html
+    assert "<p>body line two</p>" in html
+    # Not rendered as a plain blockquote.
+    assert "<blockquote>" not in html
+
+
+def test_callout_type_aliases_map_to_color_classes(node_available):
+    assert 'md-callout-warn' in _run_markdown_case("> [!warning] w")
+    assert 'md-callout-danger' in _run_markdown_case("> [!danger] d")
+    assert 'md-callout-tip' in _run_markdown_case("> [!tip] t")
+    assert 'md-callout-quote' in _run_markdown_case("> [!quote] q")
+    # Default title comes from the type when none is given.
+    assert "<span>Warning</span>" in _run_markdown_case("> [!warning]")
+
+
+def test_callout_foldable_renders_details(node_available):
+    collapsed = _run_markdown_case("> [!note]- Click to expand\n> hidden body")
+    assert "<details class=\"md-callout md-callout-note\"" in collapsed
+    assert " open>" not in collapsed  # '-' => collapsed
+    assert "<summary class=\"md-callout-title\">" in collapsed
+
+    expanded = _run_markdown_case("> [!note]+ Open by default\n> shown body")
+    assert "<details class=\"md-callout md-callout-note\" open>" in expanded
+
+
+def test_plain_blockquote_still_works(node_available):
+    html = _run_markdown_case("> just a quote\n> second line")
+    assert "<blockquote>" in html
+    assert "md-callout" not in html
+    assert "<p>just a quote</p>" in html

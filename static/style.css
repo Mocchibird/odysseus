@@ -4174,6 +4174,12 @@ body.bg-pattern-sparkles {
         margin-top: 4px;
         border-radius: 8px;
       }
+      /* …but the Theme section is a sticky footer (position:sticky; bottom:0)
+         pinned OVER the scrolling sidebar list — rounded top corners let the
+         list items show through at the corners as they scroll under it (the
+         "gap where other UI shows" bug). Square it off so it reads as a flush
+         footer bar. */
+      #theme-section { border-radius: 0; }
       /* Wave accent — slightly bigger on mobile */
       .section-header-flex h4::before {
         height: 18px;
@@ -7705,6 +7711,51 @@ button.hamburger {
   border-radius: 0 6px 6px 0;
 }
 .msg blockquote p { margin: 0.3em 0; }
+
+/* Markdown callouts / admonitions (`> [!info]`, `[!warning]`, …) rendered by
+   markdown.js. Accent + tint come from --callout-accent (set per type below
+   from existing theme color vars — no new colors). Works in every markdown
+   surface (chat, documents, notes), so kept unscoped. */
+.md-callout {
+  margin: 0.6em 0;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--callout-accent, var(--accent, var(--red)));
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--callout-accent, var(--accent, var(--red))) 8%, transparent);
+}
+.md-callout-title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-weight: 600;
+  color: var(--callout-accent, var(--accent, var(--red)));
+}
+.md-callout-title svg { flex-shrink: 0; }
+.md-callout-body { margin-top: 4px; }
+.md-callout-body > :first-child { margin-top: 0; }
+.md-callout-body > :last-child { margin-bottom: 0; }
+.md-callout-body p { margin: 0.3em 0; }
+/* Foldable variants (`[!info]-` collapsed, `[!info]+` expanded). */
+details.md-callout > summary { cursor: pointer; list-style: none; }
+details.md-callout > summary::-webkit-details-marker { display: none; }
+details.md-callout > summary::after {
+  content: "";
+  margin-left: auto;
+  width: 7px; height: 7px;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: rotate(45deg);
+  transition: transform 0.15s;
+  opacity: 0.6;
+}
+details.md-callout[open] > summary::after { transform: rotate(-135deg); }
+/* Per-type accent, mapped onto existing :root color vars. */
+.md-callout-note { --callout-accent: var(--color-brand-blue, var(--accent, var(--red))); }
+.md-callout-tip { --callout-accent: var(--color-success, var(--green)); }
+.md-callout-warn { --callout-accent: var(--accent-warm, var(--red)); }
+.md-callout-danger { --callout-accent: var(--color-danger, var(--red)); }
+.md-callout-quote { --callout-accent: var(--color-muted, var(--border)); }
 
 /* Horizontal rules */
 .msg hr {

@@ -498,6 +498,53 @@ export function processWithThinking(text) {
 /**
  * Convert markdown to HTML
  */
+// ---- Callout (admonition) metadata for `> [!type]` blocks ----
+const _coIco = (paths) => `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths}</svg>`;
+const _CO_INFO = _coIco('<circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/>');
+const _CO_PENCIL = _coIco('<path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/>');
+const _CO_FLAME = _coIco('<path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.07-2.14-.22-4.05 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.15.43-2.29 1-3a2.5 2.5 0 0 0 2.5 2.5z"/>');
+const _CO_CHECK = _coIco('<path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/>');
+const _CO_QUESTION = _coIco('<circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/>');
+const _CO_WARN = _coIco('<path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>');
+const _CO_X = _coIco('<circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/>');
+const _CO_ZAP = _coIco('<polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>');
+const _CO_BUG = _coIco('<rect x="8" y="6" width="8" height="14" rx="4"/><path d="M19 8l-3 2"/><path d="M5 8l3 2"/><path d="M19 16l-3-2"/><path d="M5 16l3-2"/>');
+const _CO_QUOTE = _coIco('<path d="M10 11H6a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1v6c0 2-1 3-3 4"/><path d="M20 11h-4a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1v6c0 2-1 3-3 4"/>');
+const _CO_LIST = _coIco('<line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/>');
+// type -> { cls (drives accent color, see .md-callout-* CSS), label, icon }
+const _CALLOUTS = {
+  note: { cls: 'note', label: 'Note', icon: _CO_PENCIL },
+  info: { cls: 'note', label: 'Info', icon: _CO_INFO },
+  todo: { cls: 'note', label: 'Todo', icon: _CO_LIST },
+  abstract: { cls: 'note', label: 'Abstract', icon: _CO_LIST },
+  summary: { cls: 'note', label: 'Summary', icon: _CO_LIST },
+  tldr: { cls: 'note', label: 'TL;DR', icon: _CO_LIST },
+  example: { cls: 'note', label: 'Example', icon: _CO_LIST },
+  tip: { cls: 'tip', label: 'Tip', icon: _CO_FLAME },
+  hint: { cls: 'tip', label: 'Hint', icon: _CO_FLAME },
+  important: { cls: 'tip', label: 'Important', icon: _CO_FLAME },
+  success: { cls: 'tip', label: 'Success', icon: _CO_CHECK },
+  check: { cls: 'tip', label: 'Success', icon: _CO_CHECK },
+  done: { cls: 'tip', label: 'Done', icon: _CO_CHECK },
+  question: { cls: 'warn', label: 'Question', icon: _CO_QUESTION },
+  help: { cls: 'warn', label: 'Help', icon: _CO_QUESTION },
+  faq: { cls: 'warn', label: 'FAQ', icon: _CO_QUESTION },
+  warning: { cls: 'warn', label: 'Warning', icon: _CO_WARN },
+  caution: { cls: 'warn', label: 'Caution', icon: _CO_WARN },
+  attention: { cls: 'warn', label: 'Attention', icon: _CO_WARN },
+  failure: { cls: 'danger', label: 'Failure', icon: _CO_X },
+  fail: { cls: 'danger', label: 'Failure', icon: _CO_X },
+  missing: { cls: 'danger', label: 'Missing', icon: _CO_X },
+  danger: { cls: 'danger', label: 'Danger', icon: _CO_ZAP },
+  error: { cls: 'danger', label: 'Error', icon: _CO_ZAP },
+  bug: { cls: 'danger', label: 'Bug', icon: _CO_BUG },
+  quote: { cls: 'quote', label: 'Quote', icon: _CO_QUOTE },
+  cite: { cls: 'quote', label: 'Quote', icon: _CO_QUOTE },
+};
+function _calloutMeta(type) {
+  return _CALLOUTS[type] || { cls: 'note', label: type.charAt(0).toUpperCase() + type.slice(1), icon: _CO_INFO };
+}
+
 export function mdToHtml(src, opts) {
   const allowedHtmlBlocks = [];
   const codeBlocks = [];
@@ -804,10 +851,32 @@ export function mdToHtml(src, opts) {
   s = s.replace(/(^|\n)((?:<uli\b[^>]*>[^\n]*<\/uli>(?:\n|$))+)/g, (_, prefix, block) =>
     `${prefix}<ul>${block.trim().replace(/<uli\b([^>]*)>/g, '<li$1>').replace(/<\/uli>/g, '</li>')}</ul>`);
 
-  // Blockquotes
-  s = s.replace(/^&gt; (.*)$/gm, '<bq>$1</bq>');
-  s = s.replace(/(?:^|\n)(<bq>[\s\S]*?)(?=\n(?!<bq>)|$)/g, m =>
-    `<blockquote>${m.trim().replace(/<\/?bq>/g, (t) => t === '<bq>' ? '<p>' : '</p>')}</blockquote>`);
+  // Blockquotes + callouts (Obsidian/GitHub admonitions: `> [!info] …`).
+  // `>` was escaped to `&gt;` above. Mark each quoted line (allow a bare
+  // `&gt;` blank line inside a quote so multi-paragraph quotes/callouts group).
+  s = s.replace(/^&gt;\s?(.*)$/gm, '<bq>$1</bq>');
+  s = s.replace(/(?:^|\n)(<bq>[\s\S]*?)(?=\n(?!<bq>)|$)/g, (m) => {
+    const lines = m.trim().split('\n').map((l) => l.replace(/^<bq>([\s\S]*)<\/bq>$/, '$1'));
+    // Callout? First line is `[!TYPE]`, optional fold marker (-/+), optional title.
+    const cm = (lines[0] || '').match(/^\s*\[!(\w+)\]([+-]?)\s*(.*)$/);
+    if (cm) {
+      const meta = _calloutMeta(cm[1].toLowerCase());
+      const fold = cm[2];                       // '' static | '-' collapsed | '+' expanded
+      const title = (cm[3] || '').trim() || meta.label;
+      const body = lines.slice(1).map((l) => (l.trim() ? `<p>${l}</p>` : '')).join('');
+      const titleHtml = `${meta.icon}<span>${title}</span>`;
+      const bodyHtml = body ? `<div class="md-callout-body">${body}</div>` : '';
+      const html = fold
+        ? `<details class="md-callout md-callout-${meta.cls}"${fold === '+' ? ' open' : ''}><summary class="md-callout-title">${titleHtml}</summary>${bodyHtml}</details>`
+        : `<div class="md-callout md-callout-${meta.cls}"><div class="md-callout-title">${titleHtml}</div>${bodyHtml}</div>`;
+      // Stash as an allowed-HTML block so the paragraph-wrap pass below (which
+      // would otherwise wrap a bare <div>/<details> line in <p>) skips it.
+      const ph = `___ALLOWED_HTML_${allowedHtmlBlocks.length}___`;
+      allowedHtmlBlocks.push(html);
+      return `\n${ph}`;
+    }
+    return `<blockquote>${lines.map((l) => `<p>${l}</p>`).join('')}</blockquote>`;
+  });
 
   // Paragraphs - but NOT for code block placeholders or allowed HTML
   s = s.replace(/^(?!<h\d|<ul>|<ol>|<li|<oli>|<\/li>|<pre>|<blockquote>|<bq>|<hr>|___CODE_BLOCK_|___ALLOWED_HTML_|___MATH_BLOCK_|___MERMAID_BLOCK_)([^\n]+)$/gm, '<p>$1</p>');
