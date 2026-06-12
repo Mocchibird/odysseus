@@ -1811,11 +1811,13 @@ function _openDetail(img) {
   `;
   detail.style.display = 'flex';
 
-  // 360°/VR video: add the manual "360" toggle to the player frame.
+  // 360°/VR video: the viewer self-detects whether this is actually a 360
+  // video (spherical metadata / aspect / filename) and only then reveals its
+  // toggle — ordinary videos keep the plain player.
   if (_isVideoUrl(img.url)) {
     const _vid = document.getElementById('gallery-detail-img');
     const _frame = _vid && _vid.closest('.gallery-detail-img-frame');
-    if (_vid && _frame) video360.attach(_vid, _frame);
+    if (_vid && _frame) video360.attach(_vid, _frame, { name: img.prompt || '', url: img.url });
   }
 
   document.getElementById('gallery-detail-back').addEventListener('click', () => {
