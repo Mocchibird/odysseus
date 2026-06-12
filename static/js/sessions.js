@@ -7,7 +7,7 @@ import markdownModule from './markdown.js';
 import chatRenderer from './chatRenderer.js';
 import { providerLogo } from './providers.js';
 import { initModelPicker, updateModelPicker } from './modelPicker.js';
-import themeModule from './theme.js?v=396';
+import themeModule from './theme.js?v=397';
 import spinnerModule from './spinner.js';
 
 const API_BASE = window.location.origin;

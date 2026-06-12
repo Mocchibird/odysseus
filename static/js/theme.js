@@ -442,13 +442,19 @@ export function applyBgPattern(pattern) {
 
 export function getSaved() {
   const obj = Storage.getJSON(LS_KEY, null);
+  // Built-in preset migrations below must NEVER clobber a USER's custom theme
+  // that happens to share a retired preset's name — otherwise activating a
+  // custom theme called e.g. 'iris' silently reverts to default on every
+  // reload (the colors survive in the custom list, but the active pointer is
+  // reset). So each migration is skipped when the name is in their customs.
+  const _customs = _loadCustomThemes();
   // Migration: 'chatgpt' preset was renamed to 'gpt'
-  if (obj && obj.name === 'chatgpt') obj.name = 'gpt';
+  if (obj && obj.name === 'chatgpt' && !_customs['chatgpt']) obj.name = 'gpt';
   // Migration: 'sakura' preset was renamed to 'ume'
-  if (obj && obj.name === 'sakura') obj.name = 'ume';
-  // Migration: the 'iris' preset was removed — reset to the stock default
-  // (colors too: the stored palette is the retired preset's, not a custom).
-  if (obj && obj.name === 'iris') {
+  if (obj && obj.name === 'sakura' && !_customs['sakura']) obj.name = 'ume';
+  // Migration: the built-in 'iris' preset was removed — reset to the stock
+  // default (its stored palette is the retired preset's, not a custom one).
+  if (obj && obj.name === 'iris' && !_customs['iris']) {
     const migrated = { name: DEFAULT_THEME, colors: THEMES[DEFAULT_THEME] };
     Storage.setJSON(LS_KEY, migrated);
     _syncToServer(migrated);
@@ -2087,26 +2093,14 @@ function _applySavedTheme(saved) {
 
 async function _initWithSync() {
   let saved = getSaved();
-  // No local theme yet → pull the server copy (cross-device / cleared-browser
-  // persistence) so a fresh browser still restores the user's theme.
-  if (!saved) {
-    const serverTheme = await _loadFromServer();
-    if (serverTheme && serverTheme.colors) {
-      if (serverTheme.name === 'sakura') serverTheme.name = 'ume';
-      // The 'iris' preset was removed — reset a synced copy to the default.
-      if (serverTheme.name === 'iris') {
-        serverTheme.name = DEFAULT_THEME;
-        serverTheme.colors = THEMES[DEFAULT_THEME];
-        _syncToServer(serverTheme);
-      }
-      Storage.setJSON(LS_KEY, serverTheme);
-      saved = serverTheme;
-    }
-  }
-  // Apply the persisted theme NOW — before, and independent of, the picker-UI
-  // wiring below. THIS is what guarantees a reload keeps the theme.
-  _applySavedTheme(saved);
-  // Also sync custom themes from server
+  // Apply a LOCAL theme right away — before, and independent of, the picker-UI
+  // wiring below (the inline <head> script already painted the colors; this
+  // re-applies font/density/bg effects). THIS is what keeps the theme on reload.
+  if (saved) _applySavedTheme(saved);
+
+  // Sync custom themes from the server. Done BEFORE the server theme-restore
+  // below so the retired-preset migration can tell a user's custom theme
+  // (e.g. one named 'iris') from the built-in preset that was removed.
   try {
     const res = await fetch('/api/prefs/custom-themes', { credentials: 'same-origin' });
     const data = await res.json();
@@ -2120,6 +2114,26 @@ async function _initWithSync() {
       if (changed) _saveCustomThemes(local);
     }
   } catch (e) { console.warn('Custom theme server sync failed:', e); }
+
+  // No local theme yet → pull the server copy (cross-device / cleared-browser
+  // persistence) so a fresh browser still restores the user's theme.
+  if (!saved) {
+    const _customs = _loadCustomThemes();
+    const serverTheme = await _loadFromServer();
+    if (serverTheme && serverTheme.colors) {
+      if (serverTheme.name === 'sakura' && !_customs['sakura']) serverTheme.name = 'ume';
+      // The built-in 'iris' preset was removed — reset a synced copy to the
+      // default, UNLESS 'iris' is one of the user's own custom themes.
+      if (serverTheme.name === 'iris' && !_customs['iris']) {
+        serverTheme.name = DEFAULT_THEME;
+        serverTheme.colors = THEMES[DEFAULT_THEME];
+        _syncToServer(serverTheme);
+      }
+      Storage.setJSON(LS_KEY, serverTheme);
+      saved = serverTheme;
+      _applySavedTheme(saved);
+    }
+  }
   // Picker UI is best-effort — a wiring error here must never undo the applied
   // theme above (it previously could, since this was the only apply path).
   try { initThemeUI(); } catch (e) { console.warn('Theme UI init failed:', e); }

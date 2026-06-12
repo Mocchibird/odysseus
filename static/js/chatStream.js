@@ -4,7 +4,7 @@
 
 import uiModule from './ui.js';
 import Storage from './storage.js';
-import themeModule from './theme.js?v=396';
+import themeModule from './theme.js?v=397';
 import markdownModule from './markdown.js';
 import sessionModule from './sessions.js';
 

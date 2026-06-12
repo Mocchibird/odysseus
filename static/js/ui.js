@@ -4,7 +4,7 @@
  * UI utilities for toasts, modals, scrolling, and user feedback
  */
 
-import themeModule from './theme.js?v=396';
+import themeModule from './theme.js?v=397';
 import * as Modals from './modalManager.js';
 import spinnerModule from './spinner.js';
 import { registerMenuDismiss, dismissTopMenu, dismissOrRemove } from './escMenuStack.js';
