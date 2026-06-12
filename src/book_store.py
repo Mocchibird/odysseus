@@ -66,10 +66,6 @@ def kind_of(filename: str) -> Optional[str]:
     return {".pdf": "pdf", ".epub": "epub"}.get(os.path.splitext(filename or "")[1].lower())
 
 
-def is_book(filename: str) -> bool:
-    return kind_of(filename) is not None
-
-
 def _book_dict(row) -> dict:
     """Map a Book row to a book dict. The Books API identifier is the Book id,
     carried as both `id` and `path` (the frontend passes a book's `path` to

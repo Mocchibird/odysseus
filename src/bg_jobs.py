@@ -259,10 +259,6 @@ def get(job_id: str) -> Optional[Dict[str, Any]]:
     return rec
 
 
-def list_for_session(session_id: str) -> List[Dict[str, Any]]:
-    return [r for r in refresh().values() if r.get("session_id") == session_id]
-
-
 def result_text(rec: Dict[str, Any]) -> str:
     """Human/agent-readable summary of a finished job, for the follow-up."""
     out = _read_output(rec)

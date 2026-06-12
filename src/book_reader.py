@@ -35,17 +35,6 @@ def save_uploaded_book(owner: str | None, filename: str, content: bytes, *, mime
     return book_store.add_book(owner, filename, content, mime=mime)
 
 
-def index_book(owner: str | None, kb_id: str) -> dict:
-    """No-op: adding a book already ingests it into the Knowledge base (text
-    extracted + RAG-indexed). Kept so the upload route's background task is valid."""
-    return book_store.get_book(owner, kb_id) or {"id": kb_id, "indexed": True}
-
-
-def get_metadata(owner: str | None, kb_id: str, *, missing_ok: bool = False) -> dict:
-    b = book_store.get_book(owner, kb_id)
-    return {"book_id": kb_id, "path": kb_id, "title": (b or {}).get("title") or ""}
-
-
 def open_book(owner: str | None, kb_id: str) -> dict:
     b = _require_book(owner, kb_id)
     if b["kind"] == "epub":

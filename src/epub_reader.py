@@ -286,12 +286,3 @@ def read_epub_chapter(owner: str | None, kb_id: str, chapter_index: int = 0) -> 
         "text_excerpt": text[:1200],
         "word_count": len(re.findall(r"\w+", text)),
     }
-
-
-def parse_epub(owner: str | None, rel_path: str) -> dict:
-    book = parse_epub_toc(owner, rel_path)
-    book["chapters"] = [
-        read_epub_chapter(owner, book["path"], chapter.get("index", idx))
-        for idx, chapter in enumerate(book.get("chapters") or [])
-    ]
-    return book

@@ -23,7 +23,6 @@ itself wasn't confident about.
 """
 from __future__ import annotations
 
-import asyncio
 import logging
 import re
 from typing import Any, Dict, List, Optional, Tuple
@@ -424,49 +423,6 @@ async def escalate_and_learn(
     except Exception as e:
         logger.warning(f"skill save raised: {e}")
     return None
-
-
-def maybe_escalate(
-    *,
-    student_endpoint_url: str,
-    mode: str,
-    user_request: str,
-    tool_results: List[Dict[str, Any]],
-    agent_reply: str,
-    owner: Optional[str] = None,
-) -> Optional[asyncio.Task]:
-    """Fire-and-forget entrypoint called by the agent loop end-of-turn.
-
-    Returns the created asyncio.Task (so tests can await it) or None
-    if escalation didn't fire. Safe to call unconditionally — does
-    its own gating.
-    """
-    # Gate 1: only in agent mode.
-    if mode != "agent":
-        return None
-
-    # Gate 2: feature is enabled AND a teacher endpoint is configured.
-    # (No self-hosted-only gate — users run cheap cloud students like
-    # deepseek-v4-flash with a SOTA teacher; the toggle is the control.)
-    try:
-        from src.settings import get_setting
-        if not get_setting("teacher_enabled", False):
-            return None
-        if not (get_setting("teacher_model", "") or "").strip():
-            return None
-    except Exception:
-        return None
-
-    # Gate 3: regex eval — only escalate on detected failure.
-    status, reason = evaluate_turn_regex(tool_results, agent_reply)
-    if status != "failure":
-        return None
-
-    # Fire async — don't block the user's chat.
-    return asyncio.create_task(
-        escalate_and_learn(user_request, tool_results, agent_reply, reason or "", owner),
-        name="teacher_escalation",
-    )
 
 
 # ── Inline teacher takeover (visible in chat stream) ───────────────

@@ -277,24 +277,6 @@ def which_tool(name: str) -> Optional[str]:
     return None
 
 
-def run_script_argv(script_path) -> List[str]:
-    """argv to execute a shell *script file*.
-
-    Prefers bash (so existing ``.sh`` wrappers work verbatim, including on
-    Windows via Git Bash). On Windows with no bash available, falls back to
-    ``cmd.exe /c`` — simple commands still run, but bash-specific syntax won't.
-    Callers that need guaranteed bash should check :func:`has_bash` first and
-    surface a clear "install Git Bash" message.
-    """
-    bash = find_bash()
-    if bash:
-        return [bash, str(script_path)]
-    if IS_WINDOWS:
-        comspec = os.environ.get("ComSpec", "cmd.exe")
-        return [comspec, "/c", str(script_path)]
-    return ["sh", str(script_path)]
-
-
 def is_wsl() -> bool:
     """True if running inside Windows Subsystem for Linux (WSL)."""
     import sys

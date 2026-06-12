@@ -232,19 +232,6 @@ def _streak_from_days(done_days: set, today: str) -> int:
     return streak
 
 
-def habit_streak(owner: str, habit_id: int) -> int:
-    owner = _owner(owner)
-    with _session() as db:
-        if not _owned_habit(db, owner, habit_id):
-            return 0
-        done_days = {
-            r.day for r in db.query(HabitLog.day)
-            .filter(HabitLog.habit_id == habit_id, HabitLog.done == True)  # noqa: E712
-            .all()
-        }
-    return _streak_from_days(done_days, _today())
-
-
 def habit_heatmap(owner: str, habit_id: int, days: int = 365) -> Dict[str, Any]:
     """GitHub-style data: a flat list of {day, done} from start..today."""
     owner = _owner(owner)
