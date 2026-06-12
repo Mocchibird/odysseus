@@ -2060,9 +2060,36 @@ const themeModule = { initThemeUI, togglePopup, closePopup, makeDraggable,
 export default themeModule;
 
 // Init on DOM ready, with server-side sync fallback
+// Apply a persisted theme object (colors + font/density + background pattern &
+// effects) to the document. Deliberately INDEPENDENT of the theme-picker UI:
+// initThemeUI() early-returns when #themeGrid is absent and does heavy DOM
+// wiring that can throw before its own apply calls, so all boot-time theming
+// used to ride on it. This runs the apply directly so a reload always restores
+// the FULL theme — not just the color subset the inline <head> FOUC script
+// sets. Mirrors the swatch-click / boot logic in initThemeUI. Each step is
+// isolated so one failure can't skip the rest.
+function _applySavedTheme(saved) {
+  if (!saved || !saved.colors) return;
+  try { applyColors(saved.colors); } catch (e) { console.warn('applyColors failed', e); }
+  try {
+    applyFontDensity(saved.font || DEFAULT_FONT, saved.density || DEFAULT_DENSITY);
+    applyBgEffectColor(saved.bgEffectColor || THEME_DEFAULT_EFFECT_COLOR[saved.name] || '');
+    applyBgEffectIntensity(
+      saved.bgEffectIntensity !== undefined
+        ? saved.bgEffectIntensity
+        : (THEME_DEFAULT_INTENSITY[saved.name] !== undefined ? THEME_DEFAULT_INTENSITY[saved.name] : 1)
+    );
+    applyBgEffectSize(saved.bgEffectSize !== undefined ? saved.bgEffectSize : 1);
+    applyFrostedGlass(saved.frosted !== undefined ? !!saved.frosted : (THEME_DEFAULT_FROSTED[saved.name] === true));
+    applyBgPattern(saved.bgPattern || THEME_DEFAULT_PATTERN[saved.name] || 'none');
+  } catch (e) { console.warn('theme background/font apply failed', e); }
+}
+
 async function _initWithSync() {
-  // If no local theme, try loading from server (cross-device sync)
-  if (!getSaved()) {
+  let saved = getSaved();
+  // No local theme yet → pull the server copy (cross-device / cleared-browser
+  // persistence) so a fresh browser still restores the user's theme.
+  if (!saved) {
     const serverTheme = await _loadFromServer();
     if (serverTheme && serverTheme.colors) {
       if (serverTheme.name === 'sakura') serverTheme.name = 'ume';
@@ -2073,9 +2100,12 @@ async function _initWithSync() {
         _syncToServer(serverTheme);
       }
       Storage.setJSON(LS_KEY, serverTheme);
-      applyColors(serverTheme.colors);
+      saved = serverTheme;
     }
   }
+  // Apply the persisted theme NOW — before, and independent of, the picker-UI
+  // wiring below. THIS is what guarantees a reload keeps the theme.
+  _applySavedTheme(saved);
   // Also sync custom themes from server
   try {
     const res = await fetch('/api/prefs/custom-themes', { credentials: 'same-origin' });
@@ -2090,7 +2120,9 @@ async function _initWithSync() {
       if (changed) _saveCustomThemes(local);
     }
   } catch (e) { console.warn('Custom theme server sync failed:', e); }
-  initThemeUI();
+  // Picker UI is best-effort — a wiring error here must never undo the applied
+  // theme above (it previously could, since this was the only apply path).
+  try { initThemeUI(); } catch (e) { console.warn('Theme UI init failed:', e); }
 }
 
 if (document.readyState === 'loading') {

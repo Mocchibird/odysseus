@@ -7,7 +7,7 @@ import { EYE_OPEN, EYE_CLOSED, ICON_DICE, ICON_PARALLEL, ICON_SEQUENTIAL, SAVE_I
 import { _clearProbeWaves } from './probe.js';
 import uiModule from '../ui.js';
 import spinnerModule from '../spinner.js';
-import themeModule from '../theme.js?v=395';
+import themeModule from '../theme.js?v=396';
 
 const escapeHtml = uiModule.esc;
 

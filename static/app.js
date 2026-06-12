@@ -37,7 +37,7 @@ import settingsModule from './js/settings.js?v=420';
 import './js/modalManager.js';
 // Desktop window tiling — drag a modal near an edge/corner to snap.
 import './js/tileManager.js';
-import themeModule from './js/theme.js?v=395';
+import themeModule from './js/theme.js?v=396';
 // IMPORTANT: import cookbook.js with NO ?v= query — the same plain specifier
 // every other importer (cookbook-hwfit.js / cookbook-diagnosis.js) uses. A query
 // mismatch makes the browser load cookbook.js twice as separate modules (two
