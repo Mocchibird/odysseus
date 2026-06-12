@@ -4174,12 +4174,11 @@ body.bg-pattern-sparkles {
         margin-top: 4px;
         border-radius: 8px;
       }
-      /* …but the Theme section is a sticky footer (position:sticky; bottom:0)
-         pinned OVER the scrolling sidebar list — rounded top corners let the
-         list items show through at the corners as they scroll under it (the
-         "gap where other UI shows" bug). Square it off so it reads as a flush
-         footer bar. */
-      #theme-section { border-radius: 0; }
+      /* …but the Theme section is a STATIC footer outside the scroller, flush
+         above the user bar — no rounding and no top margin, or a gap opens
+         above it (and previously, when it was sticky, list items bled through
+         the rounded corners — the "gap where other UI shows" bug). */
+      #theme-section { border-radius: 0; margin-top: 0; }
       /* Wave accent — slightly bigger on mobile */
       .section-header-flex h4::before {
         height: 18px;

@@ -214,7 +214,7 @@
       }, { once: true });
     })();
   </script>
-  <link rel="stylesheet" href="/static/style.css?v=411">
+  <link rel="stylesheet" href="/static/style.css?v=412">
   <link rel="modulepreload" href="/static/app.js?v=418">
   <link rel="modulepreload" href="/static/js/chat.js?v=420">
   <link rel="modulepreload" href="/static/js/ui.js">
@@ -971,19 +971,24 @@
         </div>
       </div>
 
-      <div class="section" id="theme-section" style="margin-top:auto;position:sticky;bottom:0;z-index:2;background:var(--sidebar-bg,var(--panel));">
-        <div class="list-item" id="tool-theme-btn" style="padding:8px 8px;">
-          <svg class="sidebar-action-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-            stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
-            style="flex-shrink:0;">
-            <circle cx="12" cy="12" r="10"/>
-            <path d="M12 2a7 7 0 0 0 0 20 4 4 0 0 1 0-8 4 4 0 0 0 0-8"/>
-            <circle cx="8" cy="9" r="1.5" fill="currentColor"/>
-            <circle cx="15" cy="14" r="1.5" fill="currentColor"/>
-            <circle cx="9" cy="15" r="1.5" fill="currentColor"/>
-          </svg>
-          <span class="grow">Theme</span>
-        </div>
+    </div>
+    <!-- Theme button is a STATIC footer outside the scrolling .sidebar-inner so
+         it sits flush above the user bar with no gap — when it was a
+         position:sticky child of the scroller, the scroller's padding-bottom
+         left a transparent strip beneath it through which scrolled nav items
+         (e.g. Compare) bled through. -->
+    <div class="section" id="theme-section" style="flex-shrink:0;">
+      <div class="list-item" id="tool-theme-btn" style="padding:8px 8px;">
+        <svg class="sidebar-action-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+          stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+          style="flex-shrink:0;">
+          <circle cx="12" cy="12" r="10"/>
+          <path d="M12 2a7 7 0 0 0 0 20 4 4 0 0 1 0-8 4 4 0 0 0 0-8"/>
+          <circle cx="8" cy="9" r="1.5" fill="currentColor"/>
+          <circle cx="15" cy="14" r="1.5" fill="currentColor"/>
+          <circle cx="9" cy="15" r="1.5" fill="currentColor"/>
+        </svg>
+        <span class="grow">Theme</span>
       </div>
     </div>
     <div class="sidebar-user-bar" id="sidebar-user-bar">
