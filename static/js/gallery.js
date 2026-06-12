@@ -211,6 +211,10 @@ async function _bulkUpload(filesOrItems, fallbackAlbumId) {
   // retried; their reason is surfaced in the final summary instead.
   const CONCURRENCY = 3;
   const MAX_ATTEMPTS = 3;
+  // Files past this go through the raw-body streaming endpoint (vs multipart)
+  // AND upload one-at-a-time (below) — same threshold for both, since the
+  // big-file concerns (memory, /tmp spool, bandwidth contention) coincide.
+  const RAW_STREAM_BYTES = 64 * 1024 * 1024;
   let cursor = 0;
   const failReasons = [];
 
@@ -220,15 +224,31 @@ async function _bulkUpload(filesOrItems, fallbackAlbumId) {
   const _timeoutFor = (file) => Math.max(120000, Math.ceil((file.size || 0) / (1024 * 1024)) * 8000);
 
   async function _uploadOnce(it) {
-    const fd = new FormData();
-    fd.append('file', it.file);
-    if (it.albumId) fd.append('album_id', it.albumId);
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), _timeoutFor(it.file));
     try {
-      const res = await fetch(`${API_BASE}/api/gallery/upload`, {
-        method: 'POST', body: fd, credentials: 'same-origin', signal: ctrl.signal,
-      });
+      let res;
+      if ((it.file.size || 0) > RAW_STREAM_BYTES) {
+        // Large files stream as a RAW body (the browser pipes the File from
+        // disk without buffering it in JS memory) with metadata in the query
+        // string. The server writes request.stream() straight to disk — no
+        // multipart envelope, no /tmp spool — so a 10 GB video uploads with
+        // flat memory on both ends and the body size == file size (fits a
+        // proxy body cap exactly, no multipart overhead).
+        const qs = new URLSearchParams({ filename: it.file.name || 'upload' });
+        if (it.albumId) qs.set('album_id', it.albumId);
+        res = await fetch(`${API_BASE}/api/gallery/upload?${qs.toString()}`, {
+          method: 'POST', body: it.file, credentials: 'same-origin', signal: ctrl.signal,
+          headers: { 'Content-Type': 'application/octet-stream' },
+        });
+      } else {
+        const fd = new FormData();
+        fd.append('file', it.file);
+        if (it.albumId) fd.append('album_id', it.albumId);
+        res = await fetch(`${API_BASE}/api/gallery/upload`, {
+          method: 'POST', body: fd, credentials: 'same-origin', signal: ctrl.signal,
+        });
+      }
       let data = null;
       try { data = await res.json(); } catch (_) { /* non-JSON (e.g. a proxy error page) */ }
       if (res.ok && data) {
@@ -274,9 +294,8 @@ async function _bulkUpload(filesOrItems, fallbackAlbumId) {
   // Big files (GB videos) upload ONE at a time after the small ones — three
   // parallel multi-GB streams would compete for upstream bandwidth and disk,
   // tripping timeouts; small files still get the concurrency win.
-  const LARGE_BYTES = 64 * 1024 * 1024;
-  const smallItems = items.filter(it => ((it.file && it.file.size) || 0) <= LARGE_BYTES);
-  const largeItems = items.filter(it => ((it.file && it.file.size) || 0) > LARGE_BYTES);
+  const smallItems = items.filter(it => ((it.file && it.file.size) || 0) <= RAW_STREAM_BYTES);
+  const largeItems = items.filter(it => ((it.file && it.file.size) || 0) > RAW_STREAM_BYTES);
   async function worker() {
     while (true) {
       const idx = cursor++;

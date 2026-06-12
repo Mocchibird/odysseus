@@ -22,7 +22,7 @@ REPO = Path(__file__).resolve().parent.parent
 _LIMITS = {
     # Raised 100 MB → 4 GiB when gallery_upload switched to chunked streaming
     # (phone/camera videos are GB-scale; the cap now guards disk, not RAM).
-    "GALLERY_UPLOAD_MAX_BYTES": ("ODYSSEUS_GALLERY_UPLOAD_MAX_BYTES", 4 * 1024 * 1024 * 1024),
+    "GALLERY_UPLOAD_MAX_BYTES": ("ODYSSEUS_GALLERY_UPLOAD_MAX_BYTES", 10 * 1024 * 1024 * 1024),
     "GALLERY_TRANSFORM_UPLOAD_MAX_BYTES": ("ODYSSEUS_GALLERY_TRANSFORM_UPLOAD_MAX_BYTES", 25 * 1024 * 1024),
     "MEMORY_IMPORT_MAX_BYTES": ("ODYSSEUS_MEMORY_IMPORT_MAX_BYTES", 10 * 1024 * 1024),
     "PERSONAL_UPLOAD_MAX_BYTES": ("ODYSSEUS_PERSONAL_UPLOAD_MAX_BYTES", 25 * 1024 * 1024),

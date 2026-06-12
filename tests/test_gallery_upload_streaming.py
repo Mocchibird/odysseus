@@ -19,7 +19,11 @@ import pytest
 from fastapi import HTTPException
 from starlette.datastructures import UploadFile
 
-from src.upload_limits import UPLOAD_STREAM_CHUNK, stream_upload_to_path
+from src.upload_limits import (
+    UPLOAD_STREAM_CHUNK,
+    stream_upload_to_path,
+    stream_request_to_path,
+)
 
 REPO = Path(__file__).resolve().parent.parent
 
@@ -49,6 +53,48 @@ def test_stream_over_limit_raises_413_and_removes_partial(tmp_path):
         )
     assert exc.value.status_code == 413
     assert not dest.exists(), "partial file must be cleaned up on overflow"
+
+
+class _FakeStreamRequest:
+    """Minimal stand-in for a Starlette Request exposing async stream()."""
+    def __init__(self, data: bytes, chunk: int):
+        self._data = data
+        self._chunk = chunk
+
+    async def stream(self):
+        for i in range(0, len(self._data), self._chunk):
+            yield self._data[i:i + self._chunk]
+
+
+def test_stream_request_writes_and_hashes(tmp_path):
+    # Raw-body path (large-file lane): single copy straight to disk.
+    data = bytes(range(256)) * 5000  # ~1.28 MB across several chunks
+    dest = tmp_path / "big.mp4"
+    digest, total = asyncio.run(
+        stream_request_to_path(_FakeStreamRequest(data, 64 * 1024), dest, limit=len(data) + 1)
+    )
+    assert total == len(data)
+    assert digest == hashlib.sha256(data).hexdigest()
+    assert dest.read_bytes() == data
+
+
+def test_stream_request_over_limit_413_and_cleanup(tmp_path):
+    data = b"y" * (512 * 1024)
+    dest = tmp_path / "big.mp4"
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(stream_request_to_path(_FakeStreamRequest(data, 64 * 1024), dest, limit=100 * 1024))
+    assert exc.value.status_code == 413
+    assert not dest.exists(), "partial file must be cleaned up on overflow"
+
+
+def test_gallery_upload_has_raw_stream_path():
+    # Large uploads bypass form() and stream the raw body to disk.
+    src = (REPO / "routes" / "gallery_routes.py").read_text(encoding="utf-8")
+    start = src.index("async def gallery_upload")
+    end = src.index("@router.post", start + 1)
+    body = src[start:end]
+    assert "stream_request_to_path(" in body
+    assert 'ctype.startswith("multipart/")' in body
 
 
 def test_gallery_upload_streams_instead_of_buffering():

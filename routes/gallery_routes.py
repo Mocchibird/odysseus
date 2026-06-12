@@ -17,6 +17,7 @@ from src.auth_helpers import get_current_user, owner_filter, require_privilege
 from src.upload_limits import (
     read_upload_limited,
     stream_upload_to_path,
+    stream_request_to_path,
     GALLERY_UPLOAD_MAX_BYTES,
     GALLERY_TRANSFORM_UPLOAD_MAX_BYTES,
 )
@@ -121,16 +122,31 @@ def setup_gallery_routes() -> APIRouter:
         import uuid
         from pathlib import Path
 
-        form = await request.form()
-        file = form.get("file")
-        if not file or not hasattr(file, 'filename'):
-            raise HTTPException(400, "No file provided")
-
         user = get_current_user(request)
-        album_id = form.get("album_id") or None
+        ctype = request.headers.get("content-type", "")
+        _file = None
+        if ctype.startswith("multipart/"):
+            # Normal-sized uploads: standard multipart form. Starlette keeps the
+            # part in a ~1 MiB in-memory spool (rolls to a temp file only past
+            # that), so memory stays bounded for typical photos.
+            form = await request.form()
+            _file = form.get("file")
+            if not _file or not hasattr(_file, 'filename'):
+                raise HTTPException(400, "No file provided")
+            orig_filename = _file.filename
+            album_id = form.get("album_id") or None
+        else:
+            # Large uploads (the GB-scale video lane): the client streams the raw
+            # file as the request body with metadata in the query string. We pipe
+            # request.stream() straight to disk (one write, no /tmp spool, flat
+            # memory) — letting form() buffer/spool a 10 GB body and then copying
+            # it again is double the disk I/O on a spinning NAS, and the temp
+            # spool can fill the container or eat RAM.
+            orig_filename = request.query_params.get("filename") or "upload"
+            album_id = request.query_params.get("album_id") or None
 
         # Validate the extension BEFORE touching disk — cheap reject.
-        ext = file.filename.rsplit(".", 1)[-1].lower() if "." in file.filename else "png"
+        ext = orig_filename.rsplit(".", 1)[-1].lower() if "." in orig_filename else "png"
         VIDEO_EXTS = {"mp4", "mov", "webm", "mkv", "m4v"}
         IMAGE_EXTS = {"png", "jpg", "jpeg", "webp", "gif"}
         if ext not in VIDEO_EXTS and ext not in IMAGE_EXTS:
@@ -157,9 +173,14 @@ def setup_gallery_routes() -> APIRouter:
         # videos an OOM hazard on a shared box. The leading dot keeps the temp
         # name from ever matching the served-filename pattern.
         tmp_path = img_dir / f".upload-{uuid.uuid4().hex[:12]}.tmp"
-        file_hash, total_size = await stream_upload_to_path(
-            file, tmp_path, GALLERY_UPLOAD_MAX_BYTES, "Gallery upload"
-        )
+        if _file is not None:
+            file_hash, total_size = await stream_upload_to_path(
+                _file, tmp_path, GALLERY_UPLOAD_MAX_BYTES, "Gallery upload"
+            )
+        else:
+            file_hash, total_size = await stream_request_to_path(
+                request, tmp_path, GALLERY_UPLOAD_MAX_BYTES, "Gallery upload"
+            )
 
         try:
             # Extract EXIF for images only — PIL can't parse video containers
@@ -168,7 +189,7 @@ def setup_gallery_routes() -> APIRouter:
             exif = {} if is_video else await asyncio.to_thread(
                 lambda: _extract_exif(tmp_path.read_bytes())
             )
-            original_name = file.filename.rsplit(".", 1)[0] if "." in file.filename else file.filename
+            original_name = orig_filename.rsplit(".", 1)[0] if "." in orig_filename else orig_filename
 
             db = SessionLocal()
             try:
