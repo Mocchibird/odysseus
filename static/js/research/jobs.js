@@ -37,6 +37,14 @@ export function init(apiBase) {
   // agent-started jobs never appeared until a page reload.
   if (_activePollInterval) clearInterval(_activePollInterval);
   _activePollInterval = setInterval(() => { _reconnectActive(); }, 12000);
+  // Catch up immediately when the tab becomes visible again — the poll
+  // itself is gated on document.hidden so hidden tabs stop hitting the API.
+  if (!init._visWired) {
+    init._visWired = true;
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') _reconnectActive();
+    });
+  }
 }
 
 // Allow an immediate adopt when the chat stream signals a new research
@@ -47,6 +55,9 @@ export function adoptSession(sessionId) {
 }
 
 async function _reconnectActive() {
+  // Hidden tabs (background PWA windows) shouldn't poll the server 5×/min;
+  // the visibilitychange hook in init() refreshes the moment we're visible.
+  if (document.hidden) return;
   try {
     // Reconnect to running tasks
     const res = await fetch(`${_apiBase}/api/research/active`, { credentials: 'same-origin' });

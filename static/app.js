@@ -12,9 +12,9 @@ import modelsModule from './js/models.js';
 import ragModule from './js/rag.js';
 import presetsModule from './js/presets.js';
 import searchModule from './js/search.js';
-import chatModule from './js/chat.js';
+import chatModule from './js/chat.js?v=419';
 import compareModule from './js/compare/index.js';
-import documentModule from './js/document.js?v=412';
+import documentModule from './js/document.js?v=419';
 import searchChatModule from './js/search-chat.js';
 import { makeWindowDraggable } from './js/windowDrag.js';
 import markdownModule from './js/markdown.js';
@@ -23,11 +23,11 @@ import sessionModule from './js/sessions.js';
 import memoryModule from './js/memory.js';
 import voiceRecorderModule from './js/voiceRecorder.js';
 import censorModule from './js/censor.js';
-import galleryModule from './js/gallery.js?v=418';
+import galleryModule from './js/gallery.js?v=419';
 import tasksModule from './js/tasks.js';
 import calendarModule from './js/calendar.js';
 import notesModule from './js/notes.js?v=402';
-import booksModule from './js/books.js?v=396';
+import booksModule from './js/books.js?v=419';
 import healthModule from './js/health.js?v=397';
 import pingsModule from './js/pings.js?v=395';
 import todayModule from './js/today.js?v=395';
@@ -954,7 +954,12 @@ function initializeEventListeners() {
   // Consolidated unread indicator on the rail bell + periodic refresh.
   if (pingsModule && pingsModule.refreshUnreadBadge) {
     pingsModule.refreshUnreadBadge();
-    setInterval(() => pingsModule.refreshUnreadBadge(), 60 * 1000);
+    // Gate the periodic refresh on visibility (the fn itself stays callable
+    // directly after user actions); catch up when the tab is shown again.
+    setInterval(() => { if (!document.hidden) pingsModule.refreshUnreadBadge(); }, 60 * 1000);
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') pingsModule.refreshUnreadBadge();
+    });
   }
 
   // Calendar tool button
@@ -984,7 +989,10 @@ function initializeEventListeners() {
   // Refresh notes due-reminder badge on load and every 5 minutes
   if (notesModule && notesModule.refreshDueBadge) {
     notesModule.refreshDueBadge();
-    setInterval(() => notesModule.refreshDueBadge(), 5 * 60 * 1000);
+    setInterval(() => { if (!document.hidden) notesModule.refreshDueBadge(); }, 5 * 60 * 1000);
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') notesModule.refreshDueBadge();
+    });
   }
 
   // URL-based panel routing — bookmark /calendar, /notes, /cookbook etc
@@ -3578,8 +3586,18 @@ function startOdysseusApp() {
     _show('rail-chats', !!hasChatNotif);
   }
   window._syncRailDynamic = _syncRailDynamic;
-  // Sync periodically and on key events
-  setInterval(_syncRailDynamic, 1000);
+  // Event-driven sync: a class-attribute observer catches every rail-notify
+  // toggle instantly (sessions.js / cookbookRunning.js write the class
+  // directly), overflow-state-change covers doc-panel open/close, and a slow
+  // hidden-gated tick remains as a cannot-break backstop for any untracked
+  // path. Replaces a 1 Hz forever-interval that did DOM reads/writes every
+  // second — pure idle CPU on a shared box.
+  const _railObs = new MutationObserver(_syncRailDynamic);
+  const _railChatsEl = el('rail-chats');
+  if (_railChatsEl) _railObs.observe(_railChatsEl, { attributes: true, attributeFilter: ['class'] });
+  const _docIndEl = el('doc-indicator-btn');
+  if (_docIndEl) _railObs.observe(_docIndEl, { attributes: true, attributeFilter: ['class'] });
+  setInterval(() => { if (!document.hidden) _syncRailDynamic(); }, 10000);
   document.addEventListener('overflow-state-change', _syncRailDynamic);
 
   const sidebarSearchBtn = el('sidebar-search-btn');

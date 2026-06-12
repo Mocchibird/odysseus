@@ -2658,6 +2658,9 @@ export function isTasksOpen() { return _open; }
 let _notifInterval = null;
 
 async function _pollTaskNotifications() {
+  // Skip while hidden — the server queues notifications, so they surface on
+  // the next visible poll and idle background tabs stay network-quiet.
+  if (document.hidden) return;
   try {
     const res = await fetch(`${API_BASE}/api/tasks/notifications`, { credentials: 'same-origin' });
     if (!res.ok) return;
@@ -2693,6 +2696,12 @@ async function _pollTaskNotifications() {
 function startNotificationPolling() {
   if (_notifInterval) return;
   _notifInterval = setInterval(_pollTaskNotifications, 30000);
+  if (!startNotificationPolling._visWired) {
+    startNotificationPolling._visWired = true;
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') _pollTaskNotifications();
+    });
+  }
 }
 
 function stopNotificationPolling() {

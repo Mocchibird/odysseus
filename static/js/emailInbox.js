@@ -189,9 +189,13 @@ function _bindEvents() {
     });
   }
 
-  // Initial unread count check, refresh every 60s
+  // Initial unread count check, refresh every 60s (skipped while the tab is
+  // hidden; the visibilitychange hook catches up the moment it's shown).
   _refreshUnreadCount();
   setInterval(_refreshUnreadCount, 60000);
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') _refreshUnreadCount();
+  });
   prewarmEmailLibrary({ delay: 3000 });
 
   // Deep-link: #email=<folder>:<uid> opens the library and expands that card
@@ -219,6 +223,9 @@ function _urgencyColor(score) {
 }
 
 async function _refreshUnreadCount() {
+  // Hidden tab → skip entirely (BEFORE the dot-reset below, so the visible
+  // state is left untouched until we can actually verify it).
+  if (document.hidden) return;
   // Default the dot to hidden — only the verified "new mail above threshold"
   // path below should turn it on. Without this, a fetch error or a backend
   // returning malformed data left a stale dot from a previous account/session.

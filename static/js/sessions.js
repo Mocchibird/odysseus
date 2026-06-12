@@ -22,6 +22,105 @@ const FOLDER_MAX_VISIBLE = 5;
 let _showAllSessions = false;
 let _expandedFolders = {};  // folderName -> true if "show more" clicked
 let _sortMode = Storage.get('odysseus-session-sort') || 'active'; // default to last active
+
+// ---- Virtualized history state (selectSession) ----
+// Only the last HISTORY_VISIBLE_TURNS entries render eagerly on session
+// switch; the rest stay in _histAll until "Show earlier messages" (or an
+// index-sensitive operation via ensureFullHistoryRendered) materializes them.
+const HISTORY_VISIBLE_TURNS = 30;
+const HISTORY_CHUNK = 50;
+let _histAll = [];
+let _histRenderedFrom = 0;   // index into _histAll of the first RENDERED entry
+let _histModelName = null;
+
+// Render entries [from, to) of a fetched history into #chat-history via the
+// normal addMessage path — extracted verbatim from the old selectSession loop
+// so per-message behavior (continue-bubble filtering, doc-edit rewrite,
+// multimodal text extraction) is unchanged.
+function _renderHistorySlice(history, from, to, modelName) {
+  for (let i = from; i < to; i++) {
+    const msg = history[i];
+    const meta = msg.metadata ? { ...msg.metadata, _fromHistory: true } : null;
+    let displayContent;
+    if (typeof msg.content === 'string') {
+      displayContent = msg.content;
+    } else if (Array.isArray(msg.content)) {
+      // Multimodal (image/audio attachments): extract text parts, skip binary
+      displayContent = msg.content.filter(p => p.type === 'text').map(p => p.text).join('\n').trim();
+    } else {
+      displayContent = '';
+    }
+    // Clean up doc selection context for display
+    if (msg.role === 'user') {
+      // Hide "Continue where you left off" bubbles
+      if (displayContent.trim() === 'Continue where you left off' || displayContent.trim().startsWith('Your message was cut off.') || displayContent.trim().startsWith('Your previous response was interrupted.') || displayContent.includes('[Instruction: Rewrite') || displayContent.includes('[Instruction: Explain')) continue;
+      const docEditMatch = displayContent.match(/^In the document, edit this specific text \((lines? [\d-]+)\):\n```\n([\s\S]*?)\n```\n\nInstruction: ([\s\S]*)$/);
+      if (docEditMatch) {
+        displayContent = `[Doc edit: ${docEditMatch[1]}] ${docEditMatch[3]}`;
+      }
+    }
+    window.chatModule.addMessage(msg.role, markdownModule.renderContent(displayContent), modelName, meta);
+  }
+}
+
+// Centered "Show earlier messages (N)" control inserted as the FIRST child of
+// #chat-history. Wrapped in a div so it can never match the '.msg' selectors
+// that map DOM position to server history indexes.
+function _buildEarlierButton() {
+  const wrap = document.createElement('div');
+  wrap.id = 'chat-earlier-wrap';
+  wrap.style.cssText = 'display:flex;justify-content:center;padding:6px 0;';
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.id = 'chat-show-earlier';
+  btn.className = 'memory-toolbar-btn';
+  btn.textContent = `Show earlier messages (${_histRenderedFrom})`;
+  btn.addEventListener('click', () => _renderEarlierChunk(HISTORY_CHUNK));
+  wrap.appendChild(btn);
+  return wrap;
+}
+
+// Materialize the next `count` older entries ABOVE the current view, keeping
+// the viewport anchored. addMessage appends to #chat-history (possibly several
+// nodes per entry), so the freshly appended nodes are moved up in order to sit
+// right after the button wrap.
+function _renderEarlierChunk(count) {
+  const box = document.getElementById('chat-history');
+  const wrap = document.getElementById('chat-earlier-wrap');
+  if (!box || _histRenderedFrom <= 0) return;
+  const from = Math.max(0, _histRenderedFrom - count);
+  const anchor = wrap ? wrap.nextSibling : box.firstChild;
+  const prevH = box.scrollHeight;
+  const prevTop = box.scrollTop;
+  const startLen = box.children.length;
+  box.classList.add('no-animate');
+  _renderHistorySlice(_histAll, from, _histRenderedFrom, _histModelName);
+  const appended = Array.from(box.children).slice(startLen);
+  for (const n of appended) box.insertBefore(n, anchor);
+  box.scrollTop = prevTop + (box.scrollHeight - prevH);
+  box.classList.remove('no-animate');
+  _histRenderedFrom = from;
+  if (_histRenderedFrom === 0) {
+    if (wrap) wrap.remove();
+  } else {
+    const btn = document.getElementById('chat-show-earlier');
+    if (btn) btn.textContent = `Show earlier messages (${_histRenderedFrom})`;
+  }
+  if (window.hljs) {
+    document.querySelectorAll('pre code:not(.hljs)').forEach(block => {
+      window.hljs.highlightElement(block);
+    });
+  }
+}
+
+// Force-render everything that is still virtualized. MUST be awaited before
+// any operation that maps a bubble's DOM position among '.msg' nodes to a
+// server history index (edit/resend/regenerate/fork/delete in chat.js) —
+// with older turns unrendered those indexes would be skewed by the hidden
+// prefix and truncate/fork the wrong rows.
+async function ensureFullHistoryRendered() {
+  if (_histRenderedFrom > 0) _renderEarlierChunk(Number.MAX_SAFE_INTEGER);
+}
 let _autoCreateInProgress = false; // guard against recursive auto-create
 const _INCOGNITO_SESSIONS_KEY = 'ody-incognito-sessions'; // sessionStorage key for incognito session IDs
 const _isMac = /Mac|iPhone|iPad/.test(navigator.platform);
@@ -1631,6 +1730,11 @@ export async function selectSession(id, { keepSidebar = false } = {}) {
       if (navToken !== _sessionNavToken || currentSessionId !== id) return;
       chatHistory.innerHTML = '';
     }
+    // Drop any virtualized remainder from the PREVIOUS session — the new
+    // session repopulates it below (or leaves it empty for OC/empty sessions).
+    _histAll = [];
+    _histRenderedFrom = 0;
+    _histModelName = null;
 
     // Suppress per-message entrance animations during bulk history render
     if (chatHistory) chatHistory.classList.add('no-animate');
@@ -1643,27 +1747,20 @@ export async function selectSession(id, { keepSidebar = false } = {}) {
          <p>Messages will be routed through your OpenClaw agent. The agent has access to tools, memory, and skills configured in your OpenClaw workspace.</p>`,
         'OpenClaw');
     } else if (msgHistory.length) {
-      for (const msg of msgHistory) {
-        const meta = msg.metadata ? { ...msg.metadata, _fromHistory: true } : null;
-        let displayContent;
-        if (typeof msg.content === 'string') {
-          displayContent = msg.content;
-        } else if (Array.isArray(msg.content)) {
-          // Multimodal (image/audio attachments): extract text parts, skip binary
-          displayContent = msg.content.filter(p => p.type === 'text').map(p => p.text).join('\n').trim();
-        } else {
-          displayContent = '';
-        }
-        // Clean up doc selection context for display
-        if (msg.role === 'user') {
-          // Hide "Continue where you left off" bubbles
-          if (displayContent.trim() === 'Continue where you left off' || displayContent.trim().startsWith('Your message was cut off.') || displayContent.trim().startsWith('Your previous response was interrupted.') || displayContent.includes('[Instruction: Rewrite') || displayContent.includes('[Instruction: Explain')) continue;
-          const docEditMatch = displayContent.match(/^In the document, edit this specific text \((lines? [\d-]+)\):\n```\n([\s\S]*?)\n```\n\nInstruction: ([\s\S]*)$/);
-          if (docEditMatch) {
-            displayContent = `[Doc edit: ${docEditMatch[1]}] ${docEditMatch[3]}`;
-          }
-        }
-        window.chatModule.addMessage(msg.role, markdownModule.renderContent(displayContent), modelName, meta);
+      // Virtualized history: render only the most recent window eagerly —
+      // long sessions (hundreds of turns) were costing seconds of main-thread
+      // markdown+DOM work on EVERY session switch. Older turns render on
+      // demand via the "Show earlier messages" button (_renderEarlierChunk),
+      // and any index-sensitive operation (edit/resend/regenerate/fork/delete
+      // map DOM position → server history index) first forces a full render
+      // through ensureFullHistoryRendered() so keep_count semantics are
+      // byte-for-byte identical to the old render-everything path.
+      _histAll = msgHistory;
+      _histModelName = modelName;
+      _histRenderedFrom = Math.max(0, msgHistory.length - HISTORY_VISIBLE_TURNS);
+      _renderHistorySlice(msgHistory, _histRenderedFrom, msgHistory.length, modelName);
+      if (_histRenderedFrom > 0 && chatHistory) {
+        chatHistory.insertBefore(_buildEarlierButton(), chatHistory.firstChild);
       }
     } else {
       if (window.chatModule && window.chatModule.showWelcomeScreen) window.chatModule.showWelcomeScreen();
@@ -3137,7 +3234,8 @@ const sessionModule = {
   closeArchive,
   setSessionHasDocs,
   getSortMode,
-  setSortMode
+  setSortMode,
+  ensureFullHistoryRendered
 };
 
 export { updateModelPicker };

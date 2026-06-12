@@ -17,7 +17,7 @@ import spinnerModule from './spinner.js';
 import presetsModule from './presets.js';
 import fileHandlerModule from './fileHandler.js';
 import searchModule from './search.js';
-import documentModule from './document.js?v=412';
+import documentModule from './document.js?v=419';
 import * as emailInbox from './emailInbox.js';
 import codeRunnerModule from './codeRunner.js';
 import slashCommands, { initSlashCommands, isCommand, handleSlashCommand, handleSetupInput, handleSetupWizard, typewriterInto } from './slashCommands.js';
@@ -1848,7 +1848,7 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
                 if (!_isBg) {
                   var _selM = _shortModel(json.selected_model || '');
                   var _ansM = _shortModel(json.answered_by || '');
-                  uiModule.showToast('⚠ ' + _selM + ' failed — answered by ' + _ansM, 6000);
+                  uiModule.showToast(_selM + ' failed — answered by ' + _ansM, 6000);
                   if (holder) {
                     var _rEl = holder.querySelector('.role');
                     if (_rEl) {
@@ -1890,7 +1890,7 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
                   const contBtn = document.createElement('button');
                   contBtn.className = 'continue-btn';
                   contBtn.title = 'Continue the task';
-                  contBtn.textContent = 'Continue ▸';
+                  contBtn.innerHTML = 'Continue <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-1px;"><polyline points="9 18 15 12 9 6"/></svg>';
                   const _holder = currentHolder;
                   contBtn.addEventListener('click', () => {
                     note.remove();
@@ -2634,7 +2634,7 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
             const _cont = document.createElement('button');
             _cont.className = 'continue-btn agent-continue-btn';
             _cont.title = 'Continue — pick up where it left off';
-            _cont.textContent = '▸';
+            _cont.innerHTML = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-1px;"><polyline points="9 18 15 12 9 6"/></svg>';
             _cont.addEventListener('click', () => {
               _stall.remove();
               const mi = uiModule.el('message');
@@ -3831,6 +3831,9 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
    * Edit a user message: show an input, truncate to before it, resubmit the edited text.
    */
   export async function editUserMessage(userMsgElement) {
+    // Virtualized history: older turns may be unrendered — force a full render
+    // first, or the DOM-position → history-index mapping below is skewed.
+    if (sessionModule.ensureFullHistoryRendered) await sessionModule.ensureFullHistoryRendered();
     const box = document.getElementById('chat-history');
     const allMsgs = Array.from(box.querySelectorAll('.msg'));
     const msgIndex = allMsgs.indexOf(userMsgElement);
@@ -3914,6 +3917,8 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
    * Resend a user message — truncates history to that point and resubmits.
    */
   export async function resendUserMessage(userMsgElement) {
+    // Virtualized history — see editUserMessage.
+    if (sessionModule.ensureFullHistoryRendered) await sessionModule.ensureFullHistoryRendered();
     const box = document.getElementById('chat-history');
     const allMsgs = Array.from(box.querySelectorAll('.msg'));
     const msgIndex = allMsgs.indexOf(userMsgElement);
@@ -3992,6 +3997,8 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
   }
 
   export async function regenerateFrom(aiMsgElement) {
+    // Virtualized history — see editUserMessage.
+    if (sessionModule.ensureFullHistoryRendered) await sessionModule.ensureFullHistoryRendered();
     const box = document.getElementById('chat-history');
     const allMsgs = Array.from(box.querySelectorAll('.msg'));
     const aiIndex = allMsgs.indexOf(aiMsgElement);
@@ -4242,6 +4249,8 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
   }
 
   export async function forkFrom(aiMsgElement) {
+    // Virtualized history — see editUserMessage.
+    if (sessionModule.ensureFullHistoryRendered) await sessionModule.ensureFullHistoryRendered();
     const box = document.getElementById('chat-history');
     const allMsgs = Array.from(box.querySelectorAll('.msg'));
     const aiIndex = allMsgs.indexOf(aiMsgElement);
@@ -4511,6 +4520,8 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
    * Delete an AI message and its preceding user message from the conversation.
    */
   export async function deleteMessage(msgElement) {
+    // Virtualized history — see editUserMessage.
+    if (sessionModule.ensureFullHistoryRendered) await sessionModule.ensureFullHistoryRendered();
     const box = document.getElementById('chat-history');
     const allMsgs = Array.from(box.querySelectorAll('.msg'));
     const clickedIndex = allMsgs.indexOf(msgElement);

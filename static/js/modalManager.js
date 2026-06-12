@@ -1459,7 +1459,18 @@ function _scanAndWire() {
     injectMinimizeButton(modal, id);
   }
 }
-const _scanTimer = setInterval(_scanAndWire, 1000);
+// Event-driven wiring: every lazily-created tool modal is appended as a
+// DIRECT child of document.body, so a childList observer (no subtree — chat
+// streaming mutates deep inside #chat-history and must not trigger scans)
+// catches creation instantly. A slow hidden-gated tick remains as the
+// cannot-miss backstop. Replaces a 1 Hz forever-interval (~22 getElementById
+// + header querySelectors per second, even while idle/hidden).
+let _scanDebounce = 0;
+function _scanSoon() { clearTimeout(_scanDebounce); _scanDebounce = setTimeout(_scanAndWire, 100); }
+new MutationObserver((muts) => {
+  for (const m of muts) if (m.addedNodes.length) { _scanSoon(); break; }
+}).observe(document.body, { childList: true });
+const _scanTimer = setInterval(() => { if (!document.hidden) _scanAndWire(); }, 10000);
 // First scan after DOM ready
 if (document.readyState !== 'loading') {
   setTimeout(_scanAndWire, 100);

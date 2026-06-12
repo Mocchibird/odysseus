@@ -36,7 +36,7 @@ import Storage from '../storage.js';
 import uiModule from '../ui.js';
 import sessionModule from '../sessions.js';
 import spinnerModule from '../spinner.js';
-import themeModule from '../theme.js';
+import themeModule from '../theme.js?v=395';
 import presetsModule from '../presets.js';
 import markdownModule from '../markdown.js';
 

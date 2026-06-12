@@ -113,8 +113,12 @@ app.add_middleware(
 # `text/event-stream` by default, so the SSE streams (chat, shell, research,
 # model-probe — all served with media_type="text/event-stream") are never
 # compressed or buffered; only complete bodies over minimum_size are. The
-# security-header middleware composes cleanly on top.
-app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=6)
+# security-header middleware composes cleanly on top. compresslevel=4 instead
+# of the default 6: on the shared self-host CPU, level 4 compresses text within
+# a few percent of level 6 at roughly half the CPU per response — the right
+# trade when the box also runs other services. Media routes opt out entirely
+# via Content-Encoding: identity (see GENERATED_IMAGE_HEADERS).
+app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=4)
 
 # ========= SECURITY HEADERS MIDDLEWARE =========
 app.add_middleware(SecurityHeadersMiddleware)
@@ -141,6 +145,9 @@ _TIMEOUT_EXEMPT_PREFIXES = (
     "/api/cookbook/setup",  # remote pacman/apt installs
     "/api/upload",          # large files
     "/api/image",           # diffusion proxies (inpaint/harmonize/upscale/etc.) — own 120s httpx timeout
+    "/api/gallery/upload",  # multi-GB video uploads stream for minutes; the 45s
+                            # cap was killing them mid-transfer ("network" errors)
+    "/api/gallery/download-zip",  # zipping a multi-GB selection takes > 45s
 )
 
 
@@ -399,20 +406,10 @@ else:
 os.makedirs(STATIC_DIR, exist_ok=True)
 
 
-class _RevalidatingStatic(StaticFiles):
-    """Serve static assets normally, but force the browser to REVALIDATE
-    source files (.js/.css/.html) on every load instead of serving a stale
-    copy from disk cache. The app ships raw ES modules with no build step or
-    versioned URLs, so browsers were caching modules across deploys — a code
-    change wouldn't appear without a manual hard-refresh. `no-cache` keeps the
-    cached bytes but requires a conditional request; unchanged files still
-    return a cheap 304 (ETag/Last-Modified are preserved)."""
-
-    async def get_response(self, path, scope):
-        resp = await super().get_response(path, scope)
-        if path.endswith((".js", ".css", ".html")):
-            resp.headers["Cache-Control"] = "no-cache"
-        return resp
+# Version-aware static cache headers (immutable for ?v=-stamped URLs,
+# no-cache for bare ones). Lives in its own dependency-light module so tests
+# can import it without the full app chain.
+from src.static_serving import RevalidatingStatic as _RevalidatingStatic
 
 
 app.mount("/static", _RevalidatingStatic(directory="static"), name="static")
