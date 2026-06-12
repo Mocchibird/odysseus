@@ -1978,6 +1978,23 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
           if (input.files && input.files.length) _uploadLibFiles(input.files);
           input.value = '';
         });
+        // Drag-drop upload onto the Files list — mirrors the gallery grid
+        // (#doclib-files-grid.gallery-dragover styling already exists).
+        const filesGrid = document.getElementById('doclib-files-grid');
+        if (filesGrid) {
+          ['dragenter', 'dragover'].forEach(ev => filesGrid.addEventListener(ev, (e) => {
+            e.preventDefault(); e.stopPropagation();
+            filesGrid.classList.add('gallery-dragover');
+          }));
+          ['dragleave', 'drop'].forEach(ev => filesGrid.addEventListener(ev, (e) => {
+            e.preventDefault(); e.stopPropagation();
+            filesGrid.classList.remove('gallery-dragover');
+          }));
+          filesGrid.addEventListener('drop', (e) => {
+            const files = [...(e.dataTransfer?.files || [])];
+            if (files.length) _uploadLibFiles(files);
+          });
+        }
       }
       try {
         const params = new URLSearchParams();
@@ -3358,6 +3375,26 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
       if (typeof ResizeObserver !== 'undefined') {
         new ResizeObserver(() => libraryRenderLoadMore()).observe(grid);
       }
+    }
+
+    // Drag-drop import onto the Documents grid — same affordance as the
+    // gallery (#doclib-grid.gallery-dragover styling already exists); dropped
+    // files take the exact path the Import button uses.
+    const docsGrid = document.getElementById('doclib-grid');
+    if (docsGrid && !docsGrid.dataset._dropWired) {
+      docsGrid.dataset._dropWired = '1';
+      ['dragenter', 'dragover'].forEach(ev => docsGrid.addEventListener(ev, (e) => {
+        e.preventDefault(); e.stopPropagation();
+        docsGrid.classList.add('gallery-dragover');
+      }));
+      ['dragleave', 'drop'].forEach(ev => docsGrid.addEventListener(ev, (e) => {
+        e.preventDefault(); e.stopPropagation();
+        docsGrid.classList.remove('gallery-dragover');
+      }));
+      docsGrid.addEventListener('drop', (e) => {
+        const files = [...(e.dataTransfer?.files || [])];
+        if (files.length) libraryImportFiles(files);
+      });
     }
 
     // Wire file import button

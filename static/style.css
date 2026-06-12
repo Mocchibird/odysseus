@@ -17164,6 +17164,14 @@ body.gallery-selecting .gallery-card-menu-btn,
   border-radius: 8px;
   background: color-mix(in srgb, var(--red) 5%, transparent);
 }
+/* Library modal drop targets (Documents grid + Files list) share the gallery
+   drag-over affordance. */
+#doclib-grid.gallery-dragover,
+#doclib-files-grid.gallery-dragover {
+  border: 2px dashed var(--red);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--red) 5%, transparent);
+}
 .gallery-card {
   position: relative;
   aspect-ratio: 1;
@@ -23669,6 +23677,11 @@ details.hwfit-serve-advanced > .hwfit-serve-checks:last-of-type {
   border-color: var(--red);
   background: color-mix(in srgb, var(--red) 5%, transparent);
 }
+/* Books list shares the same drop-to-upload affordance. */
+.books-list-view.gallery-dragover {
+  border-color: var(--red);
+  background: color-mix(in srgb, var(--red) 5%, transparent);
+}
 .gallery-albums-empty {
   display: flex; flex-direction: column; align-items: center; gap: 12px;
   padding: 48px 16px;
@@ -23867,6 +23880,10 @@ details.hwfit-serve-advanced > .hwfit-serve-checks:last-of-type {
 .gallery-editor-drafts {
   position: relative;
 }
+/* display:flex above would defeat the hidden attribute (the UA's
+   [hidden]{display:none} loses to any author display) — same idiom as
+   .gallery-album-menu-pop[hidden]. */
+.gallery-editor-drafts[hidden] { display: none; }
 .gallery-editor-drafts-loading {
   position: absolute;
   inset: 30px 0 0 0;
@@ -32346,7 +32363,7 @@ body.notes-mobile-mode.notes-drag-mode .note-card-pin.active {
   font: 12px/1.5 var(--mono-font, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
   background: color-mix(in srgb, var(--fg) 3%, transparent);
 }
-/* Inline image preview in the vault reader (served via /api/iris-vault/raw). */
+/* Inline image preview in the reader. */
 .notes-vault-image-wrap {
   display: flex;
   justify-content: center;
@@ -32376,24 +32393,9 @@ body.notes-mobile-mode.notes-drag-mode .note-card-pin.active {
   overflow: hidden;
   position: relative;
 }
-.vault-graph-canvas { display: block; width: 100%; height: 100%; }
 .notes-vault-reader-title span { font-size: 11px; opacity: 0.6; margin-left: 8px; }
 @media (max-width: 768px) { .notes-vault-graph { min-height: 50svh; } }
-/* Vault Organizer (inbox triage) */
 .notes-vault-org { display: flex; flex-direction: column; gap: 6px; overflow-y: auto; padding: 4px 2px; max-height: calc(100vh - 230px); }
-.vault-org-row {
-  display: flex; align-items: center; gap: 10px;
-  padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px;
-  background: color-mix(in srgb, var(--fg) 2%, transparent);
-}
-.vault-org-note { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-.vault-org-note strong { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.vault-org-note span { font-size: 11px; opacity: 0.6; }
-.vault-org-folder { flex: 0 0 auto; max-width: 170px; }
-@media (max-width: 768px) {
-  .vault-org-row { flex-wrap: wrap; }
-  .vault-org-folder { max-width: none; flex: 1 1 60%; }
-}
 .notes-book-upload-progress {
   display: grid;
   gap: 5px;

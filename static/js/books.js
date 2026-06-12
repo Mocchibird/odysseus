@@ -825,6 +825,9 @@ function _renderListInto() {
       <button type="button" class="notes-book-title-edit" data-path="${_attrEsc(book.path || '')}" data-title="${_attrEsc(title)}" title="Rename book" aria-label="Rename book">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
       </button>
+      <button type="button" class="notes-book-title-edit notes-book-del" data-path="${_attrEsc(book.path || '')}" data-title="${_attrEsc(title)}" title="Delete book" aria-label="Delete book">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>
+      </button>
     </div>`;
   }
   html += '</div>';
@@ -836,7 +839,32 @@ function _renderListInto() {
     img.addEventListener('load', () => img.closest('.notes-book-cover')?.classList.add('has-cover'));
     img.src = `${API_BASE}/api/books/cover?path=${encodeURIComponent(img.dataset.cover || '')}`;
   });
-  scroll.querySelectorAll('.notes-book-title-edit').forEach(btn => {
+  // Delete shares the rename button's styling class — exclude it here and
+  // wire it separately below.
+  scroll.querySelectorAll('.notes-book-del').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const path = btn.dataset.path || '';
+      const title = btn.dataset.title || 'this book';
+      const ok = uiModule.styledConfirm
+        ? await uiModule.styledConfirm(`Delete "${title}"? This removes the file, reading progress and annotations.`, { confirmText: 'Delete', danger: true })
+        : confirm(`Delete "${title}"?`);
+      if (!ok) return;
+      try {
+        const r = await fetch(`${API_BASE}/api/books?path=${encodeURIComponent(path)}`, {
+          method: 'DELETE', credentials: 'same-origin',
+        });
+        if (!r.ok) throw new Error('Delete failed');
+        await _fetchBooks();
+        _renderListInto();
+        uiModule.showToast?.('Book deleted');
+      } catch (err) {
+        uiModule.showError?.(err?.message || 'Failed to delete book');
+      }
+    });
+  });
+  scroll.querySelectorAll('.notes-book-title-edit:not(.notes-book-del)').forEach(btn => {
     btn.addEventListener('click', async (e) => {
       e.preventDefault();
       e.stopPropagation();
@@ -937,6 +965,39 @@ function _wireToolbar() {
   if (uploadBtn && !uploadBtn.dataset._wired) {
     uploadBtn.dataset._wired = '1';
     uploadBtn.addEventListener('click', () => fileInput?.click());
+  }
+  // Drag-drop upload onto the book list — same affordance as the gallery
+  // (.books-list-view.gallery-dragover styling already exists). Drops are
+  // ignored while the reader is open and non-book files are filtered out.
+  const listView = modal.querySelector('.books-list-view');
+  if (listView && !listView.dataset._dropWired) {
+    listView.dataset._dropWired = '1';
+    ['dragenter', 'dragover'].forEach(ev => listView.addEventListener(ev, (e) => {
+      e.preventDefault(); e.stopPropagation();
+      if (!_bookOpenBook) listView.classList.add('gallery-dragover');
+    }));
+    ['dragleave', 'drop'].forEach(ev => listView.addEventListener(ev, (e) => {
+      e.preventDefault(); e.stopPropagation();
+      listView.classList.remove('gallery-dragover');
+    }));
+    listView.addEventListener('drop', async (e) => {
+      if (_bookOpenBook) return;
+      const files = [...(e.dataTransfer?.files || [])].filter(f => /\.(epub|pdf)$/i.test(f.name || ''));
+      if (!files.length) return;
+      try {
+        for (const file of files) {
+          await _uploadBookFile(file);
+        }
+        uiModule.showToast?.('Uploaded to books');
+      } catch (err) {
+        _bookUploadState = {
+          active: false, percent: 0, label: 'Upload failed',
+          detail: err?.message || 'Upload failed', error: true,
+        };
+        _renderUploadProgress();
+        uiModule.showError?.(err?.message || 'Upload failed');
+      }
+    });
   }
   if (fileInput && !fileInput.dataset._wired) {
     fileInput.dataset._wired = '1';

@@ -157,6 +157,10 @@ def set_favorite(owner: str | None, kb_id: str, favorite: bool) -> dict:
     return book_store.set_favorite(owner, kb_id, favorite)
 
 
+def delete_book(owner: str | None, kb_id: str) -> bool:
+    return book_store.delete_book(owner, kb_id)
+
+
 def read_book_location(owner: str | None, kb_id: str, chapter_index: int = 0) -> dict:
     book = open_book(owner, kb_id)
     chapters = book.get("chapters") or []

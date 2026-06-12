@@ -239,7 +239,11 @@ async function _bulkUpload(filesOrItems, fallbackAlbumId) {
       // HTTP error: 400/413/415 are permanent (bad/oversized/unsupported);
       // 408/429/5xx (and anything else) are worth a retry.
       const permanent = [400, 413, 415].includes(res.status);
-      const reason = res.status === 413 ? 'too large'
+      // Prefer the server's own message (FastAPI puts it in `detail`, e.g.
+      // "Gallery upload exceeds 4096 MB limit") so the user sees the actual
+      // cap instead of a generic label.
+      const reason = (data && data.detail) ? String(data.detail)
+        : res.status === 413 ? 'too large'
         : (res.status === 415 || res.status === 400) ? 'unsupported'
         : `server ${res.status}`;
       return { kind: 'fail', retryable: !permanent, reason };
@@ -250,28 +254,40 @@ async function _bulkUpload(filesOrItems, fallbackAlbumId) {
     }
   }
 
+  async function _processItem(it) {
+    let result = { kind: 'fail', retryable: true, reason: 'network' };
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+      result = await _uploadOnce(it);
+      if (result.kind !== 'fail' || !result.retryable) break;
+      if (attempt < MAX_ATTEMPTS) {
+        const backoff = 600 * Math.pow(3, attempt - 1) + Math.floor(Math.random() * 300);
+        await new Promise(r => setTimeout(r, backoff));
+      }
+    }
+    if (result.kind === 'duplicate') dupes++;
+    else if (result.kind === 'fail') { errors++; failReasons.push(result.reason); }
+    done++;
+    if (progress) progress.style.width = `${(done / total) * 100}%`;
+    if (status) status.textContent = `${done}/${total}${dupes ? ` (${dupes} dup)` : ''}${errors ? ` (${errors} failed)` : ''}`;
+  }
+
+  // Big files (GB videos) upload ONE at a time after the small ones — three
+  // parallel multi-GB streams would compete for upstream bandwidth and disk,
+  // tripping timeouts; small files still get the concurrency win.
+  const LARGE_BYTES = 64 * 1024 * 1024;
+  const smallItems = items.filter(it => ((it.file && it.file.size) || 0) <= LARGE_BYTES);
+  const largeItems = items.filter(it => ((it.file && it.file.size) || 0) > LARGE_BYTES);
   async function worker() {
     while (true) {
       const idx = cursor++;
-      if (idx >= items.length) return;
-      const it = items[idx];
-      let result = { kind: 'fail', retryable: true, reason: 'network' };
-      for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-        result = await _uploadOnce(it);
-        if (result.kind !== 'fail' || !result.retryable) break;
-        if (attempt < MAX_ATTEMPTS) {
-          const backoff = 600 * Math.pow(3, attempt - 1) + Math.floor(Math.random() * 300);
-          await new Promise(r => setTimeout(r, backoff));
-        }
-      }
-      if (result.kind === 'duplicate') dupes++;
-      else if (result.kind === 'fail') { errors++; failReasons.push(result.reason); }
-      done++;
-      if (progress) progress.style.width = `${(done / total) * 100}%`;
-      if (status) status.textContent = `${done}/${total}${dupes ? ` (${dupes} dup)` : ''}${errors ? ` (${errors} failed)` : ''}`;
+      if (idx >= smallItems.length) return;
+      await _processItem(smallItems[idx]);
     }
   }
-  await Promise.all(Array.from({ length: Math.min(CONCURRENCY, total) }, worker));
+  await Promise.all(Array.from({ length: Math.min(CONCURRENCY, Math.max(1, smallItems.length)) }, worker));
+  for (const it of largeItems) {
+    await _processItem(it);
+  }
 
   // Break the failure count down by reason ("2 too large, 1 network") so the
   // user knows whether to retry or shrink the files.

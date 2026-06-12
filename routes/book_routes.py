@@ -124,6 +124,18 @@ def setup_book_routes() -> APIRouter:
     async def save_favorite(body: BookFavoriteRequest, request: Request):
         return {"ok": True, "book": book_reader.set_favorite(_owner(request), body.path, body.favorite)}
 
+    @router.delete("")
+    async def delete_book(request: Request, path: str):
+        """Delete a book (file bytes, reading progress, annotations).
+
+        `path` is the book's kb_id — the same identifier every other book
+        route uses (query-param idiom matches delete_annotation below).
+        """
+        removed = book_reader.delete_book(_owner(request), path)
+        if not removed:
+            raise HTTPException(404, "Book not found")
+        return {"ok": True}
+
     @router.get("/search")
     async def search_book(request: Request, path: str, q: str = "", limit: int = 120):
         result = book_reader.search_book_text(_owner(request), path, q, max_results=max(1, min(int(limit or 120), 400)))
