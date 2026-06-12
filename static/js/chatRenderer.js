@@ -5,7 +5,7 @@ import uiModule from './ui.js';
 import markdownModule from './markdown.js';
 import { addAITTSButton } from './tts-ai.js';
 import { providerLogo, providerLabel } from './providers.js';
-import settingsModule from './settings.js?v=400';
+import settingsModule from './settings.js?v=420';
 import spinnerModule from './spinner.js';
 import { bindMenuDismiss } from './escMenuStack.js';
 import { matchModelKey } from './model/matchKey.js';
@@ -1097,19 +1097,19 @@ document.addEventListener('click', function(e) {
       if (fn) fn(id);
     });
   } else if (kind === 'document') {
-    import('./document.js?v=419').then(mod => {
+    import('./document.js?v=420').then(mod => {
       const open = mod.loadDocument
         || mod.openDocument
         || (mod.default && (mod.default.loadDocument || mod.default.openDocument));
       if (open) open(id);
     }).catch(() => {});
   } else if (kind === 'note') {
-    import('./notes.js?v=402').then(mod => {
+    import('./notes.js?v=420').then(mod => {
       const open = mod.openNote || (mod.default && mod.default.openNote);
       if (open) open(id);
     }).catch(() => {});
   } else if (kind === 'image') {
-    import('./gallery.js?v=419').then(mod => {
+    import('./gallery.js?v=420').then(mod => {
       const open = mod.openGalleryImage || (mod.default && mod.default.openGalleryImage);
       if (open) open(id);
     }).catch(() => {});
@@ -1233,7 +1233,7 @@ export function buildImageBubble(imageUrl, prompt, model, size, quality, imageId
     e.stopPropagation();
     try {
       const [galleryMod, editorMod] = await Promise.all([
-        import('./gallery.js?v=419'),
+        import('./gallery.js?v=420'),
         import('./galleryEditor.js'),
       ]);
       // Ensure the Gallery modal is open so the editor has a container
