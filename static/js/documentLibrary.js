@@ -1729,9 +1729,22 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
             <p class="memory-desc doclib-desc" style="position:relative;top:-1px;">Uploaded files (docs, spreadsheets, data, audio, archives) — searchable by Iris and openable here.</p>
             <div class="memory-toolbar">
               <div class="memory-category-filters">
+                <select class="memory-sort-select" id="doclib-files-sort">
+                  <option value="recent">Recent</option>
+                  <option value="oldest">Oldest</option>
+                  <option value="alpha">A–Z</option>
+                  <option value="largest">Largest</option>
+                </select>
                 <button class="memory-toolbar-btn" id="doclib-files-add-btn" title="Upload files"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-1px;margin-right:3px;"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>Add files</button>
+                <button class="gallery-select-btn" id="doclib-files-select-btn" title="Select for bulk actions"><span style="position:relative;top:1px;">Select</span></button>
               </div>
               <input type="text" id="doclib-files-search" placeholder="Search files…" class="memory-search-input" />
+            </div>
+            <div id="doclib-files-bulk-bar" class="memory-bulk-bar hidden" style="margin-bottom:5px;">
+              <label class="memory-bulk-check-all" style="position:relative;top:0px;left:1px;"><input type="checkbox" id="doclib-files-select-all"> All</label>
+              <span id="doclib-files-selected-count">0 Selected</span>
+              <button class="memory-toolbar-btn danger" id="doclib-files-bulk-delete" style="margin-left:auto;position:relative;top:-2px;" disabled><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-1px;margin-right:3px;"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>Delete</button>
+              <button class="memory-toolbar-btn" id="doclib-files-bulk-cancel" title="Cancel (Esc)" style="margin-left:4px;padding:3px 6px;position:relative;top:-2px;"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
             </div>
             <input type="file" id="doclib-files-input" multiple style="display:none">
             <div id="doclib-files-grid" class="doclib-grid"></div>
@@ -1933,7 +1946,84 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
     // ── Files tab (the native Files store: /api/files) ──
     let _filesItems = [];
     let _filesSearch = '';
+    let _filesSort = 'recent';
+    let _filesSelectMode = false;
+    const _filesSelected = new Set();
     let _filesWired = false;
+
+    // Mirrors the Notes bulk-select pattern (notes.js): a Select toggle flips
+    // the rows into checkbox mode and reveals the memory-bulk-bar.
+    function _enterFilesSelectMode() {
+      _filesSelectMode = true;
+      _filesSelected.clear();
+      document.getElementById('doclib-files-bulk-bar')?.classList.remove('hidden');
+      _renderLibFiles();
+      _updateFilesBulkBar();
+    }
+
+    function _exitFilesSelectMode() {
+      _filesSelectMode = false;
+      _filesSelected.clear();
+      document.getElementById('doclib-files-bulk-bar')?.classList.add('hidden');
+      const all = document.getElementById('doclib-files-select-all');
+      if (all) all.checked = false;
+      _renderLibFiles();
+    }
+
+    function _updateFilesBulkBar() {
+      const count = _filesSelected.size;
+      const countEl = document.getElementById('doclib-files-selected-count');
+      const deleteBtn = document.getElementById('doclib-files-bulk-delete');
+      const allEl = document.getElementById('doclib-files-select-all');
+      if (countEl) countEl.textContent = `${count} Selected`;
+      if (deleteBtn) deleteBtn.disabled = count === 0;
+      if (allEl) allEl.checked = _filesItems.length > 0 && _filesItems.every(f => _filesSelected.has(f.id));
+    }
+
+    // Inline expand/collapse preview for a Files row — same shape as the
+    // archive-tab _toggleArcDocPreview: first expand fetches the extracted
+    // text, then the preview node is cached on the row for instant re-opens.
+    async function _toggleFilePreview(row, id) {
+      const grid = row.closest('.doclib-grid');
+      if (grid) {
+        grid.querySelectorAll('.doclib-card-expanded').forEach(c => {
+          if (c !== row) {
+            c.classList.remove('doclib-card-expanded');
+            const p = c.querySelector('.doclib-card-preview');
+            if (p) p.style.display = 'none';
+          }
+        });
+      }
+      if (row.classList.contains('doclib-card-expanded')) {
+        row.classList.remove('doclib-card-expanded');
+        const p = row.querySelector('.doclib-card-preview');
+        if (p) p.style.display = 'none';
+        return;
+      }
+      row.classList.add('doclib-card-expanded');
+      let preview = row.querySelector('.doclib-card-preview');
+      if (preview) { preview.style.display = 'block'; return; } // cached
+      preview = document.createElement('div');
+      preview.className = 'doclib-card-preview';
+      const pre = document.createElement('pre');
+      pre.style.cssText = 'white-space:pre-wrap;word-break:break-word;font-size:11px;margin:6px 4px;max-height:50vh;overflow:auto;';
+      const code = document.createElement('code');
+      code.textContent = 'Loading…';
+      pre.appendChild(code);
+      preview.appendChild(pre);
+      row.appendChild(preview);
+      try {
+        const res = await fetch(`/api/files/${encodeURIComponent(id)}`, { credentials: 'same-origin' });
+        if (!res.ok) throw new Error('failed');
+        const data = await res.json();
+        const text = String(data.text || '');
+        code.textContent = text
+          ? (text.length > 4000 ? text.slice(0, 4000) + '…' : text)
+          : '(no text extracted)';
+      } catch (_) {
+        code.textContent = 'Failed to load preview';
+      }
+    }
 
     async function _uploadLibFiles(fileList) {
       const files = Array.from(fileList || []);
@@ -1971,6 +2061,47 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
           clearTimeout(_deb);
           _deb = setTimeout(() => { _filesSearch = search.value.trim(); _renderLibFiles(); }, 250);
         });
+        const sortSel = document.getElementById('doclib-files-sort');
+        if (sortSel) sortSel.addEventListener('change', () => {
+          _filesSort = sortSel.value || 'recent';
+          _renderLibFiles();
+        });
+        const selBtn = document.getElementById('doclib-files-select-btn');
+        if (selBtn) selBtn.addEventListener('click', () => {
+          if (_filesSelectMode) _exitFilesSelectMode(); else _enterFilesSelectMode();
+        });
+        document.getElementById('doclib-files-bulk-cancel')?.addEventListener('click', () => _exitFilesSelectMode());
+        document.getElementById('doclib-files-select-all')?.addEventListener('change', (e) => {
+          if (e.target.checked) _filesItems.forEach(f => _filesSelected.add(f.id));
+          else _filesSelected.clear();
+          document.querySelectorAll('#doclib-files-grid .memory-select-cb[data-file-id]').forEach(cb => {
+            cb.checked = _filesSelected.has(cb.dataset.fileId);
+          });
+          _updateFilesBulkBar();
+        });
+        document.getElementById('doclib-files-bulk-delete')?.addEventListener('click', async () => {
+          const ids = [..._filesSelected];
+          if (!ids.length) return;
+          const msg = `Delete ${ids.length} file${ids.length !== 1 ? 's' : ''}?`;
+          const ok = uiModule && uiModule.styledConfirm
+            ? await uiModule.styledConfirm(msg, { confirmText: 'Delete', danger: true })
+            : confirm(msg);
+          if (!ok) return;
+          let failed = 0;
+          for (const id of ids) {
+            try {
+              const r = await fetch(`/api/files/${encodeURIComponent(id)}`, { method: 'DELETE', credentials: 'same-origin' });
+              if (!r.ok) failed++;
+            } catch (_) { failed++; }
+          }
+          _exitFilesSelectMode();
+          if (uiModule) {
+            const deleted = ids.length - failed;
+            (failed ? uiModule.showError : uiModule.showToast)(
+              failed ? `Deleted ${deleted} · ${failed} failed` : `Deleted ${deleted} file${deleted !== 1 ? 's' : ''}`,
+            );
+          }
+        });
         const addBtn = document.getElementById('doclib-files-add-btn');
         const input = document.getElementById('doclib-files-input');
         if (addBtn && input) addBtn.addEventListener('click', () => input.click());
@@ -2003,6 +2134,17 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
         const data = await res.json();
         _filesItems = Array.isArray(data.files) ? data.files : [];
       } catch (_) { _filesItems = []; }
+      // Client-side sort — same comparator shape as the Chats tab.
+      if (_filesSort === 'oldest') _filesItems.sort((a, b) => (a.created_at || '') > (b.created_at || '') ? 1 : -1);
+      else if (_filesSort === 'alpha') _filesItems.sort((a, b) => (a.filename || '').localeCompare(b.filename || ''));
+      else if (_filesSort === 'largest') _filesItems.sort((a, b) => (b.file_size || 0) - (a.file_size || 0));
+      else _filesItems.sort((a, b) => (b.created_at || '') > (a.created_at || '') ? 1 : -1);
+      const _fsb = document.getElementById('doclib-files-select-btn');
+      if (_fsb) {
+        _fsb.classList.toggle('active', _filesSelectMode);
+        const lbl = _fsb.querySelector('span');
+        if (lbl) lbl.textContent = _filesSelectMode ? 'Cancel' : 'Select';
+      }
       if (stats) stats.textContent = _filesItems.length ? String(_filesItems.length) : '';
       if (!grid) return;
       if (!_filesItems.length) {
@@ -2016,22 +2158,64 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
         const openLink = f.has_file
           ? `<a class="memory-item-btn" href="${_esc(f.url)}" target="_blank" rel="noopener" title="Open the original file" aria-label="Open"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg></a>`
           : '';
-        html += `<div class="memory-item doclib-file-row" data-file-id="${_esc(f.id)}">
+        const rowActions = _filesSelectMode ? '' : `<div class="memory-item-actions" style="display:flex;gap:2px;flex-shrink:0;">
+              ${openLink}
+              <button class="memory-item-btn doclib-file-rename" data-file-id="${_esc(f.id)}" data-name="${_esc(f.filename)}" title="Rename"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg></button>
+              <button class="memory-item-btn doclib-file-tags" data-file-id="${_esc(f.id)}" data-tags="${_esc((f.tags || []).join(', '))}" title="Edit tags"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.59 13.41 13.42 20.58a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.83z"/><circle cx="7" cy="7" r="1.5"/></svg></button>
+              <button class="memory-item-btn doclib-file-delete" data-file-id="${_esc(f.id)}" title="Delete"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg></button>
+            </div>`;
+        html += `<div class="memory-item doclib-chat-row doclib-file-row" data-file-id="${_esc(f.id)}">
           <div class="doclib-chat-header" style="display:flex;align-items:center;width:100%;gap:6px;">
+            ${_filesSelectMode ? `<input type="checkbox" class="memory-select-cb" data-file-id="${_esc(f.id)}" ${_filesSelected.has(f.id) ? 'checked' : ''} />` : ''}
             <div style="flex:1;min-width:0;">
               <div class="memory-item-title" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:4px;opacity:0.4;flex-shrink:0;"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>${_esc(f.filename)}</div>
               ${f.excerpt ? `<div class="memory-item-meta" style="font-size:10px;opacity:0.5;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${_esc(f.excerpt)}</div>` : ''}
               ${tagHtml ? `<div style="margin-top:3px;">${tagHtml}</div>` : ''}
             </div>
-            <div class="memory-item-actions" style="display:flex;gap:2px;flex-shrink:0;">
-              ${openLink}
-              <button class="memory-item-btn doclib-file-rename" data-file-id="${_esc(f.id)}" data-name="${_esc(f.filename)}" title="Rename"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg></button>
-              <button class="memory-item-btn doclib-file-delete" data-file-id="${_esc(f.id)}" title="Delete"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg></button>
-            </div>
+            ${rowActions}
+            <span class="doclib-card-chevron" style="flex-shrink:0;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></span>
           </div>
         </div>`;
       }
       grid.innerHTML = html;
+      grid.querySelectorAll('.memory-select-cb[data-file-id]').forEach(cb => {
+        cb.addEventListener('click', (e) => e.stopPropagation());
+        cb.addEventListener('change', () => {
+          const id = cb.dataset.fileId;
+          if (cb.checked) _filesSelected.add(id); else _filesSelected.delete(id);
+          _updateFilesBulkBar();
+        });
+      });
+      grid.querySelectorAll('.doclib-file-row').forEach(row => {
+        row.addEventListener('click', (e) => {
+          if (e.target.closest('button, a, input')) return;
+          if (_filesSelectMode) {
+            const cb = row.querySelector('.memory-select-cb');
+            if (cb) { cb.checked = !cb.checked; cb.dispatchEvent(new Event('change')); }
+            return;
+          }
+          _toggleFilePreview(row, row.dataset.fileId);
+        });
+      });
+      grid.querySelectorAll('.doclib-file-tags').forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          const id = btn.dataset.fileId;
+          const cur = btn.dataset.tags || '';
+          const next = (uiModule && uiModule.styledPrompt)
+            ? await uiModule.styledPrompt('Edit tags (comma-separated).', { title: 'Tags', defaultValue: cur, placeholder: 'tag1, tag2', confirmText: 'Save', maxLength: 500 })
+            : prompt('Tags (comma-separated):', cur);
+          if (next === null || next === undefined) return;
+          try {
+            const r = await fetch(`/api/files/${encodeURIComponent(id)}/tags`, {
+              method: 'PUT', headers: { 'Content-Type': 'application/json' },
+              credentials: 'same-origin', body: JSON.stringify({ tags: String(next) }),
+            });
+            if (r.ok) { _renderLibFiles(); if (uiModule) uiModule.showToast('Tags saved'); }
+            else if (uiModule) uiModule.showError('Saving tags failed');
+          } catch (_) { if (uiModule) uiModule.showError('Saving tags failed'); }
+        });
+      });
       grid.querySelectorAll('.doclib-file-delete').forEach(btn => {
         btn.addEventListener('click', async (e) => {
           e.stopPropagation();

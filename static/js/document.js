@@ -13,7 +13,7 @@ import markdownModule from './markdown.js';
 import codeRunnerModule from './codeRunner.js';
 import { langIcon } from './langIcons.js';
 import spinnerModule from './spinner.js';
-import { openLibrary, closeLibrary, isLibraryOpen, initLibrary } from './documentLibrary.js?v=419';
+import { openLibrary, closeLibrary, isLibraryOpen, initLibrary } from './documentLibrary.js?v=420';
 import signatureModule from './signature.js';
 import * as Modals from './modalManager.js';
 
@@ -1752,9 +1752,16 @@ import * as Modals from './modalManager.js';
     const doc = docs.get(docId);
     if (!doc) return;
 
-    const instruction = window.prompt(
-      'What should the AI fill in?\n(e.g. "My name is Jane Doe, address 123 Main St, dob 1990-01-15")'
-    );
+    const instruction = (uiModule && uiModule.styledPrompt)
+      ? await uiModule.styledPrompt('What should the AI fill in? (e.g. "My name is Jane Doe, address 123 Main St, dob 1990-01-15")', {
+        title: 'AI fill',
+        placeholder: 'Details the AI should use',
+        confirmText: 'Fill',
+        maxLength: 500,
+      })
+      : window.prompt(
+        'What should the AI fill in?\n(e.g. "My name is Jane Doe, address 123 Main St, dob 1990-01-15")',
+      );
     if (!instruction || !instruction.trim()) return;
 
     _setPdfSaveStatus('saving');
