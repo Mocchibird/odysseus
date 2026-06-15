@@ -2490,6 +2490,11 @@ export function openTasks(focusId) {
     if (focusId) _focusTask(focusId);
     return;
   }
+  // A previous close may still be playing its exit animation (the element
+  // lingers up to 250ms). Remove it now so we never have two #tasks-modal
+  // nodes at once — otherwise getElementById() below would resolve to the
+  // disappearing one and the fresh window would render blank then vanish.
+  document.getElementById('tasks-modal')?.remove();
   _pendingFocusTaskId = focusId || null;
   _open = true;
   _tasksCascadeNext = true;

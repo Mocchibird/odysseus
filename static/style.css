@@ -21912,6 +21912,14 @@ body:not(.welcome-ready) #welcome-screen {
 }
 .modal-content.modal-closing {
   animation: modal-exit 0.18s ease-in both;
+  /* While a window plays its ~0.18-0.25s exit animation it is still in the
+     DOM. On mobile the content is a full-screen sheet, so without this it
+     keeps eating taps for that window — a quick re-tap on the same rail/
+     sidebar icon lands on the disappearing sheet instead of the button, so
+     the window appears to need a second tap to reopen (reported on iOS).
+     Letting pointer events fall through fixes it for every animated-close
+     modal at once; the element is being removed anyway. */
+  pointer-events: none;
 }
 
 @keyframes cookbook-modal-enter {
