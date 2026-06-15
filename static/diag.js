@@ -21,6 +21,62 @@
   var arOK = CSS.supports('aspect-ratio', '1 / 1');
   add('CSS aspect-ratio supported', arOK ? 'YES' : 'NO', arOK ? 'pass' : 'fail');
 
+  // Which build is actually deployed/served (so we know what we're testing).
+  (function () {
+    var row = add('Deployed build (sw CACHE_NAME)', 'checking…', 'warn');
+    fetch('/static/sw.js?cb=' + Date.now(), { cache: 'no-store' })
+      .then(function (r) { return r.text(); })
+      .then(function (t) {
+        var m = t.match(/CACHE_NAME\s*=\s*['"]([^'"]+)/);
+        setLast(row, m ? m[1] + ' (360-on-three.js = v438+)' : 'could not parse', m ? '' : 'warn');
+      })
+      .catch(function (e) { setLast(row, 'fetch failed: ' + e, 'fail'); });
+  })();
+
+  // F. The REAL 360 path on this device: does three.js import, and can a real
+  // gallery video play + texture through it? Distinguishes "three.js won't load
+  // on iOS" from "the video won't play" from "all good (app integration bug)".
+  (function () {
+    var row = add('F. three.js + real video (360 path)', 'importing three.js…', 'warn');
+    import('/static/lib/three.module.min.js').then(function (THREE) {
+      var ver = 'r' + (THREE.REVISION || '?');
+      return fetch('/api/gallery/library?media_type=video&limit=1', { credentials: 'same-origin' })
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (data) {
+          var items = (data && data.items) || [];
+          var url = items.length ? items[0].url : null;
+          if (!url) { setLast(row, 'three.js ' + ver + ' loaded OK — but no videos in gallery to test', 'warn'); return; }
+          var v = document.createElement('video');
+          v.muted = true; v.setAttribute('muted', ''); v.playsInline = true;
+          v.setAttribute('playsinline', ''); v.setAttribute('webkit-playsinline', '');
+          v.loop = true; v.src = url;
+          // ON-SCREEN (small, visible) so iOS doesn't pause it for being offscreen
+          v.style.cssText = 'position:fixed;right:4px;bottom:4px;width:64px;height:36px;z-index:99;opacity:0.6';
+          document.body.appendChild(v);
+          var finish = function () {
+            var rendered = false, err = '';
+            try {
+              var rr = new THREE.WebGLRenderer(); rr.setSize(64, 36);
+              var sc = new THREE.Scene(); var cam = new THREE.PerspectiveCamera(75, 2, 0.1, 100);
+              var tex = new THREE.VideoTexture(v);
+              var geo = new THREE.SphereGeometry(10, 24, 16); geo.scale(-1, 1, 1);
+              sc.add(new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ map: tex })));
+              rr.render(sc, cam); rendered = true; rr.dispose();
+            } catch (e) { err = String(e); }
+            var okk = rendered && !v.paused && v.videoWidth > 0;
+            setLast(row, 'three.js ' + ver + ' OK | video paused=' + v.paused + ' readyState=' + v.readyState +
+              ' vw=' + v.videoWidth + ' | three render ' + (rendered ? 'OK' : 'FAIL ' + err), okk ? 'pass' : 'fail');
+            setTimeout(function () { v.remove(); }, 1500);
+          };
+          var p = v.play();
+          if (p && p.then) p.then(function () { setTimeout(finish, 700); }).catch(function (e) { setLast(row, 'three.js ' + ver + ' OK; but video.play() REJECTED: ' + e, 'fail'); setTimeout(finish, 700); });
+          else setTimeout(finish, 700);
+        });
+    }).catch(function (e) {
+      setLast(row, 'three.js FAILED to import: ' + e + ' — THIS is why 360 is black on iOS', 'fail');
+    });
+  })();
+
   var IMG = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='4' height='6'%3E%3Crect width='4' height='6' fill='%234a90d9'/%3E%3C/svg%3E";
 
   // Build a 4-cell grid variant, measure squareness + overlap AFTER `delay`ms.
