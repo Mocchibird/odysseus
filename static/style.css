@@ -17510,14 +17510,11 @@ body:not(.email-doc-split-active) #email-lib-modal.email-lib-fullscreen:not(.mod
 /* Video cards: <video> fills the same slot as <img>, plus a small play badge
    so it's clear the thumbnail represents a video. */
 .gallery-card video {
-  position: absolute;
-  inset: 0;
   width: 100%;
   height: 100%;
   object-fit: cover;
   background: #000;
   display: block;
-  z-index: 0;
 }
 .gallery-card-play {
   position: absolute;
@@ -17678,6 +17675,12 @@ body.gallery-selecting .gallery-card-menu-btn,
   overflow-y: auto;
   padding: 2px;
   transition: border-color 0.15s, background 0.15s;
+  /* align-content:start is the on-device-verified fix for the iOS squish:
+     when the grid is height-constrained (keyboard open / short viewport),
+     WebKit otherwise compresses the auto rows to fit instead of letting the
+     square cells overflow and scroll. start = rows keep their natural
+     aspect-ratio height and the grid scrolls. (Diag: fix A = square OK.) */
+  align-content: start;
 }
 .gallery-grid.gallery-dragover {
   border: 2px dashed var(--red);
@@ -17694,20 +17697,23 @@ body.gallery-selecting .gallery-card-menu-btn,
 }
 .gallery-card {
   position: relative;
+  aspect-ratio: 1;
+  /* min-height:0 lets the square aspect-ratio height win over a tall image's
+     min-content height (iOS/WebKit doesn't reliably apply overflow:hidden ->
+     min-content:0 for grid items). Combined with align-content:start on the
+     grid (the anti-squish fix) and the absolutely-positioned media children
+     below (inset:0, so a tall image can't add intrinsic height), the cell
+     stays square at any container height and the grid scrolls.
+     NOTE: the earlier padding-top:100% ::before hack SQUISHED on iOS (on-device
+     diag fix B = 106x46) — do NOT reintroduce it; align-content:start is the
+     real fix (diag fix A = square OK). */
+  min-height: 0;
   border-radius: 6px;
   overflow: hidden;
   border: 1px solid var(--border);
   cursor: pointer;
   transition: border-color 0.15s, box-shadow 0.15s, transform 0.15s;
 }
-/* Square cells via the width-based padding-top hack instead of aspect-ratio.
-   iOS/WebKit squishes aspect-ratio grid items when the grid's height is
-   constrained (e.g. the on-screen keyboard shrinks the modal) — it compresses
-   the rows instead of scrolling. padding-top:100% derives the height purely
-   from the cell WIDTH, so the cell stays square at ANY container height and the
-   grid scrolls. Every card child (img/video/buttons/label/upload-inner) is
-   absolutely positioned over this spacer, so nothing adds intrinsic height. */
-.gallery-card::before { content: ''; display: block; padding-top: 100%; }
 /* Upload-affordance tile pinned to the top-left of the Photos grid. Matches
    the Upload album tile in the Albums tab — dashed border, centered icon. */
 .gallery-card-upload {
@@ -17966,13 +17972,10 @@ body.gallery-selecting .gallery-card-menu-btn,
 }
 .gallery-bulk-cancel:hover { opacity: 1; }
 .gallery-card img {
-  position: absolute;
-  inset: 0;
   width: 100%;
   height: 100%;
   object-fit: cover;
   display: block;
-  z-index: 0;
 }
 .gallery-card-info {
   position: absolute;
