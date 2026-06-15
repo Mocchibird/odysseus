@@ -98,39 +98,54 @@
   });
   testVariant('D. + inside max-height scroller', { absChildren: true, scroller: true });
 
-  // E. REAL gallery image inside a flex-column scroller (mimics the modal),
-  // testing fix candidates. The A-D variants used tiny instant images + no app
-  // CSS, so they couldn't reproduce the real bug (card grows to a real, large,
-  // async-loading image). Fetches a real image so we see the actual failure
-  // and which fix makes the card square again.
+  // E. SQUISH test — reproduce the height-dependent card squish with the REAL
+  // gallery-grid CSS, a REAL image, in a HEIGHT-CONSTRAINED scroller (mimics the
+  // keyboard-shrunk modal). Runs the same grid at a TALL vs SHORT height to show
+  // the height-dependence, then tries fix candidates at the SHORT height.
+  // 'square' = card w≈h (good); if SHORT is squished but TALL is square, the
+  // grid is distributing its height to rows instead of scrolling.
   (function () {
-    var head = add('E. REAL image in flex-col scroller (3 fix candidates)', 'fetching a real gallery image…', 'warn');
-    function buildVariant(label, imgUrl, cardExtra, imgExtra) {
+    var head = add('E. SQUISH test (real image, height-constrained grid)', 'fetching a real gallery image…', 'warn');
+    // build a grid of 12 real-image cards inside a fixed-height flex column.
+    // `mode` selects baseline vs a candidate fix.
+    function run(label, imgUrl, hPx, mode) {
       var host = document.createElement('div'); host.className = 'row';
       host.innerHTML = '<span class="k">' + label + ':</span> <span class="warn">measuring…</span>';
       out.appendChild(host);
       var status = host.querySelector('span:last-child');
-      // flex-column constrained parent, like the gallery modal-body
       var flex = document.createElement('div');
-      flex.style.cssText = 'display:flex;flex-direction:column;max-height:240px;margin-top:6px';
+      flex.style.cssText = 'display:flex;flex-direction:column;height:' + hPx + 'px;width:330px;margin-top:6px;border:1px dashed #444';
       var grid = document.createElement('div');
-      grid.style.cssText = 'display:grid;grid-template-columns:repeat(auto-fill,minmax(90px,1fr));gap:6px;max-height:220px;overflow-y:auto';
-      for (var i = 0; i < 4; i++) {
+      // mirror .gallery-grid; max-height removed for the "no-maxheight" fix
+      var gridCss = 'display:grid;grid-template-columns:repeat(auto-fill,minmax(100px,1fr));gap:6px;overflow-y:auto;';
+      if (mode === 'nomax') gridCss += 'flex:1;min-height:0;';          // fix C: grid fills+scrolls, no vh cap
+      else gridCss += 'max-height:60vh;';                                // baseline/others: vh-capped like the app
+      if (mode === 'aligncontent') gridCss += 'align-content:start;';   // fix A
+      grid.style.cssText = gridCss;
+      for (var i = 0; i < 12; i++) {
         var card = document.createElement('div');
-        card.style.cssText = 'position:relative;aspect-ratio:1;border-radius:6px;overflow:hidden;border:1px solid #3a3d45;background:#2a2d35;' + (cardExtra || '');
-        var img = document.createElement('img');
-        img.src = imgUrl;
-        img.style.cssText = 'width:100%;height:100%;object-fit:cover;display:block;' + (imgExtra || '');
-        card.appendChild(img);
+        var cardCss = 'position:relative;border-radius:6px;overflow:hidden;border:1px solid #3a3d45;background:#2a2d35;min-height:0;';
+        if (mode === 'padhack') cardCss += '';                           // height via ::before-like spacer below
+        else cardCss += 'aspect-ratio:1;';
+        card.style.cssText = cardCss;
+        if (mode === 'padhack') {
+          var spacer = document.createElement('div'); spacer.style.cssText = 'padding-top:100%;'; card.appendChild(spacer);
+          var im = document.createElement('img'); im.src = imgUrl;
+          im.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block;';
+          card.appendChild(im);
+        } else {
+          var img = document.createElement('img'); img.src = imgUrl;
+          img.style.cssText = 'width:100%;height:100%;object-fit:cover;display:block;';
+          card.appendChild(img);
+        }
         grid.appendChild(card);
       }
       flex.appendChild(grid); host.appendChild(flex);
       setTimeout(function () {
         var c0 = grid.children[0].getBoundingClientRect();
-        var img0 = grid.children[0].querySelector('img');
-        var square = grid.children[0] && c0.h > 0 && Math.abs(c0.w - c0.h) <= 3;
-        status.textContent = (square ? 'OK square' : 'BROKEN') + ' — card ' + Math.round(c0.w) + 'x' + Math.round(c0.h) +
-          ', imgNatural ' + img0.naturalWidth + 'x' + img0.naturalHeight + ', imgClientH ' + img0.clientHeight;
+        var square = c0.h > 0 && Math.abs(c0.w - c0.h) <= 4;
+        status.textContent = (square ? 'square OK' : (c0.h < c0.w ? 'SQUISHED' : 'TALL')) +
+          ' — card ' + Math.round(c0.w) + 'x' + Math.round(c0.h) + ', scrollH ' + grid.scrollHeight + ' clientH ' + grid.clientHeight;
         status.className = square ? 'pass' : 'fail';
       }, 900);
     }
@@ -139,11 +154,13 @@
       .then(function (data) {
         var items = (data && data.items) || [];
         var url = items.length ? items[0].url : null;
-        if (!url) { setLast(head, 'no gallery images returned (cannot run E) — items=' + items.length, 'warn'); return; }
-        setLast(head, 'using ' + url.slice(0, 60), '');
-        buildVariant('E0 baseline (height:100% img)', url, '', '');
-        buildVariant('E1 card min-height:0', url, 'min-height:0;', '');
-        buildVariant('E2 img position:absolute inset:0', url, '', 'position:absolute;inset:0;');
+        if (!url) { setLast(head, 'no gallery images (open the gallery once, or it is empty) — items=' + items.length, 'warn'); return; }
+        setLast(head, 'using ' + url.slice(0, 50), '');
+        run('E-tall  baseline (height 440)', url, 440, 'base');
+        run('E-short baseline (height 200)', url, 200, 'base');
+        run('E-short fix A: align-content:start', url, 200, 'aligncontent');
+        run('E-short fix B: padding-hack + abs img', url, 200, 'padhack');
+        run('E-short fix C: no vh cap, flex+scroll', url, 200, 'nomax');
       })
       .catch(function (e) { setLast(head, 'fetch failed: ' + e, 'fail'); });
   })();
