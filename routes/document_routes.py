@@ -557,7 +557,8 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
         user = get_current_user(request)
         try:
             data = await request.json()
-        except Exception:
+        except Exception as e:
+            logger.warning("Failed to parse export request body, defaulting to empty", exc_info=e)
             data = {}
         ids = data.get("ids") or []
         if not ids:
@@ -700,8 +701,8 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
                     try:
                         from src.agent_tools.document_tools import clear_active_document
                         clear_active_document(doc_id)
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.warning("Failed to clear active document %r on detach", doc_id, exc_info=e)
             db.commit()
             db.refresh(doc)
             _index_document_rag(doc.owner or user, doc)

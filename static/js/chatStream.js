@@ -170,7 +170,7 @@ export function handleUIControl(uiData) {
           if (fn) fn();
         }).catch(function(){});
       } else if (panel === 'notes') {
-        import('./notes.js?v=421').then(function(mod) {
+        import('./notes.js?v=440').then(function(mod) {
           var fn = mod.openPanel || mod.openNotes || (mod.default && (mod.default.openPanel || mod.default.openNotes));
           if (fn) fn();
         }).catch(function(){});
@@ -185,7 +185,7 @@ export function handleUIControl(uiData) {
     } else if (uiEvent === 'open_email_reply' || uiData.ui_event === 'open_email_reply') {
       import('./emailInbox.js').then(function(mod) {
         var fn = mod.openReplyDraft || (mod.default && mod.default.openReplyDraft);
-        if (fn) fn(uiData.uid, uiData.folder || 'INBOX', uiData.mode || 'reply');
+        if (fn) fn(uiData.uid, uiData.folder || 'INBOX', uiData.mode || 'reply', uiData.body || '');
       }).catch(function(e) {
         console.warn('open_email_reply failed:', e);
       });

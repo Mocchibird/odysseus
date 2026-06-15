@@ -2,15 +2,17 @@
 """Application-wide constants and configuration values."""
 import os
 
+from src.runtime_paths import get_app_root, get_default_data_dir
+
 APP_VERSION = "1.0.0"
 
 # Base paths
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__))) + "/"
+BASE_DIR = os.path.join(get_app_root(), "")
 STATIC_DIR = os.path.join(BASE_DIR, "static")
 # `or` (not getenv's default) so an env var passed EMPTY (e.g. docker-compose
 # `${VAR:-}`) falls back to the default instead of becoming "" — an empty path
 # then crashes os.makedirs("") with "[Errno 2] No such file or directory: ''".
-DATA_DIR = os.getenv("ODYSSEUS_DATA_DIR") or os.path.join(BASE_DIR, "data")
+DATA_DIR = os.getenv("ODYSSEUS_DATA_DIR") or get_default_data_dir()
 
 # Data file paths
 # Single source of truth: every persisted file/dir lives under DATA_DIR, which
@@ -68,6 +70,14 @@ FASTEMBED_CACHE_DIR = os.getenv("FASTEMBED_CACHE_PATH") or os.path.join(DATA_DIR
 MAX_OUTPUT_CHARS = 10_000       # cap for bash/python/web_search/web_fetch output
 MAX_READ_CHARS = 20_000         # cap for read_file / document preview
 MAX_DIFF_LINES = 400            # cap for edit_file unified-diff display
+
+# web_fetch response-size policy (#3812). MAX_OUTPUT_CHARS above only trims
+# what the agent SEES; these caps bound what the server downloads, parses,
+# and writes to the content cache. The soft cap is the default download
+# budget; the agent can raise it per call (full/max_bytes) but never past
+# the hard cap, so a model can't decide to pull a multi-GB file.
+WEB_FETCH_SOFT_MAX_BYTES = 2_000_000    # default download budget (2 MB)
+WEB_FETCH_HARD_MAX_BYTES = 20_000_000   # absolute ceiling, even with override (20 MB)
 
 # API Configuration
 MAX_CONTEXT_MESSAGES = 90

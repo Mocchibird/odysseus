@@ -342,6 +342,7 @@ function _anchorLeftDock(content) {
   }
 }
 
+export function collapseSidebarToRail() { return _collapseSidebarToRail(); }
 function _collapseSidebarToRail() {
   const sidebar = document.getElementById('sidebar');
   const rail = document.getElementById('icon-rail');
@@ -848,6 +849,9 @@ export function makeEdgeDockController(modal, side = 'right', dockClass) {
     left: document.createElement('div'),
     right: document.createElement('div'),
   };
+  // In minimal/headless DOM stubs (unit tests, SSR) createElement may not
+  // yield real elements with the event API — there's nothing to wire up.
+  if (typeof handles.left.addEventListener !== 'function') return;
   const _setStyle = (el, prop, value) => {
     if (el.style[prop] !== value) el.style[prop] = value;
   };
@@ -861,7 +865,10 @@ export function makeEdgeDockController(modal, side = 'right', dockClass) {
     handle.style.bottom = '0';
     handle.style.width = '10px';
     handle.style.cursor = 'col-resize';
-    handle.style.background = 'linear-gradient(to right, transparent 0 3px, color-mix(in srgb, var(--accent, var(--red)) 35%, transparent) 3px 7px, transparent 7px 10px)';
+    // Invisible at rest, accent stripe fades in on hover (see
+    // .edge-dock-resize-handle CSS rule).
+    handle.style.background = 'transparent';
+    handle.style.transition = 'background 0.18s ease';
     handle.style.pointerEvents = 'auto';
     handle.style.touchAction = 'none';
     handle.style.display = 'none';
@@ -1042,6 +1049,9 @@ export function makeEdgeDockController(modal, side = 'right', dockClass) {
 (function _initSplitSeamIndicator() {
   if (typeof document === 'undefined') return;
   const stripe = document.createElement('div');
+  // Minimal/headless DOM stubs (unit tests, SSR) may not yield real elements
+  // with the event API — there's nothing to wire up there.
+  if (typeof stripe.addEventListener !== 'function') return;
   stripe.id = 'email-doc-split-seam';
   stripe.style.position = 'fixed';
   stripe.style.top = '0';

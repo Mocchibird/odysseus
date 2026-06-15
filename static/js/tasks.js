@@ -1079,9 +1079,23 @@ function _showForm(existing, initTaskType, initTriggerType) {
     typeOpts.innerHTML = '';
     if (taskType === 'llm' || taskType === 'research') {
       const placeholder = taskType === 'research' ? 'What should be researched?' : 'What should the AI do?';
+      const _personaOpts = [
+        ['', 'Default (no persona)'],
+        ['socrates', 'Socrates'],
+        ['razor', 'Razor'],
+        ['nietzsche', 'Nietzsche'],
+        ['spark', 'Spark'],
+        ['odysseus', 'Odysseus'],
+      ];
+      const _curPersona = (existing?.character_id || '').toLowerCase();
+      const _personaOptsHtml = _personaOpts.map(([v, label]) =>
+        `<option value="${v}" ${v === _curPersona ? 'selected' : ''}>${label}</option>`).join('');
       typeOpts.innerHTML = `
         <label class="task-form-label">${taskType === 'research' ? 'Research question' : 'Prompt'}</label>
         <textarea id="task-form-prompt" class="task-form-input task-form-textarea" rows="4" placeholder="${placeholder}">${existing?.prompt || ''}</textarea>
+
+        <label class="task-form-label">Persona <span style="opacity:0.5;font-weight:normal;font-size:10px;">(optional — biases the output voice)</span></label>
+        <select id="task-form-persona" class="task-form-input">${_personaOptsHtml}</select>
       `;
     } else {
       typeOpts.innerHTML = `
@@ -1439,7 +1453,11 @@ function _showForm(existing, initTaskType, initTriggerType) {
         return;
       }
       payload.prompt = prompt;
+      const personaVal = document.getElementById('task-form-persona')?.value || '';
+      payload.character_id = personaVal;
     } else {
+      // Non-llm/research tasks: explicitly clear any persona on switch.
+      payload.character_id = '';
       const action = document.getElementById('task-form-action')?.value;
       if (!action) {
         if (uiModule) uiModule.showError('Select an action');
@@ -2484,12 +2502,15 @@ function _renderMainView() {
 
 // ---- Modal ----
 
-export function openTasks(focusId) {
+export function openTasks(focusId, opts) {
+  const o = opts || {};
   if (_open) {
-    // Already open — just focus the requested task.
+    // Already open — just focus the requested task / apply filter.
+    if (o.filter !== undefined) { _taskFilter = o.filter; _renderList(); }
     if (focusId) _focusTask(focusId);
     return;
   }
+  if (o.filter !== undefined) _taskFilter = o.filter;
   // A previous close may still be playing its exit animation (the element
   // lingers up to 250ms). Remove it now so we never have two #tasks-modal
   // nodes at once — otherwise getElementById() below would resolve to the

@@ -1100,6 +1100,9 @@ export function openPanel() {
   document.getElementById('notes-pane-backdrop')?.remove();
   _open = true;
   _editingId = null;
+  // Reset the search filter — the rebuilt pane's search input renders empty, so a
+  // stale _searchQuery would silently hide non-matching notes after a reopen.
+  _searchQuery = '';
   _clearViewedReminderGlows();
   _firedDotDismissedAt = Date.now();
   try { localStorage.setItem(REMINDER_DISMISSED_AT_KEY, String(_firedDotDismissedAt)); } catch {}
