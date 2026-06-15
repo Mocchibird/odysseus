@@ -899,17 +899,29 @@ async def action_daily_brief(owner: str, **kwargs) -> Tuple[str, bool]:
     """Build a short morning digest: today's calendar events, unread email count
     + top-N senders/subjects, active todos."""
     try:
-        from datetime import datetime as _dt, timedelta as _td
+        from datetime import datetime as _dt, timedelta as _td, time as _time, timezone as _tz
         import json as _json
 
         from core.database import SessionLocal, CalendarEvent, CalendarCal, Note
         from routes.email_helpers import _imap_connect, _decode_header
         from src.i18n import format_date, get_user_language, t as _t18
+        from src.user_time import resolve_owner_tzinfo, event_local_clock, event_local_datetime
         _lang = get_user_language(owner)
 
         # ----- Calendar: today's events -----
-        today = _dt.now().replace(hour=0, minute=0, second=0, microsecond=0)
-        tomorrow = today + _td(days=1)
+        # "Today" is the user's local day, not the server's (UTC). Events are
+        # stored as UTC instants (is_utc) or floating local time; both must be
+        # bucketed and displayed against the user's clock.
+        _tzinfo = resolve_owner_tzinfo(owner)
+        _now_local = _dt.now(_tz.utc).astimezone(_tzinfo)
+        _day = _now_local.date()
+        _start_local = _dt.combine(_day, _time.min).replace(tzinfo=_tzinfo)
+        _end_local = _start_local + _td(days=1)
+        # Naive-UTC bounds widened by a day so the SQL pre-filter catches both
+        # UTC-stored and floating events near the local-day edges; exact
+        # local-day membership is decided in Python below.
+        today = _start_local.astimezone(_tz.utc).replace(tzinfo=None) - _td(days=1)
+        tomorrow = _end_local.astimezone(_tz.utc).replace(tzinfo=None) + _td(days=1)
         # v2 review HIGH-12: gate the OR-null branch on single-user
         # (unconfigured) deploys only. In a multi-user deploy, one
         # user's daily brief must not include another user's notes or
@@ -928,7 +940,16 @@ async def action_daily_brief(owner: str, **kwargs) -> Tuple[str, bool]:
             )
             if owner:
                 ev_q = owner_filter(ev_q, CalendarCal, owner, include_shared=_allow_null)
-            events = ev_q.order_by(CalendarEvent.dtstart).all()
+            events_raw = ev_q.order_by(CalendarEvent.dtstart).all()
+            # Exact local-day membership: an event counts as "today" if its
+            # interval (interpreted per is_utc) overlaps the user's local day.
+            def _overlaps_today(e):
+                s = event_local_datetime(e.dtstart, e.is_utc, _tzinfo)
+                if s is None:
+                    return False
+                en = event_local_datetime(e.dtend, e.is_utc, _tzinfo) or s
+                return s < _end_local and en > _start_local
+            events = [e for e in events_raw if _overlaps_today(e)]
             # ----- Notes: pinned + non-archived todos with at least one undone item -----
             n_q = db.query(Note).filter(Note.archived == False)  # noqa: E712
             if owner:
@@ -992,13 +1013,13 @@ async def action_daily_brief(owner: str, **kwargs) -> Tuple[str, bool]:
         # ----- Compose -----
         # %-d is GNU-only; format the day with str() so the brief works on
         # Windows / non-glibc Python builds too.
-        date_label = format_date(today, _lang)
+        date_label = format_date(_dt.combine(_day, _time.min), _lang)
 
         plain = [_t18("brief_title", _lang, date=date_label), ""]
         if events:
             plain.append(_t18("brief_calendar", _lang))
             for e in events:
-                t = e.dtstart.strftime("%H:%M") if not e.all_day else _t18("brief_all_day", _lang)
+                t = _t18("brief_all_day", _lang) if e.all_day else event_local_clock(e.dtstart, e.is_utc, _tzinfo)
                 loc = f" @ {e.location}" if e.location else ""
                 plain.append(f"  {t}  {e.summary}{loc}")
             plain.append("")
@@ -2157,26 +2178,42 @@ async def action_evening_wrapup(owner: str, **kwargs) -> Tuple[str, bool]:
     """End-of-day summary: today's events, open todos, habit status, and a
     preview of tomorrow's first events. Read-only — a counterpart to daily_brief."""
     try:
-        from datetime import datetime as _dt, timedelta as _td
+        from datetime import datetime as _dt, timedelta as _td, time as _time, timezone as _tz
         import json as _json
         from core.database import SessionLocal, CalendarEvent, CalendarCal, Note
         from src.i18n import format_date, get_user_language, t as _t18
+        from src.user_time import resolve_owner_tzinfo, event_local_clock, event_local_datetime
         _lang = get_user_language(owner)
 
-        today = _dt.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        # Day boundaries in the user's local timezone, not the server's (UTC).
+        _tzinfo = resolve_owner_tzinfo(owner)
+        _now_local = _dt.now(_tz.utc).astimezone(_tzinfo)
+        today = _dt.combine(_now_local.date(), _time.min).replace(tzinfo=_tzinfo)
         tomorrow = today + _td(days=1)
         day_after = tomorrow + _td(days=1)
         allow_null = _allow_null_owner()
         db = SessionLocal()
         try:
-            def _events(lo, hi):
+            def _events(lo_local, hi_local):
+                # Widen the SQL pre-filter by a day so UTC-stored and floating
+                # events near the edges are caught; bucket precisely in Python.
+                lo = lo_local.astimezone(_tz.utc).replace(tzinfo=None) - _td(days=1)
+                hi = hi_local.astimezone(_tz.utc).replace(tzinfo=None) + _td(days=1)
                 q = db.query(CalendarEvent).join(CalendarCal).filter(
                     CalendarEvent.dtstart < hi, CalendarEvent.dtend > lo,
                     CalendarEvent.status != "cancelled",
                 )
                 if owner:
                     q = owner_filter(q, CalendarCal, owner, include_shared=allow_null)
-                return q.order_by(CalendarEvent.dtstart).all()
+                out = []
+                for e in q.order_by(CalendarEvent.dtstart).all():
+                    s = event_local_datetime(e.dtstart, e.is_utc, _tzinfo)
+                    if s is None:
+                        continue
+                    en = event_local_datetime(e.dtend, e.is_utc, _tzinfo) or s
+                    if s < hi_local and en > lo_local:
+                        out.append(e)
+                return out
 
             today_events = _events(today, tomorrow)
             tomorrow_events = _events(tomorrow, day_after)
@@ -2211,11 +2248,11 @@ async def action_evening_wrapup(owner: str, **kwargs) -> Tuple[str, bool]:
         except Exception:
             pass
 
-        date_label = format_date(today, _lang)
+        date_label = format_date(_dt.combine(_now_local.date(), _time.min), _lang)
         out = [_t18("wrapup_title", _lang, date=date_label), ""]
         out.append(_t18("wrapup_events", _lang, n=len(today_events)))
         for e in today_events:
-            t = e.dtstart.strftime("%H:%M") if not e.all_day else _t18("brief_all_day", _lang)
+            t = _t18("brief_all_day", _lang) if e.all_day else event_local_clock(e.dtstart, e.is_utc, _tzinfo)
             out.append(f"  {t}  {e.summary}")
         out.append("")
         if habit_line:
@@ -2231,7 +2268,7 @@ async def action_evening_wrapup(owner: str, **kwargs) -> Tuple[str, bool]:
         if tomorrow_events:
             out.append(_t18("wrapup_tomorrow", _lang))
             for e in tomorrow_events[:5]:
-                t = e.dtstart.strftime("%H:%M") if not e.all_day else _t18("brief_all_day", _lang)
+                t = _t18("brief_all_day", _lang) if e.all_day else event_local_clock(e.dtstart, e.is_utc, _tzinfo)
                 out.append(f"  {t}  {e.summary}")
         else:
             out.append(_t18("wrapup_tomorrow_empty", _lang))

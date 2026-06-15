@@ -132,6 +132,11 @@ DEFAULT_SETTINGS = {
     # Preferred output language for the assistant + notifications (en/ko).
     # Per-user override via _PER_USER_KEYS; see src/i18n.py.
     "language": "en",
+    # IANA timezone for displaying stored (UTC) times in background output —
+    # daily brief, evening wrap-up, reminders. Per-user override via
+    # _PER_USER_KEYS, auto-learned from the browser (x-tz-name). Empty = fall
+    # back to the server's local zone. See src/user_time.py.
+    "timezone": "",
     # Admin-set GLOBAL allowlist of model ids that NON-ADMIN users may use for
     # chat & agent. Empty = no restriction (every enabled endpoint's models show
     # in their picker, current behavior). When non-empty: non-admins' model
@@ -282,6 +287,10 @@ _PER_USER_KEYS = {
     "default_persona",
     # Assistant/notification language is personal (en/ko, see src/i18n.py).
     "language",
+    # Display timezone is personal, auto-learned from the browser so the
+    # daily brief / reminders convert UTC to the user's local clock — and
+    # follow them when travelling. See src/user_time.py.
+    "timezone",
     "utility_endpoint_id", "utility_model", "utility_model_fallbacks",
     "research_endpoint_id", "research_model",
     # Reminder delivery is personal: one user may want browser-only alerts,

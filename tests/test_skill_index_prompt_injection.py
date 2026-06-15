@@ -105,7 +105,10 @@ def _patch_prefs(monkeypatch, data_dir):
         "skills_enabled": True,
         "auto_approve_skills": True,
     }
-    sys.modules["routes.prefs_routes"] = fake_prefs
+    # setitem (not a bare sys.modules assignment) so the real module is
+    # restored at teardown — otherwise this fake leaks to every later test
+    # that imports routes.prefs_routes (e.g. the per-user timezone round-trip).
+    monkeypatch.setitem(sys.modules, "routes.prefs_routes", fake_prefs)
 
     # Bust the base-prompt cache so our test re-reads the skill index.
     from src import agent_loop

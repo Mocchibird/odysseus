@@ -938,9 +938,9 @@ def setup_calendar_routes() -> APIRouter:
 
     @router.get("/today")
     async def today(request: Request):
-        _require_user(request)
+        owner = _require_user(request)
         try:
-            from src.user_time import clear_user_time_context, timezone_label
+            from src.user_time import clear_user_time_context, timezone_label, persist_user_timezone
 
             clear_user_time_context()
             tz_offset = request.headers.get("x-tz-offset")
@@ -949,6 +949,9 @@ def setup_calendar_routes() -> APIRouter:
                 set_user_tz_offset(tz_offset)
             if tz_name:
                 set_user_tz_name(tz_name)
+                # Remember the browser's zone so background output (daily brief,
+                # reminders) renders in the user's local time and follows travel.
+                persist_user_timezone(owner, tz_name)
             now = now_user_local()
             return {
                 "date": now.date().isoformat(),

@@ -307,19 +307,29 @@ def _recover_empty_session_model(sess, session_id: str, owner: str | None = None
 def _set_user_time_from_request(request: Request) -> None:
     """Copy browser timezone headers into the per-request context.
 
-    This is intentionally ephemeral: it is used only while building prompts
-    and running tools for this request. It is not persisted or logged.
+    The per-request offset/name are ephemeral (used only while building this
+    request's prompts and tools). The IANA zone name is additionally persisted
+    to the user's prefs (low-churn, only on change) so background output — the
+    daily brief and reminders — can render in the user's local time even with
+    no browser request, and follow them when they travel.
     """
     try:
         tz_offset = request.headers.get("x-tz-offset")
         tz_name = request.headers.get("x-tz-name")
-        from src.user_time import clear_user_time_context, set_user_tz_name, set_user_tz_offset
+        from src.user_time import (
+            clear_user_time_context, set_user_tz_name, set_user_tz_offset,
+            persist_user_timezone,
+        )
 
         clear_user_time_context()
         if tz_offset is not None:
             set_user_tz_offset(tz_offset)
         if tz_name:
             set_user_tz_name(tz_name)
+            try:
+                persist_user_timezone(get_current_user(request), tz_name)
+            except Exception:
+                pass
     except Exception:
         pass
 

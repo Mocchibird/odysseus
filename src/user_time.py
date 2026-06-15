@@ -55,6 +55,117 @@ def clear_user_time_context() -> None:
     _USER_TZ_NAME.set(None)
 
 
+def _safe_zone_name(name) -> Optional[str]:
+    """Validate/normalize an IANA zone name; return None if it isn't loadable."""
+    if not name:
+        return None
+    first_token = str(name).strip().split()[0] if str(name).strip() else ""
+    cleaned = re.sub(r"[^A-Za-z0-9_+\-./]", "", first_token)[:80]
+    if not cleaned:
+        return None
+    try:
+        from zoneinfo import ZoneInfo
+        ZoneInfo(cleaned)
+    except Exception:
+        return None
+    return cleaned
+
+
+def get_user_timezone(owner: str = "") -> Optional[str]:
+    """The owner's persisted IANA timezone (per-user pref -> global), if any.
+
+    Unlike the per-request ContextVar above, this reads the stored preference,
+    so background tasks (daily brief, reminders) that run without a browser
+    request can still resolve the user's clock. Returns None when unset.
+    """
+    try:
+        from src.settings import get_setting, get_user_setting
+        name = get_user_setting("timezone", str(owner or ""), get_setting("timezone", ""))
+    except Exception:
+        name = None
+    return _safe_zone_name(name)
+
+
+def resolve_owner_tzinfo(owner: str = ""):
+    """Best tzinfo for an owner in a background context: persisted pref ->
+    per-request context -> server local -> UTC. Always returns a tzinfo."""
+    name = get_user_timezone(owner)
+    if name:
+        try:
+            from zoneinfo import ZoneInfo
+            return ZoneInfo(name)
+        except Exception:
+            pass
+    ctx_name = get_user_tz_name()
+    if ctx_name:
+        try:
+            from zoneinfo import ZoneInfo
+            return ZoneInfo(ctx_name)
+        except Exception:
+            pass
+    offset = get_user_tz_offset()
+    if offset is not None:
+        return timezone(timedelta(minutes=offset))
+    return datetime.now().astimezone().tzinfo or timezone.utc
+
+
+def persist_user_timezone(owner: str, tz_name) -> None:
+    """Persist the browser's IANA timezone to the owner's prefs, low-churn.
+
+    Called from request paths that carry both an owner and the ``x-tz-name``
+    header; only writes when the (validated) zone actually changed so we don't
+    rewrite prefs on every request. This is what makes background output follow
+    the user when they travel.
+    """
+    if not owner:
+        return
+    name = _safe_zone_name(tz_name)
+    if not name:
+        return
+    try:
+        from routes.prefs_routes import _load_for_user, _save_for_user
+        prefs = _load_for_user(owner) or {}
+        if prefs.get("timezone") == name:
+            return
+        prefs["timezone"] = name
+        _save_for_user(owner, prefs)
+    except Exception:
+        pass
+
+
+def event_local_clock(dtstart, is_utc: bool, tzinfo, fmt: str = "%H:%M") -> str:
+    """Format a stored calendar datetime for display in ``tzinfo``.
+
+    Events are stored either as UTC instants (``is_utc``) or as floating
+    local wall-clock (``is_utc`` false). UTC instants are converted to the
+    target zone; floating times are shown as stored (they mean the same
+    wall-clock everywhere). Mirrors the browser-side rule so server-rendered
+    briefs match the calendar UI.
+    """
+    if dtstart is None:
+        return ""
+    if is_utc:
+        try:
+            return dtstart.replace(tzinfo=timezone.utc).astimezone(tzinfo).strftime(fmt)
+        except Exception:
+            return dtstart.strftime(fmt)
+    return dtstart.strftime(fmt)
+
+
+def event_local_datetime(dtstart, is_utc: bool, tzinfo):
+    """Return ``dtstart`` as an aware datetime in ``tzinfo`` (see
+    event_local_clock for the UTC-vs-floating rule). Used to bucket events by
+    the user's local day."""
+    if dtstart is None:
+        return None
+    if is_utc:
+        try:
+            return dtstart.replace(tzinfo=timezone.utc).astimezone(tzinfo)
+        except Exception:
+            return dtstart.replace(tzinfo=tzinfo)
+    return dtstart.replace(tzinfo=tzinfo)
+
+
 def format_utc_offset(offset_min: Optional[int]) -> str:
     """Format minutes east of UTC as +HH:MM or -HH:MM."""
     if offset_min is None:
