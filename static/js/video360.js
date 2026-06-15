@@ -1,25 +1,29 @@
 /**
- * video360.js — dependency-free WebGL 360°/VR video viewer for the gallery.
+ * video360.js — 360°/VR video viewer for the gallery, rendered with three.js.
  *
- * Renders a <video> as an equirectangular panorama via a single fullscreen-quad
- * fragment shader (per-pixel ray -> longitude/latitude -> texture sample). No
- * sphere geometry, no three.js — keeps it tiny and avoids the UV-seam artifacts
- * of a tessellated sphere.
+ * Renders the gallery <video> as an equirectangular panorama on an inward-facing
+ * sphere via three.js VideoTexture. three.js handles the iOS/WebKit video-texture
+ * quirks (playsinline, RGBA upload, per-frame refresh) that a hand-rolled WebGL
+ * path kept tripping over. three.js is vendored at /static/lib/three.module.min.js
+ * and lazy-imported only when a 360 video is actually viewed.
  *
- * Layouts (manual toggle, since there's no reliable metadata for projection):
+ * Layouts (manual toggle — no reliable projection metadata):
  *   - mono : full-frame equirectangular
- *   - sbs  : side-by-side stereo  -> shows the LEFT eye (u in [0, .5])
- *   - tb   : top-bottom  stereo   -> shows the TOP  eye (v in [0, .5])
- * Plus a 180° toggle (front hemisphere only; outside = black).
+ *   - sbs  : side-by-side stereo  -> shows the LEFT eye (texture left half)
+ *   - tb   : top-bottom  stereo   -> shows the TOP  eye (texture top half)
+ * Plus a 180° toggle (front hemisphere only).
  *
- * On a flat screen a stereo file can't show true 3D, so we render one eye as a
- * normal pannable 360 view — drag to look, wheel to zoom, click to play/pause.
- *
- * The raw <video> keeps playing underneath (audio + frame source); the canvas
- * just sits on top. Toggling 360 off removes the canvas and restores native
- * controls. Only one viewer is ever live (WebGL contexts are a scarce resource),
- * so attach() detaches the previous one.
+ * The raw <video> keeps playing underneath (audio + frame source); the three.js
+ * canvas sits on top. Drag to look, wheel to zoom, tap to play/pause. Only one
+ * viewer is ever live, so attach() detaches the previous one.
  */
+
+const THREE_URL = '/static/lib/three.module.min.js';
+let _threePromise = null;
+function _loadThree() {
+  if (!_threePromise) _threePromise = import(THREE_URL);
+  return _threePromise;
+}
 
 let _active = null;
 
@@ -34,55 +38,6 @@ export function attach(video, frame, opts) {
   catch (e) { console.warn('video360 attach failed:', e); _active = null; }
 }
 
-const VS = `
-attribute vec2 a_pos;
-varying vec2 v_uv;
-void main() { v_uv = a_pos * 0.5 + 0.5; gl_Position = vec4(a_pos, 0.0, 1.0); }
-`;
-
-const FS = `
-precision highp float;
-varying vec2 v_uv;
-uniform sampler2D u_tex;
-uniform float u_yaw;
-uniform float u_pitch;
-uniform float u_fov;     // vertical field of view (radians)
-uniform float u_aspect;  // canvas width / height
-uniform int   u_layout;  // 0 mono, 1 side-by-side (left eye), 2 top-bottom (top eye)
-uniform float u_half;    // 1.0 = 180°, 0.0 = 360°
-uniform float u_flip;    // 1.0 = flip texture vertically (FLIP_Y compensation)
-const float PI = 3.14159265358979;
-
-void main() {
-  float t = tan(u_fov * 0.5);
-  // Camera-space ray for this pixel (looking down -Z).
-  vec3 dir = normalize(vec3((v_uv.x * 2.0 - 1.0) * t * u_aspect,
-                            (v_uv.y * 2.0 - 1.0) * t,
-                            -1.0));
-  // Pitch about X, then yaw about Y.
-  float cp = cos(u_pitch), sp = sin(u_pitch);
-  dir = vec3(dir.x, cp * dir.y - sp * dir.z, sp * dir.y + cp * dir.z);
-  float cy = cos(u_yaw), sy = sin(u_yaw);
-  dir = vec3(cy * dir.x + sy * dir.z, dir.y, -sy * dir.x + cy * dir.z);
-
-  float lon = atan(dir.x, -dir.z);             // -PI .. PI
-  float lat = asin(clamp(dir.y, -1.0, 1.0));   // -PI/2 .. PI/2
-
-  float u, v;
-  v = 0.5 - lat / PI;                          // 0 = up
-  if (u_half > 0.5) {
-    u = lon / PI + 0.5;                         // front hemisphere -> [0,1]
-    if (u < 0.0 || u > 1.0) { gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0); return; }
-  } else {
-    u = fract(lon / (2.0 * PI) + 0.5);          // wrap the 360 seam
-  }
-  if (u_flip > 0.5) v = 1.0 - v;
-  if (u_layout == 1) { u = u * 0.5; }            // side-by-side -> left eye
-  else if (u_layout == 2) { v = (u_flip > 0.5) ? (0.5 + v * 0.5) : (v * 0.5); } // top-bottom -> top eye
-  gl_FragColor = texture2D(u_tex, vec2(u, v));
-}
-`;
-
 class Viewer360 {
   constructor(video, frame, opts) {
     this.video = video;
@@ -94,20 +49,20 @@ class Viewer360 {
     this.yaw = 0;
     this.pitch = 0;
     this.fov = 75 * Math.PI / 180;
-    this.flipY = false;
     this.raf = 0;
     this.canvas = null;
-    this.gl = null;
+    this.THREE = null;
+    this.renderer = null;
+    this.scene = null;
+    this.camera = null;
+    this.mesh = null;
     this.tex = null;
-    this.lastVideoTime = -1;
     this._destroyed = false;
     this._onResize = () => this._resize();
     this._onFsChange = () => this._syncFullscreenBtn();
   }
 
   // Decide whether this is actually a 360 video; only then reveal the toggle.
-  // Keeps the control off normal flat videos. Sets this.layout from the
-  // detected stereo packing so the user doesn't have to pick mono/SBS/TB.
   async detectAndMaybeShow() {
     let det;
     try { det = await this._detect(); }
@@ -123,8 +78,7 @@ class Viewer360 {
     const name = String(this.opts.name || '');
     const url = this.video.currentSrc || this.video.src || this.opts.url || '';
     // 1) Spherical-video metadata — the authoritative signal (also gives the
-    //    stereo packing). Best-effort: a single small head range request; if the
-    //    file isn't faststart we fall through to the heuristics below.
+    //    stereo packing). Best-effort: a single small head range request.
     try {
       const meta = await _fetchSpherical(url);
       if (meta && meta.spherical) {
@@ -185,7 +139,7 @@ class Viewer360 {
     sel.innerHTML = '<option value="mono">Mono</option>'
       + '<option value="sbs">Side-by-side (L/R)</option>'
       + '<option value="tb">Top-bottom</option>';
-    sel.addEventListener('change', () => { this.layout = sel.value; });
+    sel.addEventListener('change', () => { this.layout = sel.value; if (this.enabled) this._applyStereo(); });
     sel.value = this.layout;                       // preselect the detected packing
     opts.appendChild(sel);
 
@@ -198,6 +152,7 @@ class Viewer360 {
     half.addEventListener('click', () => {
       this.is180 = !this.is180;
       half.classList.toggle('active', this.is180);
+      if (this.enabled) this._buildSphere();
     });
     opts.appendChild(half);
 
@@ -250,35 +205,106 @@ class Viewer360 {
     if (on) this._enable(); else this._disable();
   }
 
-  _enable() {
-    const c = document.createElement('canvas');
-    c.className = 'video360-canvas';
-    c.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;z-index:1;cursor:grab;touch-action:none;';
-    this.frame.appendChild(c);
-    this.canvas = c;
-    const gl = c.getContext('webgl', { alpha: false, antialias: true, preserveDrawingBuffer: false })
-      || c.getContext('experimental-webgl');
-    if (!gl) { console.warn('WebGL unavailable — 360 view disabled'); this._setEnabled(false); return; }
-    this.gl = gl;
-    this._initGL();
-    this._bindPointer();
-    this.frame.classList.add('video360-on');
-    // iOS/WebKit only yields decodable frames for texImage2D from a video that
-    // is actually PLAYING and inline. _enable() runs inside the toggle's tap
-    // (a user gesture), so this play() is allowed; without it a paused video
-    // textures as black on iOS. playsinline keeps it from going fullscreen.
+  async _enable() {
+    // Play SYNCHRONOUSLY inside the toggle's tap (a user gesture), BEFORE any
+    // await — iOS revokes the gesture across an await and would reject play(),
+    // leaving the video paused (black + no audio). three.js then textures the
+    // now-playing video.
     try {
       this.video.setAttribute('playsinline', '');
       this.video.setAttribute('webkit-playsinline', '');
       const p = this.video.play();
       if (p && p.catch) p.catch(() => {});
-    } catch (e) { /* autoplay/gesture rejected — user can tap to play */ }
+    } catch (e) { /* user can tap the view to play */ }
+
+    let THREE;
+    try { THREE = await _loadThree(); }
+    catch (e) { console.warn('three.js failed to load — 360 disabled', e); this._setEnabled(false); return; }
+    if (!this.enabled || this._destroyed) return;  // toggled off / closed during load
+    this.THREE = THREE;
+
+    const renderer = new THREE.WebGLRenderer({ alpha: false, antialias: true });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    const c = renderer.domElement;
+    c.className = 'video360-canvas';
+    c.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;z-index:1;cursor:grab;touch-action:none;';
+    this.frame.appendChild(c);
+    this.canvas = c;
+    this.renderer = renderer;
+
+    this.scene = new THREE.Scene();
+    this.camera = new THREE.PerspectiveCamera(this.fov * 180 / Math.PI, 1, 0.1, 1100);
+    this.camera.rotation.order = 'YXZ';
+
+    const tex = new THREE.VideoTexture(this.video);
+    tex.minFilter = THREE.LinearFilter;
+    tex.magFilter = THREE.LinearFilter;
+    if ('colorSpace' in tex) tex.colorSpace = THREE.SRGBColorSpace;
+    this.tex = tex;
+
+    this._buildSphere();
+    this.frame.classList.add('video360-on');
+    this._bindPointer();
     this._resize();
+
     this._ro = ('ResizeObserver' in window) ? new ResizeObserver(this._onResize) : null;
     if (this._ro) this._ro.observe(this.frame);
     else window.addEventListener('resize', this._onResize);
+
     const loop = () => { this.raf = requestAnimationFrame(loop); this._render(); };
     this.raf = requestAnimationFrame(loop);
+  }
+
+  // (Re)build the sphere mesh for the current 360-vs-180 mode. Equirect maps
+  // onto a sphere viewed from the inside (scale x -1).
+  _buildSphere() {
+    const THREE = this.THREE;
+    if (!THREE || !this.scene) return;
+    if (this.mesh) {
+      this.scene.remove(this.mesh);
+      this.mesh.geometry.dispose();
+      this.mesh.material.dispose();
+      this.mesh = null;
+    }
+    const R = 500;
+    const geo = this.is180
+      ? new THREE.SphereGeometry(R, 60, 40, -Math.PI / 2, Math.PI)  // front hemisphere
+      : new THREE.SphereGeometry(R, 60, 40);
+    geo.scale(-1, 1, 1);  // view from inside
+    const mat = new THREE.MeshBasicMaterial({ map: this.tex });
+    this.mesh = new THREE.Mesh(geo, mat);
+    this.scene.add(this.mesh);
+    this._applyStereo();
+  }
+
+  // Crop the texture to one eye for stereo packings (flat screen can't show 3D).
+  _applyStereo() {
+    const t = this.tex;
+    if (!t) return;
+    if (this.layout === 'sbs') { t.repeat.set(0.5, 1); t.offset.set(0, 0); }       // left eye
+    else if (this.layout === 'tb') { t.repeat.set(1, 0.5); t.offset.set(0, 0.5); } // top eye
+    else { t.repeat.set(1, 1); t.offset.set(0, 0); }
+    t.needsUpdate = true;
+  }
+
+  _resize() {
+    if (!this.renderer || !this.camera) return;
+    const w = this.frame.clientWidth, h = this.frame.clientHeight;
+    if (!w || !h) return;
+    this.renderer.setSize(w, h, false);  // false: keep our 100%/inset CSS sizing
+    this.camera.aspect = w / h;
+    this.camera.updateProjectionMatrix();
+  }
+
+  _render() {
+    if (!this.renderer) return;
+    this._resize();  // cheap; covers a 0->N frame-size transition iOS can miss
+    this.camera.fov = this.fov * 180 / Math.PI;
+    this.camera.rotation.y = this.yaw;
+    this.camera.rotation.x = this.pitch;
+    this.camera.updateProjectionMatrix();
+    // VideoTexture refreshes from the playing <video> automatically each render.
+    this.renderer.render(this.scene, this.camera);
   }
 
   _disable() {
@@ -286,11 +312,13 @@ class Viewer360 {
     this.raf = 0;
     if (this._ro) { this._ro.disconnect(); this._ro = null; }
     else window.removeEventListener('resize', this._onResize);
-    if (this.gl) {
-      const lose = this.gl.getExtension('WEBGL_lose_context');
-      if (lose) lose.loseContext();
-    }
-    this.gl = null; this.tex = null; this.prog = null;
+    try {
+      if (this.mesh) { this.mesh.geometry.dispose(); this.mesh.material.dispose(); }
+      if (this.tex) this.tex.dispose();
+      if (this.renderer) this.renderer.dispose();
+    } catch (e) { /* noop */ }
+    this.mesh = null; this.tex = null; this.scene = null; this.camera = null;
+    this.renderer = null;
     if (this.canvas) { this.canvas.remove(); this.canvas = null; }
     this.frame.classList.remove('video360-on');
   }
@@ -306,84 +334,6 @@ class Viewer360 {
     this.bar = null;
   }
 
-  _initGL() {
-    const gl = this.gl;
-    const vs = _compile(gl, gl.VERTEX_SHADER, VS);
-    const fs = _compile(gl, gl.FRAGMENT_SHADER, FS);
-    const prog = gl.createProgram();
-    gl.attachShader(prog, vs); gl.attachShader(prog, fs); gl.linkProgram(prog);
-    if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(prog) || 'link failed');
-    gl.useProgram(prog);
-    this.prog = prog;
-
-    const buf = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, buf);
-    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
-    const loc = gl.getAttribLocation(prog, 'a_pos');
-    gl.enableVertexAttribArray(loc);
-    gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
-
-    this.u = {
-      tex: gl.getUniformLocation(prog, 'u_tex'),
-      yaw: gl.getUniformLocation(prog, 'u_yaw'),
-      pitch: gl.getUniformLocation(prog, 'u_pitch'),
-      fov: gl.getUniformLocation(prog, 'u_fov'),
-      aspect: gl.getUniformLocation(prog, 'u_aspect'),
-      layout: gl.getUniformLocation(prog, 'u_layout'),
-      half: gl.getUniformLocation(prog, 'u_half'),
-      flip: gl.getUniformLocation(prog, 'u_flip'),
-    };
-
-    this.tex = gl.createTexture();
-    gl.bindTexture(gl.TEXTURE_2D, this.tex);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
-    gl.uniform1i(this.u.tex, 0);
-  }
-
-  _resize() {
-    if (!this.canvas || !this.gl) return;
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    const w = Math.max(1, Math.round(this.frame.clientWidth * dpr));
-    const h = Math.max(1, Math.round(this.frame.clientHeight * dpr));
-    if (this.canvas.width !== w || this.canvas.height !== h) {
-      this.canvas.width = w; this.canvas.height = h;
-      this.gl.viewport(0, 0, w, h);
-    }
-  }
-
-  _render() {
-    const gl = this.gl, v = this.video;
-    if (!gl) return;
-    // Self-correct sizing every frame — covers a frame that had no layout when
-    // 360 was first enabled (a ResizeObserver can miss the 0->N transition).
-    // Cheap: _resize only touches the canvas/GL when the size actually changes.
-    this._resize();
-    // Upload the current video frame only when it advances (cheap idle).
-    if (v && v.readyState >= 2 && v.videoWidth) {
-      if (v.currentTime !== this.lastVideoTime) {
-        this.lastVideoTime = v.currentTime;
-        gl.bindTexture(gl.TEXTURE_2D, this.tex);
-        // RGBA (not RGB): iOS/Safari WebKit renders RGB video textures black on
-        // many devices — RGBA is the universally-supported video-texture format
-        // (what three.js uses by default) and is identical on desktop.
-        try { gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, v); }
-        catch (e) { /* transient (e.g. not yet decodable) */ }
-      }
-    }
-    gl.uniform1f(this.u.yaw, this.yaw);
-    gl.uniform1f(this.u.pitch, this.pitch);
-    gl.uniform1f(this.u.fov, this.fov);
-    gl.uniform1f(this.u.aspect, this.canvas.width / this.canvas.height);
-    gl.uniform1i(this.u.layout, this.layout === 'sbs' ? 1 : this.layout === 'tb' ? 2 : 0);
-    gl.uniform1f(this.u.half, this.is180 ? 1 : 0);
-    gl.uniform1f(this.u.flip, this.flipY ? 1 : 0);
-    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
-  }
-
   _bindPointer() {
     const c = this.canvas;
     let dragging = false, lx = 0, ly = 0, moved = 0;
@@ -392,7 +342,7 @@ class Viewer360 {
       if (!dragging) return;
       const dx = e.clientX - lx, dy = e.clientY - ly;
       lx = e.clientX; ly = e.clientY; moved += Math.abs(dx) + Math.abs(dy);
-      const k = this.fov / this.canvas.clientHeight; // pixels -> radians (zoom-aware)
+      const k = this.fov / (this.canvas.clientHeight || 1); // pixels -> radians (zoom-aware)
       this.yaw -= dx * k;
       this.pitch = Math.max(-Math.PI / 2 + 0.01, Math.min(Math.PI / 2 - 0.01, this.pitch - dy * k));
     };
@@ -409,17 +359,8 @@ class Viewer360 {
   }
 }
 
-function _compile(gl, type, src) {
-  const sh = gl.createShader(type);
-  gl.shaderSource(sh, src); gl.compileShader(sh);
-  if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(sh) || 'shader compile failed');
-  return sh;
-}
-
 // Read the head of an MP4 and look for Google spatial-media markers (the
 // spherical-video v1 XML "Spherical" token, or the v2 'sv3d'/'st3d' boxes).
-// A single bounded Range request — if the server ignores Range (200, not 206)
-// we bail rather than pull a whole multi-GB file.
 async function _fetchSpherical(url) {
   if (!url) return null;
   const res = await fetch(url, { headers: { Range: 'bytes=0-524287' }, credentials: 'same-origin' });
@@ -443,7 +384,6 @@ function _scanSpherical(b) {
   let stereo = 'mono';
   const st3d = find('st3d');                         // v2 stereo box
   if (st3d >= 0 && st3d + 8 < b.length) {
-    // box = [size:4][type 'st3d':4][version+flags:4][stereo_mode:1]
     const mode = b[st3d + 8];
     stereo = mode === 1 ? 'tb' : mode === 2 ? 'sbs' : 'mono';
   } else if (hasXml) {
