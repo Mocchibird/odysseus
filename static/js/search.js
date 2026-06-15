@@ -7,6 +7,7 @@
 let API_BASE = '';
 let _provider = 'searxng';
 let _loaded = false;
+let _provToken = 0;
 
 export function init(apiBase) {
   API_BASE = apiBase;
@@ -15,9 +16,15 @@ export function init(apiBase) {
 }
 
 async function _fetchProvider() {
+  // Token guard: init() + a refresh() after an admin save can be in flight at
+  // once; without this a slow earlier response could overwrite the newer
+  // provider. Latest call wins.
+  const tok = ++_provToken;
   try {
     const res = await fetch((API_BASE || '') + '/api/auth/settings', { credentials: 'same-origin' });
+    if (!res.ok) return;
     const s = await res.json();
+    if (tok !== _provToken) return;
     _provider = s.search_provider || 'searxng';
     _loaded = true;
   } catch (e) { /* keep default */ }

@@ -2,7 +2,7 @@
 // Admin-only: users, endpoints, MCP, RAG, embeddings, tokens, webhooks, features
 
 import uiModule from './ui.js';
-import settingsModule from './settings.js?v=421';
+import settingsModule from './settings.js?v=422';
 import { providerLogo } from './providers.js';
 import { sortModelObjects } from './modelSort.js';
 import { PROVIDER_DEVICE_FLOWS, formatDeviceFlowError, runProviderDeviceFlow } from './providerDeviceFlow.js';

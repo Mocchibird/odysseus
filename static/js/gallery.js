@@ -1478,15 +1478,25 @@ function _renderGrid() {
   grid.querySelectorAll('.gallery-fav-btn').forEach(btn => {
     btn.addEventListener('click', async (e) => {
       e.stopPropagation();
+      // The endpoint is a server-side TOGGLE; without an in-flight guard a
+      // double-tap fires two toggles whose responses can land out of order,
+      // leaving the heart out of sync with the persisted state.
+      if (btn.dataset.busy) return;
+      btn.dataset.busy = '1';
       const id = btn.dataset.id;
-      const res = await fetch(`${API_BASE}/api/gallery/${id}/favorite`, {
-        method: 'POST', credentials: 'same-origin',
-      });
-      const data = await res.json();
-      if (data.ok) {
-        btn.classList.toggle('gallery-fav-active', data.favorite);
-        const item = _items.find(i => i.id === id);
-        if (item) item.favorite = data.favorite;
+      try {
+        const res = await fetch(`${API_BASE}/api/gallery/${id}/favorite`, {
+          method: 'POST', credentials: 'same-origin',
+        });
+        if (!res.ok) return;
+        const data = await res.json();
+        if (data.ok) {
+          btn.classList.toggle('gallery-fav-active', data.favorite);
+          const item = _items.find(i => i.id === id);
+          if (item) item.favorite = data.favorite;
+        }
+      } finally {
+        delete btn.dataset.busy;
       }
     });
   });
@@ -1901,10 +1911,19 @@ function _openDetail(img) {
     menu.addEventListener('click', () => { _hideMenu(); });
   }
 
+  let _favBusy = false;
   const _toggleDetailFavorite = async () => {
-    const res = await fetch(`${API_BASE}/api/gallery/${img.id}/favorite`, {
-      method: 'POST', credentials: 'same-origin',
-    });
+    if (_favBusy) return;  // server-side toggle — block double-fire from header+menu/double-tap
+    _favBusy = true;
+    let res;
+    try {
+      res = await fetch(`${API_BASE}/api/gallery/${img.id}/favorite`, {
+        method: 'POST', credentials: 'same-origin',
+      });
+    } finally {
+      _favBusy = false;
+    }
+    if (!res.ok) return;
     const data = await res.json();
     if (!data.ok) return;
     img.favorite = data.favorite;
@@ -2654,7 +2673,7 @@ export function openGallery() {
   if (visionLink) {
     visionLink.addEventListener('click', (e) => {
       e.preventDefault();
-      import('./settings.js?v=421').then(m => {
+      import('./settings.js?v=422').then(m => {
         m.open('ai');
         // The gallery modal gets a bumped z-index from modalManager; settings
         // opens with its lower static z-index and lands BEHIND it. Raise it above.

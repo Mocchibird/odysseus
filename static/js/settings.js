@@ -287,16 +287,24 @@ function _bindFallbackWidget(opts) {
     if (selected) selectEl.value = selected;
   }
 
-  async function save() {
+  var _saveChain = Promise.resolve();
+  function save() {
     var clean = current.filter(function(f) { return f.endpoint_id && f.model; });
     var body = {};
     body[settingKey] = clean;
-    try {
-      await fetch('/api/auth/settings', { method: 'POST', credentials: 'same-origin',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body)
-      });
-    } catch (e) { console.warn('[fallback] save failed for ' + settingKey, e); }
+    // Serialize saves through a promise chain so rapid edits POST in call
+    // order — the server is last-write-wins, so out-of-order requests could
+    // otherwise persist a stale value while the UI shows the newer one.
+    _saveChain = _saveChain.then(async function() {
+      try {
+        var res = await fetch('/api/auth/settings', { method: 'POST', credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body)
+        });
+        if (!res.ok) console.warn('[fallback] save HTTP ' + res.status + ' for ' + settingKey);
+      } catch (e) { console.warn('[fallback] save failed for ' + settingKey, e); }
+    });
+    return _saveChain;
   }
 
   function render() {

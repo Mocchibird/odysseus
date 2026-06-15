@@ -23,7 +23,7 @@ import sessionModule from './js/sessions.js';
 import memoryModule from './js/memory.js';
 import voiceRecorderModule from './js/voiceRecorder.js';
 import censorModule from './js/censor.js';
-import galleryModule from './js/gallery.js?v=424';
+import galleryModule from './js/gallery.js?v=425';
 import tasksModule from './js/tasks.js';
 import calendarModule from './js/calendar.js';
 import notesModule from './js/notes.js?v=421';
@@ -32,7 +32,7 @@ import healthModule from './js/health.js?v=398';
 import pingsModule from './js/pings.js?v=396';
 import todayModule from './js/today.js?v=421';
 import adminModule from './js/admin.js?v=421';
-import settingsModule from './js/settings.js?v=421';
+import settingsModule from './js/settings.js?v=422';
 // Eagerly bind unified minimize/restore behavior across all tool modals.
 import './js/modalManager.js';
 // Desktop window tiling — drag a modal near an edge/corner to snap.

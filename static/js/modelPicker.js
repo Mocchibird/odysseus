@@ -3,7 +3,7 @@
 
 import { providerLogo } from './providers.js';
 import uiModule from './ui.js';
-import settingsModule from './settings.js?v=421';
+import settingsModule from './settings.js?v=422';
 import { sortModelObjects } from './modelSort.js';
 
 const API_BASE = window.location.origin;
