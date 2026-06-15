@@ -357,7 +357,10 @@ class Viewer360 {
       if (v.currentTime !== this.lastVideoTime) {
         this.lastVideoTime = v.currentTime;
         gl.bindTexture(gl.TEXTURE_2D, this.tex);
-        try { gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, v); }
+        // RGBA (not RGB): iOS/Safari WebKit renders RGB video textures black on
+        // many devices — RGBA is the universally-supported video-texture format
+        // (what three.js uses by default) and is identical on desktop.
+        try { gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, v); }
         catch (e) { /* transient (e.g. not yet decodable) */ }
       }
     }
