@@ -4190,6 +4190,21 @@ if (document.readyState === 'loading') {
 // Register the service worker — enables installable PWA + offline reading of
 // books you've opened (see static/sw.js). Was scaffolded but never registered.
 if ('serviceWorker' in navigator) {
+  // Auto-reload an already-open tab when a freshly-deployed SW takes control.
+  // The SW does skipWaiting + clients.claim on activate, but that updates the
+  // worker WITHOUT reloading the page — so after `docker compose up -d --build`
+  // an open tab keeps showing the old HTML/CSS/JS until a manual hard refresh
+  // (the "I redeployed but it still looks old" trap). Only arm this when the
+  // page is ALREADY controlled by a SW, so the first-ever install (which fires
+  // controllerchange once as it claims) doesn't trigger a spurious reload.
+  if (navigator.serviceWorker.controller) {
+    let _swReloaded = false;
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (_swReloaded) return;
+      _swReloaded = true;
+      window.location.reload();
+    });
+  }
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('/static/sw.js').catch((e) => console.debug('SW register failed', e));
   });
