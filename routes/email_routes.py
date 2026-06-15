@@ -30,6 +30,8 @@ from pathlib import Path
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
+from src.bg import spawn
+
 from fastapi import APIRouter, Query, UploadFile, File, BackgroundTasks, HTTPException, Depends, Request
 from fastapi.responses import FileResponse
 from src.constants import DATA_DIR
@@ -607,24 +609,28 @@ def setup_email_routes():
         """
         pool_key = (account_id, owner)
         now = _time.monotonic()
+        candidate = None
         with _pool_lock:
             entry = _IMAP_POOL.get(pool_key)
             if entry:
                 conn, last_used = entry
+                # Pop it out of the pool under the lock so nobody else grabs it,
+                # then validate OUTSIDE the lock. conn.noop() is a network
+                # round-trip — holding the global _pool_lock across it serializes
+                # EVERY account's pool access behind one slow/stalled server.
+                del _IMAP_POOL[pool_key]
                 if (now - last_used) < _IMAP_IDLE_MAX:
-                    try:
-                        conn.noop()
-                        # Pop it out of the pool while we use it (serialize)
-                        del _IMAP_POOL[pool_key]
-                        return conn, True  # reused
-                    except Exception:
-                        try: conn.logout()
-                        except Exception: pass
-                        del _IMAP_POOL[pool_key]
+                    candidate = conn
                 else:
                     try: conn.logout()
                     except Exception: pass
-                    del _IMAP_POOL[pool_key]
+        if candidate is not None:
+            try:
+                candidate.noop()
+                return candidate, True  # reused
+            except Exception:
+                try: candidate.logout()
+                except Exception: pass
         # Fresh connection
         return _imap_connect(account_id, owner=owner), False
 
@@ -635,8 +641,16 @@ def setup_email_routes():
             try: conn.logout()
             except Exception: pass
             return
+        displaced = None
         with _pool_lock:
+            # If a connection is already pooled for this key (a concurrent
+            # caller opened a fresh one too), keep the newer and close the old
+            # instead of orphaning it.
+            displaced = _IMAP_POOL.get((account_id, owner))
             _IMAP_POOL[(account_id, owner)] = (conn, _time.monotonic())
+        if displaced is not None and displaced[0] is not conn:
+            try: displaced[0].logout()
+            except Exception: pass
 
     def _list_cache_key(account_id, folder, filter_, limit, offset, from_addr=""):
         return (account_id or "", folder, filter_, int(limit), int(offset), from_addr or "")
@@ -1438,7 +1452,7 @@ def setup_email_routes():
         if cached is not None:
             if mark_seen:
                 try:
-                    _asyncio.create_task(_asyncio.to_thread(_mark_email_seen_sync, uid, folder, account_id, owner))
+                    spawn(_asyncio.to_thread(_mark_email_seen_sync, uid, folder, account_id, owner), "mark email seen")
                 except RuntimeError:
                     pass
             return cached
@@ -1494,7 +1508,7 @@ def setup_email_routes():
                     await _asyncio.sleep(0.05)
 
         try:
-            _asyncio.create_task(_warm())
+            spawn(_warm(), "warm email cache")
         except RuntimeError:
             pass
 

@@ -2024,15 +2024,19 @@ class TaskScheduler:
             logger.error(f"Task {task.id} MCP delivery failed: {e}")
 
     async def run_task_now(self, task_id: str, *, force: bool = False):
-        """Manually trigger a task execution."""
-        if force:
-            asyncio.create_task(self._execute_task(task_id, bypass_model_slot=True, release_executing=False))
-            return True
+        """Manually trigger a task execution.
+
+        `force` only skips the model-slot throttle (so it runs immediately even
+        when slots are full) — it must STILL respect the per-task single-run
+        guard. Otherwise a forced run can execute concurrently with the task's
+        own scheduled dispatch, both mutating the same row (next_run/run_count)
+        and clobbering _task_handles so stop_task can only cancel one of them.
+        Already running -> no-op (it's already running)."""
         async with self._executing_lock:
             if task_id in self._executing:
                 return False
             self._executing.add(task_id)
-        asyncio.create_task(self._execute_task(task_id))
+        asyncio.create_task(self._execute_task(task_id, bypass_model_slot=force))
         return True
 
     async def stop_task(self, task_id: str) -> bool:

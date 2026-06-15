@@ -13,6 +13,7 @@ from core.database import SessionLocal
 from core.database import Session as DBSession, ModelEndpoint
 from src.llm_core import normalize_model_id
 from src.endpoint_resolver import normalize_base
+from src.bg import spawn
 from src.context_compactor import maybe_compact, trim_for_context
 from src.auth_helpers import get_current_user
 from src.prompt_security import untrusted_context_message
@@ -371,9 +372,9 @@ def add_user_message(sess, chat_handler, preprocessed: PreprocessedMessage, inco
 def fire_message_event(request, webhook_manager, session_id: str, sess, message: str, compare_mode: bool = False):
     """Fire webhook and event_bus events for a new user message."""
     if webhook_manager and not compare_mode:
-        asyncio.create_task(webhook_manager.fire("chat.message", {
+        spawn(webhook_manager.fire("chat.message", {
             "session_id": session_id, "model": sess.model, "message": message[:2000],
-        }))
+        }), "webhook chat.message")
     from src.event_bus import fire_event
     user = get_current_user(request)
     fire_event("message_sent", user)
@@ -1132,7 +1133,7 @@ def run_post_response_tasks(
             )))
 
     if _extraction_jobs:
-        asyncio.create_task(_run_extraction_jobs_sequentially(session_id, _extraction_jobs))
+        spawn(_run_extraction_jobs_sequentially(session_id, _extraction_jobs), "memory extraction jobs")
 
     # Token accumulation
     if last_metrics:
@@ -1140,11 +1141,11 @@ def run_post_response_tasks(
 
     # Webhook
     if webhook_manager and not compare_mode:
-        asyncio.create_task(webhook_manager.fire("chat.completed", {
+        spawn(webhook_manager.fire("chat.completed", {
             "session_id": session_id, "model": sess.model,
             "user_message": message, "response": full_response[:2000],
-        }))
+        }), "webhook chat.completed")
 
     # Auto-name
     if needs_auto_name(sess.name):
-        asyncio.create_task(auto_name_session(session_manager, sess))
+        spawn(auto_name_session(session_manager, sess), "auto-name session")

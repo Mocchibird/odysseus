@@ -990,18 +990,38 @@ def _scheduled_poll_once() -> dict:
     try:
         now_iso = datetime.utcnow().isoformat()
         conn = sqlite3.connect(SCHEDULED_DB)
-        cols = [row[1] for row in conn.execute("PRAGMA table_info(scheduled_emails)").fetchall()]
-        kind_expr = "odysseus_kind" if "odysseus_kind" in cols else "'scheduled' AS odysseus_kind"
-        owner_expr = "owner" if "owner" in cols else "'' AS owner"
-        rows = conn.execute(f"""
-            SELECT id, to_addr, cc, bcc, subject, body, in_reply_to, references_hdr, attachments, account_id, {kind_expr}, {owner_expr}
-            FROM scheduled_emails
-            WHERE status = 'pending' AND send_at <= ?
-        """, (now_iso,)).fetchall()
-        conn.close()
+        try:
+            cols = [row[1] for row in conn.execute("PRAGMA table_info(scheduled_emails)").fetchall()]
+            kind_expr = "odysseus_kind" if "odysseus_kind" in cols else "'scheduled' AS odysseus_kind"
+            owner_expr = "owner" if "owner" in cols else "'' AS owner"
+            rows = conn.execute(f"""
+                SELECT id, to_addr, cc, bcc, subject, body, in_reply_to, references_hdr, attachments, account_id, {kind_expr}, {owner_expr}
+                FROM scheduled_emails
+                WHERE status = 'pending' AND send_at <= ?
+            """, (now_iso,)).fetchall()
+        finally:
+            conn.close()
 
         for r in rows:
             sid = r[0]
+            # Atomic claim before sending: flip pending -> sending and only
+            # proceed if THIS call won the row. If both the in-process poller
+            # and the `odysseus-mail poll-scheduled` CLI/cron run (or two ticks
+            # overlap), the loser gets rowcount 0 and skips — without this the
+            # same email is sent twice to the real recipient.
+            claim = sqlite3.connect(SCHEDULED_DB)
+            try:
+                claim.execute("PRAGMA busy_timeout=5000")
+                cur = claim.execute(
+                    "UPDATE scheduled_emails SET status='sending' WHERE id=? AND status='pending'",
+                    (sid,),
+                )
+                claim.commit()
+                claimed = cur.rowcount == 1
+            finally:
+                claim.close()
+            if not claimed:
+                continue
             try:
                 attachments = json.loads(r[8] or "[]")
                 row_account_id = r[9] if len(r) > 9 else None
