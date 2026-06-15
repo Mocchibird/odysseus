@@ -17240,6 +17240,13 @@ body.gallery-selecting .gallery-card-menu-btn,
 .gallery-card {
   position: relative;
   aspect-ratio: 1;
+  /* Without this, a tall image's min-content height can override aspect-ratio
+     and grow the card past its square (iOS/WebKit doesn't reliably apply the
+     overflow:hidden -> min-height:0 rule), which left the iPhone gallery with
+     uneven/overlapping tiles showing images at their natural aspect ratio.
+     min-height:0 forces the square aspect-ratio height to win; the in-flow
+     img's height:100% then resolves against that definite height. */
+  min-height: 0;
   border-radius: 6px;
   overflow: hidden;
   border: 1px solid var(--border);
