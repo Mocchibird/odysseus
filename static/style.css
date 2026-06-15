@@ -14604,9 +14604,17 @@ body:has(.doc-version-panel:not(.hidden)) .hamburger-btn {
 
 /* Gallery grid domino-in cascade on open — same recipe as the document/email
    libraries. Applied to #gallery-grid in gallery.js on the first render after
-   each open, removed after the longest delay so re-renders feel instant. */
+   each open, removed after the longest delay so re-renders feel instant.
+   NOTE: gallery cards use `aspect-ratio:1` for their square shape. iOS/WebKit
+   has a bug where animating `transform` on an aspect-ratio box can invalidate
+   its computed height and NOT recover after the animation ends — leaving the
+   cards collapsed/overlapping (the iPhone gallery bug). So the gallery cascade
+   fades opacity ONLY (no transform); the staggered delays below still apply.
+   The shared section-domino-in (with transforms) stays for tasks/doclib lists,
+   which don't use aspect-ratio. */
+@keyframes gallery-card-in { from { opacity: 0; } to { opacity: 1; } }
 .gallery-just-opened > .gallery-card {
-  animation: section-domino-in 0.36s cubic-bezier(0.22, 1.61, 0.36, 1) backwards;
+  animation: gallery-card-in 0.34s ease backwards;
 }
 .gallery-just-opened > :nth-child(1)  { animation-delay: 0.02s; }
 .gallery-just-opened > :nth-child(2)  { animation-delay: 0.04s; }

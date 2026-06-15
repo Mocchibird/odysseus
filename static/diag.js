@@ -21,24 +21,84 @@
   var arOK = CSS.supports('aspect-ratio', '1 / 1');
   add('CSS aspect-ratio supported', arOK ? 'YES' : 'NO', arOK ? 'pass' : 'fail');
 
-  // Measure the replica grid once layout settles.
-  setTimeout(function () {
-    var cards = document.querySelectorAll('#grid .card');
-    var rects = [].map.call(cards, function (c) {
-      var r = c.getBoundingClientRect();
-      return { w: Math.round(r.width), h: Math.round(r.height), t: Math.round(r.top), l: Math.round(r.left) };
-    });
-    var square = rects.length && rects.every(function (r) { return r.h > 0 && Math.abs(r.w - r.h) <= 2; });
-    add('Grid cells square', square ? 'YES (grid OK)' : 'NO — first cell is ' + JSON.stringify(rects[0]) + ' (THIS is the gallery bug)', square ? 'pass' : 'fail');
-    var overlap = false;
-    for (var i = 0; i < rects.length; i++) for (var j = i + 1; j < rects.length; j++) {
-      var a = rects[i], b = rects[j];
-      if (a.l < b.l + b.w && a.l + a.w > b.l && a.t < b.t + b.h && a.t + a.h > b.t) overlap = true;
-    }
-    add('Cells overlap', overlap ? 'YES (broken)' : 'no', overlap ? 'fail' : 'pass');
-  }, 400);
+  var IMG = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='4' height='6'%3E%3Crect width='4' height='6' fill='%234a90d9'/%3E%3C/svg%3E";
 
-  // WebGL video-texture test — the exact 360 mechanism.
+  // Build a 4-cell grid variant, measure squareness + overlap AFTER `delay`ms.
+  // `decorate(card)` adds the differentiating feature being tested.
+  function testVariant(label, opts) {
+    var host = document.createElement('div'); host.className = 'row';
+    host.innerHTML = '<span class="k">' + label + ':</span> <span class="warn">measuring…</span>';
+    out.appendChild(host);
+    var statusSpan = host.querySelector('span:last-child');  // grab BEFORE appending the grid below
+    var holder = document.createElement('div');
+    // optional scroll container
+    var scroller = holder;
+    if (opts.scroller) {
+      scroller = document.createElement('div');
+      scroller.style.cssText = 'max-height:120px;overflow-y:auto';
+      holder.appendChild(scroller);
+    }
+    var grid = document.createElement('div');
+    grid.style.cssText = 'display:grid;grid-template-columns:repeat(auto-fill,minmax(90px,1fr));gap:6px';
+    if (opts.gridClass) grid.className = opts.gridClass;
+    for (var i = 0; i < 4; i++) {
+      var card = document.createElement('div');
+      card.style.cssText = 'position:relative;aspect-ratio:1;border-radius:6px;overflow:hidden;border:1px solid #3a3d45;background:#2a2d35';
+      if (opts.cardClass) card.className = opts.cardClass;
+      var img = document.createElement('img');
+      img.src = IMG;
+      img.style.cssText = 'width:100%;height:100%;object-fit:cover;display:block';
+      card.appendChild(img);
+      if (opts.absChildren) {
+        var btn = document.createElement('button');
+        btn.textContent = '♥';
+        btn.style.cssText = 'position:absolute;top:4px;right:4px';
+        card.appendChild(btn);
+        var bar = document.createElement('div');
+        bar.textContent = 'label';
+        bar.style.cssText = 'position:absolute;bottom:0;left:0;right:0;background:rgba(0,0,0,.5);font-size:9px;padding:2px';
+        card.appendChild(bar);
+      }
+      grid.appendChild(card);
+    }
+    scroller.appendChild(grid);
+    holder.style.marginTop = '6px';
+    host.appendChild(holder);
+    if (opts.afterAppend) opts.afterAppend(grid);
+
+    setTimeout(function () {
+      var cards = grid.children;
+      var rects = [].map.call(cards, function (c) { var r = c.getBoundingClientRect(); return { w: Math.round(r.width), h: Math.round(r.height), t: Math.round(r.top), l: Math.round(r.left) }; });
+      var square = rects.length && rects.every(function (r) { return r.h > 0 && Math.abs(r.w - r.h) <= 3; });
+      var overlap = false;
+      for (var i = 0; i < rects.length; i++) for (var j = i + 1; j < rects.length; j++) {
+        var a = rects[i], b = rects[j];
+        if (a.l < b.l + b.w && a.l + a.w > b.l && a.t < b.t + b.h && a.t + a.h > b.t) overlap = true;
+      }
+      var okk = square && !overlap;
+      statusSpan.textContent = (okk ? 'OK (square, no overlap)' : 'BROKEN') + ' — cell0 ' + JSON.stringify(rects[0]) + (overlap ? ' OVERLAP' : '');
+      statusSpan.className = okk ? 'pass' : 'fail';
+    }, opts.delay || 400);
+  }
+
+  // Each variant isolates ONE difference between the working replica and the
+  // real gallery card. Whichever comes back BROKEN is the trigger.
+  testVariant('A. plain card (control)', {});
+  testVariant('B. + absolutely-positioned children (♥ + label bar)', { absChildren: true });
+  testVariant('C. + open animation (transform, like .gallery-just-opened)', {
+    absChildren: true,
+    afterAppend: function (grid) {
+      // Mimic section-domino-in: animate transform with backwards fill, then
+      // measure AFTER it finishes to see if aspect-ratio stays broken.
+      [].forEach.call(grid.children, function (c, i) {
+        c.style.animation = 'diag-domino 0.36s cubic-bezier(0.22,1.61,0.36,1) ' + (0.02 * (i + 1)) + 's backwards';
+      });
+    },
+    delay: 1400,
+  });
+  testVariant('D. + inside max-height scroller', { absChildren: true, scroller: true });
+
+  // WebGL video-texture test — the exact 360 mechanism (kept from v1).
   (function () {
     var status = add('WebGL video-texture (360)', 'testing…', 'warn');
     try {
@@ -71,7 +131,7 @@
       var p = v.play();
       if (p && p.then) {
         p.then(function () { setTimeout(run, 500); })
-         .catch(function (e) { setLast(status, 'video.play() REJECTED: ' + e + ' — iOS blocked playback (likely why 360 is black)', 'fail'); setTimeout(run, 500); });
+         .catch(function (e) { setLast(status, 'video.play() REJECTED: ' + e, 'fail'); setTimeout(run, 500); });
       } else { setTimeout(run, 500); }
     } catch (e) { setLast(status, 'error: ' + e, 'fail'); }
   })();
