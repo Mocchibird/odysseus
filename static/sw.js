@@ -8,7 +8,7 @@
 //   - Other static assets (images/fonts/libs): cache-first with bg refresh.
 //   - API / non-GET: never cached.
 // Bump CACHE_NAME whenever the precache list or SW logic changes.
-const CACHE_NAME = 'odysseus-v427';
+const CACHE_NAME = 'odysseus-v428';
 // Separate, long-lived cache for book content (PDF bytes / EPUB chapters) so
 // books you've opened stay readable offline AND survive app-shell version bumps
 // (the activate cleanup below deliberately keeps this one).
@@ -20,8 +20,8 @@ const BOOKS_CACHE = 'odysseus-books-v1';
 const PRECACHE = [
   '/',
   '/static/manifest.json',
-  '/static/style.css?v=412',
-  '/static/app.js?v=421',
+  '/static/style.css?v=413',
+  '/static/app.js?v=422',
   '/static/js/storage.js',
   '/static/js/i18n.js',
   '/static/js/i18n/ko.js',
@@ -47,15 +47,15 @@ const PRECACHE = [
   '/static/js/chatRenderer.js',
   '/static/js/codeRunner.js',
   '/static/js/chatStream.js',
-  '/static/js/chat.js?v=420',
+  '/static/js/chat.js?v=421',
   '/static/js/composerArrowUpRecall.js',
   '/static/js/cookbook.js',
   '/static/js/search-chat.js',
   '/static/js/compare/index.js',
   '/static/js/theme.js?v=397',
   '/static/js/censor.js',
-  '/static/js/settings.js?v=420',
-  '/static/js/admin.js?v=420',
+  '/static/js/settings.js?v=421',
+  '/static/js/admin.js?v=421',
   '/static/js/init.js',
   '/static/js/slashCommands.js',
   '/static/js/emailInbox.js',

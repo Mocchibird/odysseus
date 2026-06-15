@@ -18,7 +18,7 @@ import spinnerModule from './spinner.js';
 import themeModule from './theme.js?v=397';
 import documentModule from './document.js?v=420';
 import workspaceModule from './workspace.js';
-import settingsModule from './settings.js?v=420';
+import settingsModule from './settings.js?v=421';
 import cookbookModule from './cookbook.js';
 import { EVAL_PROMPTS } from './compare/index.js';
 import { PROVIDER_DEVICE_FLOWS, formatDeviceFlowError, runProviderDeviceFlow } from './providerDeviceFlow.js';

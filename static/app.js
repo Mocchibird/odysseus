@@ -12,7 +12,7 @@ import modelsModule from './js/models.js';
 import ragModule from './js/rag.js';
 import presetsModule from './js/presets.js';
 import searchModule from './js/search.js';
-import chatModule from './js/chat.js?v=420';
+import chatModule from './js/chat.js?v=421';
 import compareModule from './js/compare/index.js';
 import documentModule from './js/document.js?v=420';
 import searchChatModule from './js/search-chat.js';
@@ -31,8 +31,8 @@ import booksModule from './js/books.js?v=419';
 import healthModule from './js/health.js?v=397';
 import pingsModule from './js/pings.js?v=395';
 import todayModule from './js/today.js?v=420';
-import adminModule from './js/admin.js?v=420';
-import settingsModule from './js/settings.js?v=420';
+import adminModule from './js/admin.js?v=421';
+import settingsModule from './js/settings.js?v=421';
 // Eagerly bind unified minimize/restore behavior across all tool modals.
 import './js/modalManager.js';
 // Desktop window tiling — drag a modal near an edge/corner to snap.

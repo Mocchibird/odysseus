@@ -132,7 +132,7 @@ async function _openDownloadForGgufTask(task) {
       quant.dispatchEvent(new Event('change', { bubbles: true }));
     }
     try {
-      const hwfit = await import('./cookbook-hwfit.js?v=420');
+      const hwfit = await import('./cookbook-hwfit.js?v=421');
       if (typeof hwfit._hwfitFetch === 'function') hwfit._hwfitFetch(true);
     } catch {}
   }, 80);
