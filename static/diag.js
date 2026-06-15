@@ -40,12 +40,15 @@
     var row = add('F. three.js + real video (360 path)', 'importing three.js…', 'warn');
     import('/static/lib/three.module.min.js').then(function (THREE) {
       var ver = 'r' + (THREE.REVISION || '?');
-      return fetch('/api/gallery/library?media_type=video&limit=1', { credentials: 'same-origin' })
+      // Fetch broadly + detect a video by media_type OR file extension — older
+      // imported videos may not be tagged media_type='video'.
+      return fetch('/api/gallery/library?limit=40', { credentials: 'same-origin' })
         .then(function (r) { return r.ok ? r.json() : null; })
         .then(function (data) {
           var items = (data && data.items) || [];
-          var url = items.length ? items[0].url : null;
-          if (!url) { setLast(row, 'three.js ' + ver + ' loaded OK — but no videos in gallery to test', 'warn'); return; }
+          var vid = items.find(function (it) { return it.media_type === 'video' || /\.(mp4|mov|webm|m4v|ogv)(\?|$)/i.test(it.url || ''); });
+          var url = vid ? vid.url : null;
+          if (!url) { setLast(row, 'three.js ' + ver + ' loaded OK — no video found among ' + items.length + ' items', 'warn'); return; }
           var v = document.createElement('video');
           v.muted = true; v.setAttribute('muted', ''); v.playsInline = true;
           v.setAttribute('playsinline', ''); v.setAttribute('webkit-playsinline', '');
@@ -199,9 +202,10 @@
       flex.appendChild(grid); host.appendChild(flex);
       setTimeout(function () {
         var c0 = grid.children[0].getBoundingClientRect();
-        var square = c0.h > 0 && Math.abs(c0.w - c0.h) <= 4;
-        status.textContent = (square ? 'square OK' : (c0.h < c0.w ? 'SQUISHED' : 'TALL')) +
-          ' — card ' + Math.round(c0.w) + 'x' + Math.round(c0.h) + ', scrollH ' + grid.scrollHeight + ' clientH ' + grid.clientHeight;
+        var w = c0.width, h = c0.height;
+        var square = h > 0 && Math.abs(w - h) <= 4;
+        status.textContent = (square ? 'square OK' : (h < w ? 'SQUISHED' : 'TALL')) +
+          ' — card ' + Math.round(w) + 'x' + Math.round(h) + ', scrollH ' + grid.scrollHeight + ' clientH ' + grid.clientHeight;
         status.className = square ? 'pass' : 'fail';
       }, 900);
     }
