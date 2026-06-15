@@ -107,7 +107,9 @@ class TestBuildersRejectLookalikeHosts:
         assert build_chat_url("https://notanthropic.com") == "https://notanthropic.com/chat/completions"
 
     def test_lookalike_anthropic_models_is_openai(self):
-        assert build_models_url("https://anthropic.com.evil.com") == "https://anthropic.com.evil.com/models"
+        # Path-less lookalike host → generic OpenAI-compatible, which lands on
+        # /v1/models (issue #25); the point is it is NOT treated as Anthropic.
+        assert build_models_url("https://anthropic.com.evil.com") == "https://anthropic.com.evil.com/v1/models"
 
     def test_anthropic_domain_in_path_is_openai(self):
         assert build_chat_url("https://myproxy.internal/anthropic.com/v1") == "https://myproxy.internal/anthropic.com/v1/chat/completions"
@@ -119,7 +121,9 @@ class TestBuildersRejectLookalikeHosts:
         assert build_chat_url("https://notollama.com") == "https://notollama.com/chat/completions"
 
     def test_lookalike_ollama_models_is_openai(self):
-        assert build_models_url("https://notollama.com") == "https://notollama.com/models"
+        # Path-less lookalike host → generic OpenAI-compatible /v1/models
+        # (issue #25); the point is it is NOT treated as native Ollama.
+        assert build_models_url("https://notollama.com") == "https://notollama.com/v1/models"
 
 
 class TestBuildersLocalAndDockerEndpoints:

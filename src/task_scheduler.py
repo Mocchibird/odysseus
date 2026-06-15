@@ -1689,6 +1689,8 @@ class TaskScheduler:
                     data = json.loads(event_str[6:])
                     # Capture text from all event types, not just delta
                     if "delta" in data:
+                        if data.get("thinking"):
+                            continue
                         full_text += data["delta"]
                     elif data.get("type") == "tool_output":
                         # Tool results — capture summary so we have SOMETHING even
