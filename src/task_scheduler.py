@@ -57,10 +57,22 @@ async def _cached(key: Tuple, ttl: float, fetch: Callable[[], Awaitable[Any]]) -
             _shared_cache_pending.pop(key, None)
         pending.set_result(val)
         return val
+    except asyncio.CancelledError:
+        # CancelledError is a BaseException, so the `except Exception` below
+        # would NOT catch it — without this, a cancelled owner (e.g. stop_task
+        # mid-fetch) leaves its future in _shared_cache_pending unresolved and
+        # every waiter on it hangs forever. Pop it and wake waiters with a
+        # cancellation. (A lone dict pop is atomic on the single event loop, so
+        # no lock/await is needed here — safer during cancellation.)
+        _shared_cache_pending.pop(key, None)
+        if not pending.done():
+            pending.cancel()
+        raise
     except Exception as e:
         async with _shared_cache_lock:
             _shared_cache_pending.pop(key, None)
-        pending.set_exception(e)
+        if not pending.done():
+            pending.set_exception(e)
         raise
 
 
