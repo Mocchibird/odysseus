@@ -58,8 +58,9 @@ class Viewer360 {
     this.mesh = null;
     this.tex = null;
     this._destroyed = false;
+    this._pseudoFs = false;
+    this._onFsKey = null;
     this._onResize = () => this._resize();
-    this._onFsChange = () => this._syncFullscreenBtn();
   }
 
   // Decide whether this is actually a 360 video; only then reveal the toggle.
@@ -170,30 +171,39 @@ class Viewer360 {
     if (getComputedStyle(this.frame).position === 'static') this.frame.style.position = 'relative';
     this.frame.appendChild(bar);
     this.bar = bar;
-    document.addEventListener('fullscreenchange', this._onFsChange);
-    document.addEventListener('webkitfullscreenchange', this._onFsChange);
   }
 
+  // CSS pseudo-fullscreen (NOT the Fullscreen API): iOS Safari only allows
+  // requestFullscreen() on a <video>, never on a <div>/<canvas>, so the API
+  // silently fails for the WebGL 360 viewer. Pinning the frame to the viewport
+  // via a fixed-position class works on every platform.
   _toggleFullscreen() {
-    const fsEl = document.fullscreenElement || document.webkitFullscreenElement;
-    if (fsEl === this.frame) {
-      const exit = document.exitFullscreen || document.webkitExitFullscreen;
-      try { Promise.resolve(exit.call(document)).catch(() => {}); } catch (e) { /* noop */ }
-    } else {
-      const req = this.frame.requestFullscreen || this.frame.webkitRequestFullscreen;
-      if (req) {
-        this.frame.dataset._bg = this.frame.style.background || '';
-        this.frame.style.background = '#000';
-        try { Promise.resolve(req.call(this.frame)).catch(() => { this.frame.style.background = this.frame.dataset._bg || ''; }); }
-        catch (e) { this.frame.style.background = this.frame.dataset._bg || ''; }
-      }
-    }
+    if (this._pseudoFs) this._exitPseudoFs();
+    else this._enterPseudoFs();
+  }
+
+  _enterPseudoFs() {
+    if (this._pseudoFs) return;
+    this._pseudoFs = true;
+    this.frame.classList.add('video360-fullscreen');
+    this._onFsKey = (e) => { if (e.key === 'Escape') this._exitPseudoFs(); };
+    document.addEventListener('keydown', this._onFsKey);
+    this._syncFullscreenBtn();
+    this._resize();
+  }
+
+  _exitPseudoFs() {
+    if (!this._pseudoFs) return;
+    this._pseudoFs = false;
+    this.frame.classList.remove('video360-fullscreen');
+    if (this._onFsKey) { document.removeEventListener('keydown', this._onFsKey); this._onFsKey = null; }
+    this._syncFullscreenBtn();
+    this._resize();
   }
 
   _syncFullscreenBtn() {
-    const on = (document.fullscreenElement || document.webkitFullscreenElement) === this.frame;
+    const on = this._pseudoFs;
     if (this.fsBtn) { this.fsBtn.innerHTML = on ? _ICON_COMPRESS : _ICON_EXPAND; this.fsBtn.classList.toggle('active', on); }
-    if (!on && this.frame) this.frame.style.background = this.frame.dataset._bg || '';
     this._resize();
   }
 
@@ -326,10 +336,7 @@ class Viewer360 {
   destroy() {
     this._destroyed = true;
     this._disable();
-    document.removeEventListener('fullscreenchange', this._onFsChange);
-    document.removeEventListener('webkitfullscreenchange', this._onFsChange);
-    const fsEl = document.fullscreenElement || document.webkitFullscreenElement;
-    if (fsEl === this.frame) { try { (document.exitFullscreen || document.webkitExitFullscreen).call(document); } catch (e) { /* noop */ } }
+    this._exitPseudoFs();
     if (this.bar) this.bar.remove();
     this.bar = null;
   }
@@ -337,9 +344,10 @@ class Viewer360 {
   _bindPointer() {
     const c = this.canvas;
     let dragging = false, lx = 0, ly = 0, moved = 0;
-    const down = (e) => { dragging = true; moved = 0; lx = e.clientX; ly = e.clientY; c.style.cursor = 'grabbing'; c.setPointerCapture && c.setPointerCapture(e.pointerId); };
+    const down = (e) => { e.stopPropagation(); dragging = true; moved = 0; lx = e.clientX; ly = e.clientY; c.style.cursor = 'grabbing'; c.setPointerCapture && c.setPointerCapture(e.pointerId); };
     const move = (e) => {
       if (!dragging) return;
+      e.stopPropagation();
       const dx = e.clientX - lx, dy = e.clientY - ly;
       lx = e.clientX; ly = e.clientY; moved += Math.abs(dx) + Math.abs(dy);
       const k = this.fov / (this.canvas.clientHeight || 1); // pixels -> radians (zoom-aware)

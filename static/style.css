@@ -18174,6 +18174,27 @@ body.gallery-selecting .gallery-card-menu-btn,
   object-fit: contain;
   display: block;
 }
+/* CSS pseudo-fullscreen for the 360 viewer — the Fullscreen API can't target a
+   <div>/<canvas> on iOS (only <video>), so pin the frame to the whole viewport
+   instead. The WebGL canvas (position:absolute; inset:0) fills it and the
+   viewer's _resize() updates the renderer + camera aspect each frame. */
+.gallery-detail-img-frame.video360-fullscreen {
+  position: fixed;
+  inset: 0;
+  z-index: 99999;
+  max-width: none;
+  max-height: none;
+  width: 100vw;
+  height: 100dvh;
+  background: #000;
+  border-radius: 0;
+}
+.gallery-detail-img-frame.video360-fullscreen img,
+.gallery-detail-img-frame.video360-fullscreen video {
+  max-height: none;
+  width: 100%;
+  height: 100%;
+}
 .gallery-detail-nav {
   position: absolute;
   top: 50%;

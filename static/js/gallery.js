@@ -2045,7 +2045,9 @@ function _openDetail(img) {
     let sx = 0, sy = 0, st = 0, tracking = false;
     wrap.addEventListener('touchstart', (e) => {
       if (e.touches.length !== 1) { tracking = false; return; }
-      if (e.target.closest('video, button')) { tracking = false; return; }
+      // Skip video controls, buttons, and the 360 viewer's <canvas> (a fast
+      // look-around drag must not flick to the next/prev photo).
+      if (e.target.closest('video, button, canvas')) { tracking = false; return; }
       const t = e.touches[0];
       sx = t.clientX; sy = t.clientY; st = Date.now();
       tracking = true;
