@@ -242,6 +242,20 @@ def setup_gallery_routes() -> APIRouter:
                     return {"ok": False, "duplicate": True, "filename": existing.filename,
                             "id": existing.id, "message": "Duplicate photo skipped"}
 
+                # Make H.264 videos iOS-decodable (lossless remux: cap level to
+                # 5.2 + faststart) before publishing — phones reject Level 6.0 /
+                # moov-at-end with MediaError 4. Best-effort, off the event loop;
+                # on failure the original bytes publish unchanged.
+                if is_video:
+                    try:
+                        from src.video_normalize import normalize_in_place
+                        changed, _vinfo = await asyncio.to_thread(
+                            normalize_in_place, tmp_path, ext)
+                        if changed:
+                            total_size = tmp_path.stat().st_size
+                    except Exception as _ve:  # never let normalization break an upload
+                        logger.warning("Gallery video normalize skipped: %s", _ve)
+
                 # Atomic publish: the served filename appears only when the
                 # bytes are fully on disk.
                 await asyncio.to_thread(os.replace, tmp_path, img_path)

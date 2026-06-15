@@ -82,8 +82,20 @@ def ingest_upload(owner: Optional[str], upload_id: str, *, album: Optional[str] 
 
         os.makedirs(GENERATED_IMAGES_DIR, exist_ok=True)
         filename = f"{uuid.uuid4().hex[:12]}.{ext}"
-        with open(os.path.join(GENERATED_IMAGES_DIR, filename), "wb") as out:
+        dest_path = os.path.join(GENERATED_IMAGES_DIR, filename)
+        with open(dest_path, "wb") as out:
             out.write(content)
+        file_size = len(content)
+        # Make H.264 videos iOS-decodable (lossless level-cap + faststart);
+        # best-effort, leaves the file unchanged on any failure.
+        if is_video:
+            try:
+                from src.video_normalize import normalize_in_place
+                changed, _ = normalize_in_place(dest_path, ext)
+                if changed:
+                    file_size = os.path.getsize(dest_path)
+            except Exception as _ve:
+                logger.warning("Gallery ingest video normalize skipped: %s", _ve)
 
         exif = {}
         if not is_video:
@@ -100,7 +112,7 @@ def ingest_upload(owner: Optional[str], upload_id: str, *, album: Optional[str] 
             id=img_id, filename=filename, prompt=label, model="imported", owner=owner,
             media_type="video" if is_video else "image",
             tags=(tags or "").strip(), album_id=album_id, file_hash=file_hash,
-            file_size=len(content), width=exif.get("width"), height=exif.get("height"),
+            file_size=file_size, width=exif.get("width"), height=exif.get("height"),
             taken_at=exif.get("taken_at"), camera_make=exif.get("camera_make"),
             camera_model=exif.get("camera_model"), gps_lat=exif.get("gps_lat"),
             gps_lng=exif.get("gps_lng"),
