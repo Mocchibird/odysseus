@@ -1104,12 +1104,12 @@ document.addEventListener('click', function(e) {
       if (open) open(id);
     }).catch(() => {});
   } else if (kind === 'note') {
-    import('./notes.js?v=420').then(mod => {
+    import('./notes.js?v=421').then(mod => {
       const open = mod.openNote || (mod.default && mod.default.openNote);
       if (open) open(id);
     }).catch(() => {});
   } else if (kind === 'image') {
-    import('./gallery.js?v=423').then(mod => {
+    import('./gallery.js?v=424').then(mod => {
       const open = mod.openGalleryImage || (mod.default && mod.default.openGalleryImage);
       if (open) open(id);
     }).catch(() => {});
@@ -1233,7 +1233,7 @@ export function buildImageBubble(imageUrl, prompt, model, size, quality, imageId
     e.stopPropagation();
     try {
       const [galleryMod, editorMod] = await Promise.all([
-        import('./gallery.js?v=423'),
+        import('./gallery.js?v=424'),
         import('./galleryEditor.js'),
       ]);
       // Ensure the Gallery modal is open so the editor has a container

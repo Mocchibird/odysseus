@@ -176,6 +176,7 @@ export function openPings() {
     return;
   }
   if (_open) return;
+  document.getElementById('pings-modal')?.remove();  // clear a still-closing node
   _open = true;
   const modal = document.createElement('div');
   modal.className = 'modal';

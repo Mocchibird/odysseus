@@ -144,6 +144,7 @@ export function openToday() {
     return;
   }
   if (_open) { closeToday(); return; }
+  document.getElementById('today-modal')?.remove();  // clear a still-closing node
   _open = true;
   const modal = document.createElement('div');
   modal.className = 'modal';

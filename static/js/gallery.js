@@ -70,9 +70,15 @@ let _albumSearch = '';
 let _albumSelectMode = false;
 const _albumSelected = new Set();
 
+// Monotonic token so a slow earlier library fetch can't paint over a newer
+// one (rapid Photos<->Videos / search / tag-filter switching). Mirrors
+// calendar.js's _renderToken discipline.
+let _libToken = 0;
+
 // ---- API helpers ----
 
 async function _fetchLibrary(append) {
+  const _tok = ++_libToken;
   // Recompute the page size each fetch so resizing / fullscreening the
   // window between loads pulls the right number of photos.
   _limit = _computeFetchLimit();
@@ -104,7 +110,11 @@ async function _fetchLibrary(append) {
   if (_showHidden) params.set('show_hidden', 'true');
   try {
     const res = await fetch(`${API_BASE}/api/gallery/library?${params}`, { credentials: 'same-origin' });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
+    // A newer fetch superseded us (filter/tab switched mid-flight) — drop this
+    // stale response so it can't paint the wrong media set.
+    if (_tok !== _libToken) return;
     if (append) {
       _items = _items.concat(data.items || []);
     } else {
@@ -127,7 +137,11 @@ async function _fetchLibrary(append) {
     _renderModels(data.models || []);
     _renderStats();
   } catch (e) {
+    if (_tok !== _libToken) return;  // superseded — let the newer fetch own the UI
     console.error('Gallery fetch error:', e);
+    // First-load error left skeleton tiles on screen; replace them so the grid
+    // isn't stuck showing placeholders forever (previous items, if any, stay).
+    if (!append) _renderGrid();
   }
 }
 
@@ -137,6 +151,7 @@ async function _fetchAlbums() {
     if (_showHidden) aparams.set('show_hidden', 'true');
     const qs = aparams.toString();
     const res = await fetch(`${API_BASE}/api/gallery/albums${qs ? '?' + qs : ''}`, { credentials: 'same-origin' });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
     _albums = data.albums || [];
     _renderAlbums();
@@ -2285,6 +2300,11 @@ export function openGallery() {
     return;
   }
   if (_open) return;
+  // A previous close may still be playing its exit animation (the node lingers
+  // ~250ms). Remove it now so a fast reopen never leaves two #gallery-modal
+  // nodes — otherwise getElementById would bind the fresh window's handlers to
+  // the dying one.
+  document.getElementById('gallery-modal')?.remove();
   _open = true;
   _galleryCascaded = false;   // replay the domino-in cascade on each open
   // State is preserved across close/reopen — filters, album, sort, items,
@@ -3264,6 +3284,15 @@ function _doCloseGallery() {
 
 export function closeGallery() {
   if (!_open && !Modals.isMinimized('gallery-modal')) return;
+  // The editor blocks close (enforced in _doCloseGallery). Re-check it HERE,
+  // because Modals.close() hides + unregisters the window even when its
+  // closeFn bails — that would strand the gallery hidden but _open=true, i.e.
+  // unreachable until reload.
+  const editorMounted = !!document.querySelector('#gallery-editor-container .gallery-editor');
+  if ((window.__galleryEditLive || isEditorOpen() || editorMounted) && !window.__galleryAllowCloseEditor) {
+    if (uiModule) uiModule.showToast('Close the edit tab first');
+    return;
+  }
   if (Modals.isRegistered('gallery-modal')) {
     Modals.close('gallery-modal');
   } else {

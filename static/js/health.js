@@ -750,6 +750,9 @@ export function openHealth(tab) {
     return;
   }
   if (want) _tab = want;
+  // Drop a still-animating node from a previous close so a fast reopen can't
+  // leave two #health-modal nodes (getElementById would bind to the dying one).
+  document.getElementById('health-modal')?.remove();
   _open = true;
   const modal = document.createElement('div');
   modal.className = 'modal';
@@ -831,6 +834,7 @@ export function openHabits() {
     return;
   }
   if (_habitsOpen) { closeHabits(); return; }  // toggle from the rail
+  document.getElementById('habits-modal')?.remove();  // clear a still-closing node
   _habitsOpen = true;
   const modal = document.createElement('div');
   modal.className = 'modal';

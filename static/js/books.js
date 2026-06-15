@@ -1042,6 +1042,7 @@ export async function openBooksPanel(initialPath = '') {
     if (_pendingOpenPath) { _openAndShow(_pendingOpenPath); _pendingOpenPath = null; }
     return;
   }
+  document.getElementById('books-modal')?.remove();  // clear a still-closing node
   _open = true;
   const modal = document.createElement('div');
   modal.className = 'modal';

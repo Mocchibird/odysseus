@@ -1094,6 +1094,10 @@ export async function refreshDueBadge(opts = {}) {
 
 export function openPanel() {
   if (_open) return;
+  // Clear any still-animating pane/backdrop from a previous close so a fast
+  // reopen doesn't leave two #notes-pane nodes (getElementById binds the old).
+  document.getElementById('notes-pane')?.remove();
+  document.getElementById('notes-pane-backdrop')?.remove();
   _open = true;
   _editingId = null;
   _clearViewedReminderGlows();
