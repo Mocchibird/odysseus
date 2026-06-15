@@ -49,31 +49,45 @@
           var vid = items.find(function (it) { return it.media_type === 'video' || /\.(mp4|mov|webm|m4v|ogv)(\?|$)/i.test(it.url || ''); });
           var url = vid ? vid.url : null;
           if (!url) { setLast(row, 'three.js ' + ver + ' loaded OK — no video found among ' + items.length + ' items', 'warn'); return; }
+          // (1) Does the DEVICE get 206 for a Range request (through any proxy)?
+          // iOS won't play a <video> unless the server answers Range with 206.
+          var rangeRow = add('F1. Range probe (device sees 206?)', 'probing…', 'warn');
+          fetch(url, { headers: { Range: 'bytes=0-1023' }, credentials: 'same-origin' })
+            .then(function (rr) {
+              var cr = rr.headers.get('content-range'), ar = rr.headers.get('accept-ranges');
+              setLast(rangeRow, 'status ' + rr.status + (rr.status === 206 ? ' (206 OK)' : ' (NOT 206 — iOS will refuse video; likely the edge proxy)') +
+                ' | accept-ranges=' + ar + ' content-range=' + cr, rr.status === 206 ? 'pass' : 'fail');
+              try { rr.body && rr.body.cancel(); } catch (e) {}
+            })
+            .catch(function (e) { setLast(rangeRow, 'fetch failed: ' + e, 'fail'); });
+
+          // (2) Watch the <video> actually load + play over a few seconds.
           var v = document.createElement('video');
           v.muted = true; v.setAttribute('muted', ''); v.playsInline = true;
           v.setAttribute('playsinline', ''); v.setAttribute('webkit-playsinline', '');
-          v.loop = true; v.src = url;
-          // ON-SCREEN (small, visible) so iOS doesn't pause it for being offscreen
+          v.loop = true; v.preload = 'auto'; v.src = url;
           v.style.cssText = 'position:fixed;right:4px;bottom:4px;width:64px;height:36px;z-index:99;opacity:0.6';
+          var vidErr = '';
+          v.addEventListener('error', function () { vidErr = 'MediaError code=' + (v.error && v.error.code); });
           document.body.appendChild(v);
           var finish = function () {
             var rendered = false, err = '';
             try {
-              var rr = new THREE.WebGLRenderer(); rr.setSize(64, 36);
+              var rr2 = new THREE.WebGLRenderer(); rr2.setSize(64, 36);
               var sc = new THREE.Scene(); var cam = new THREE.PerspectiveCamera(75, 2, 0.1, 100);
               var tex = new THREE.VideoTexture(v);
               var geo = new THREE.SphereGeometry(10, 24, 16); geo.scale(-1, 1, 1);
               sc.add(new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ map: tex })));
-              rr.render(sc, cam); rendered = true; rr.dispose();
+              rr2.render(sc, cam); rendered = true; rr2.dispose();
             } catch (e) { err = String(e); }
             var okk = rendered && !v.paused && v.videoWidth > 0;
-            setLast(row, 'three.js ' + ver + ' OK | video paused=' + v.paused + ' readyState=' + v.readyState +
-              ' vw=' + v.videoWidth + ' | three render ' + (rendered ? 'OK' : 'FAIL ' + err), okk ? 'pass' : 'fail');
+            setLast(row, 'three.js ' + ver + ' OK | after 4s: paused=' + v.paused + ' readyState=' + v.readyState +
+              ' vw=' + v.videoWidth + (vidErr ? ' | ' + vidErr : '') + ' | render ' + (rendered ? 'OK' : 'FAIL ' + err), okk ? 'pass' : 'fail');
             setTimeout(function () { v.remove(); }, 1500);
           };
           var p = v.play();
-          if (p && p.then) p.then(function () { setTimeout(finish, 700); }).catch(function (e) { setLast(row, 'three.js ' + ver + ' OK; but video.play() REJECTED: ' + e, 'fail'); setTimeout(finish, 700); });
-          else setTimeout(finish, 700);
+          if (p && p.catch) p.catch(function (e) { vidErr = (vidErr ? vidErr + '; ' : '') + 'play() rejected: ' + e; });
+          setTimeout(finish, 4000);  // give a real (possibly large) video time to load
         });
     }).catch(function (e) {
       setLast(row, 'three.js FAILED to import: ' + e + ' — THIS is why 360 is black on iOS', 'fail');
