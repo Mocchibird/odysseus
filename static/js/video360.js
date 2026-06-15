@@ -263,6 +263,16 @@ class Viewer360 {
     this._initGL();
     this._bindPointer();
     this.frame.classList.add('video360-on');
+    // iOS/WebKit only yields decodable frames for texImage2D from a video that
+    // is actually PLAYING and inline. _enable() runs inside the toggle's tap
+    // (a user gesture), so this play() is allowed; without it a paused video
+    // textures as black on iOS. playsinline keeps it from going fullscreen.
+    try {
+      this.video.setAttribute('playsinline', '');
+      this.video.setAttribute('webkit-playsinline', '');
+      const p = this.video.play();
+      if (p && p.catch) p.catch(() => {});
+    } catch (e) { /* autoplay/gesture rejected — user can tap to play */ }
     this._resize();
     this._ro = ('ResizeObserver' in window) ? new ResizeObserver(this._onResize) : null;
     if (this._ro) this._ro.observe(this.frame);
