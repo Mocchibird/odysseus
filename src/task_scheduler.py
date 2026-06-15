@@ -185,7 +185,15 @@ def compute_next_run(schedule: str, scheduled_time: str,
 
 
 def _resolve_task_timezone(db, task) -> str | None:
-    """Look up the IANA timezone name for a task via its linked CrewMember, if any."""
+    """Look up the IANA timezone name for a task via its linked CrewMember, if any.
+
+    Used for SCHEDULING (compute_next_run): a crew member with a timezone wants
+    its scheduled_time interpreted as that zone's local wall-clock. Returns None
+    for a plain user task so its scheduled_time keeps the UTC contract (the LLM
+    converts the user's local time to UTC at creation) and existing tasks never
+    shift. Do NOT fold the owner's display timezone in here — see
+    _resolve_task_display_tz for that.
+    """
     if not getattr(task, "crew_member_id", None):
         return None
     try:
@@ -196,6 +204,24 @@ def _resolve_task_timezone(db, task) -> str | None:
     except Exception:
         pass
     return None
+
+
+def _resolve_task_display_tz(db, task) -> str | None:
+    """IANA zone for FORMATTING a task's notification text / time grounding —
+    the crew member's zone if set, else the owner's persisted (browser-learned)
+    timezone. This is what makes pings that fire while the browser is closed
+    read in the user's local time. Distinct from _resolve_task_timezone: this
+    must NOT feed compute_next_run, or a user task's UTC scheduled_time would be
+    reinterpreted as local and shift.
+    """
+    tz = _resolve_task_timezone(db, task)
+    if tz:
+        return tz
+    try:
+        from src.user_time import get_user_timezone
+        return get_user_timezone(getattr(task, "owner", "") or "")
+    except Exception:
+        return None
 
 
 # Built-in "housekeeping" tasks seeded for every owner, keyed by action.
@@ -1140,12 +1166,15 @@ class TaskScheduler:
         from src.tool_implementations import do_manage_notes
         from src.tool_utils import get_mcp_manager
 
-        tz_name = _resolve_task_timezone(db, task)
+        tz_name = _resolve_task_display_tz(db, task)
+        from src.user_time import resolve_owner_tzinfo, event_local_clock
+        _disp_tz = resolve_owner_tzinfo(getattr(task, "owner", "") or "")
         try:
             if tz_name:
                 from zoneinfo import ZoneInfo
                 from datetime import timezone, timedelta
-                now = _utcnow().replace(tzinfo=timezone.utc).astimezone(ZoneInfo(tz_name))
+                _disp_tz = ZoneInfo(tz_name)
+                now = _utcnow().replace(tzinfo=timezone.utc).astimezone(_disp_tz)
             else:
                 from datetime import timedelta
                 now = _utcnow()
@@ -1186,7 +1215,7 @@ class TaskScheduler:
                             continue
                         marker = {"critical": "[!!]", "high": "[!]", "normal": "  ", "low": " ·"}[tier]
                         for ev in items:
-                            t = ev.dtstart.strftime("%a %b %d %H:%M")
+                            t = event_local_clock(ev.dtstart, ev.is_utc, _disp_tz, "%a %b %d %H:%M")
                             tag = f" ({ev.event_type})" if ev.event_type else ""
                             loc = f" @ {ev.location}" if ev.location else ""
                             lines.append(f"{marker} {t} — {ev.summary}{tag}{loc}")
@@ -1383,8 +1412,10 @@ class TaskScheduler:
             if crew and crew.personality
             else "You are a helpful assistant executing a scheduled task. Use available tools to complete the task thoroughly."
         )
-        # Inject current time so the model knows what's past vs upcoming
-        tz_name = _resolve_task_timezone(db, task)
+        # Inject current time so the model knows what's past vs upcoming —
+        # in the owner's local timezone (display resolver), so pings that fire
+        # with the browser closed still reason in the user's clock.
+        tz_name = _resolve_task_display_tz(db, task)
         try:
             if tz_name:
                 from zoneinfo import ZoneInfo
