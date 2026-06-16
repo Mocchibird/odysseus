@@ -51,8 +51,27 @@ function _injectApiTokensPanel() {
   intgCard.insertAdjacentElement('afterend', card);
 }
 
+// ── Endpoint "Type" selector (admin → Add Models form) ───────────────────────
+// Fork-only: lets you mark an added endpoint as an Image-generation endpoint
+// (model_type=image) rather than a chat LLM. admin.js reads #adm-epType when
+// building the add-endpoint request (guarded — absent = defaults to llm).
+// Upstream's redesigned Add-Models form never had it, so we inject it next to
+// the Add button in the upstream-stable #adm-epApiKey-row.
+function _injectEndpointTypeSelect() {
+  if (document.getElementById('adm-epType')) return;             // already mounted
+  const row = document.getElementById('adm-epApiKey-row');
+  if (!row) return;                                              // anchor gone → skip
+  const addBtn = document.getElementById('adm-epAddBtn');
+  const label = document.createElement('label');
+  label.dataset.forkUi = 'ep-type';
+  label.style.cssText = 'display:inline-flex;align-items:center;gap:4px;font-size:11px;opacity:0.7;flex-shrink:0;';
+  label.innerHTML = 'Type:<select id="adm-epType" style="height:32px;padding:4px 6px;flex-shrink:0;box-sizing:border-box;"><option value="llm" selected>LLM</option><option value="image">Image</option></select>';
+  if (addBtn) row.insertBefore(label, addBtn);                  // sits before "Add"
+  else row.appendChild(label);
+}
+
 // Registry of injectors — add fork panels here as they're moved out of index.html.
-const _INJECTORS = [_injectApiTokensPanel];
+const _INJECTORS = [_injectApiTokensPanel, _injectEndpointTypeSelect];
 
 export function injectForkUI() {
   for (const inject of _INJECTORS) {
