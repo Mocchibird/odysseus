@@ -33,6 +33,10 @@ import pingsModule from './js/pings.js?v=396';
 import todayModule from './js/today.js?v=421';
 import adminModule from './js/admin.js?v=448';
 import settingsModule from './js/settings.js?v=448';
+// FORK: runtime-inject fork-only UI (e.g. the API Tokens panel) into stable
+// upstream anchors, so index.html stays aligned with upstream. Side-effect
+// import — the module self-runs on load. See static/js/fork-ui.js.
+import './js/fork-ui.js?v=449';
 // Eagerly bind unified minimize/restore behavior across all tool modals.
 import './js/modalManager.js';
 // Desktop window tiling — drag a modal near an edge/corner to snap.
