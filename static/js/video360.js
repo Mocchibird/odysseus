@@ -61,6 +61,7 @@ class Viewer360 {
     this._pseudoFs = false;
     this._onFsKey = null;
     this._onResize = () => this._resize();
+    this._onFsChange = () => this._onFullscreenChange();
   }
 
   // Decide whether this is actually a 360 video; only then reveal the toggle.
@@ -171,15 +172,69 @@ class Viewer360 {
     if (getComputedStyle(this.frame).position === 'static') this.frame.style.position = 'relative';
     this.frame.appendChild(bar);
     this.bar = bar;
+    // Sync the button + drop the fullscreen class when the user leaves real
+    // fullscreen via Esc / the system gesture (not our button).
+    document.addEventListener('fullscreenchange', this._onFsChange);
+    document.addEventListener('webkitfullscreenchange', this._onFsChange);
   }
 
-  // CSS pseudo-fullscreen (NOT the Fullscreen API): iOS Safari only allows
-  // requestFullscreen() on a <video>, never on a <div>/<canvas>, so the API
-  // silently fails for the WebGL 360 viewer. Pinning the frame to the viewport
-  // via a fixed-position class works on every platform.
-  _toggleFullscreen() {
+  _onFullscreenChange() {
+    const fsEl = document.fullscreenElement || document.webkitFullscreenElement;
+    if (fsEl !== this.frame && !this._pseudoFs) {
+      // Left real fullscreen externally — clean up the landscape lock + class.
+      this.frame.classList.remove('video360-fullscreen');
+      try { if (screen.orientation && screen.orientation.unlock) screen.orientation.unlock(); }
+      catch (e) { /* noop */ }
+    }
+    this._syncFullscreenBtn();
+  }
+
+  // Fullscreen, best-effort across platforms:
+  //  - Real Fullscreen API + lock to landscape where supported (desktop,
+  //    Android, iPadOS, and iOS when installed as a standalone PWA) — this is
+  //    the "normal" fullscreen the user expects, rotated to landscape.
+  //  - iPhone Safari TABS expose no Fullscreen API for a <div>/<canvas> (only
+  //    <video>), and orientation lock only works inside real fullscreen, so we
+  //    fall back to CSS pseudo-fullscreen + a "rotate to landscape" hint.
+  _isFs() {
+    return this._pseudoFs ||
+      (document.fullscreenElement || document.webkitFullscreenElement) === this.frame;
+  }
+
+  async _toggleFullscreen() {
+    if (this._isFs()) { this._exitFullscreen(); return; }
+    const req = this.frame.requestFullscreen || this.frame.webkitRequestFullscreen;
+    if (req) {
+      try {
+        await Promise.resolve(req.call(this.frame));
+        this.frame.classList.add('video360-fullscreen');  // background + sizing
+        this._lockLandscape();
+        this._syncFullscreenBtn();
+        this._resize();
+        return;
+      } catch (e) { /* API present but refused (iPhone tab) → pseudo-fs */ }
+    }
+    this._enterPseudoFs();
+  }
+
+  _exitFullscreen() {
+    const fsEl = document.fullscreenElement || document.webkitFullscreenElement;
+    if (fsEl === this.frame) {
+      try { (document.exitFullscreen || document.webkitExitFullscreen).call(document); }
+      catch (e) { /* noop */ }
+    }
+    try { if (screen.orientation && screen.orientation.unlock) screen.orientation.unlock(); }
+    catch (e) { /* noop */ }
+    this.frame.classList.remove('video360-fullscreen');
     if (this._pseudoFs) this._exitPseudoFs();
-    else this._enterPseudoFs();
+    else this._syncFullscreenBtn();
+  }
+
+  _lockLandscape() {
+    try {
+      const o = screen.orientation;
+      if (o && o.lock) Promise.resolve(o.lock('landscape')).catch(() => {});
+    } catch (e) { /* not supported (iPhone Safari tab) — user rotates manually */ }
   }
 
   _enterPseudoFs() {
@@ -202,7 +257,7 @@ class Viewer360 {
   }
 
   _syncFullscreenBtn() {
-    const on = this._pseudoFs;
+    const on = this._isFs();
     if (this.fsBtn) { this.fsBtn.innerHTML = on ? _ICON_COMPRESS : _ICON_EXPAND; this.fsBtn.classList.toggle('active', on); }
     this._resize();
   }
@@ -238,6 +293,9 @@ class Viewer360 {
     const c = renderer.domElement;
     c.className = 'video360-canvas';
     c.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;z-index:1;cursor:grab;touch-action:none;';
+    // A look-around drag must NOT be read as a swipe-to-dismiss by the modal
+    // sheet (ui.js) — that was closing the whole gallery on a fast swipe.
+    c.dataset.noSwipeDismiss = '';
     this.frame.appendChild(c);
     this.canvas = c;
     this.renderer = renderer;
@@ -336,7 +394,10 @@ class Viewer360 {
   destroy() {
     this._destroyed = true;
     this._disable();
-    this._exitPseudoFs();
+    this._exitFullscreen();
+    document.removeEventListener('fullscreenchange', this._onFsChange);
+    document.removeEventListener('webkitfullscreenchange', this._onFsChange);
+    if (this._onFsKey) { document.removeEventListener('keydown', this._onFsKey); this._onFsKey = null; }
     if (this.bar) this.bar.remove();
     this.bar = null;
   }
