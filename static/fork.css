@@ -542,20 +542,8 @@ details.md-callout[open] > summary::after { transform: rotate(-135deg); }
   border-radius: 6px;
   box-shadow: 0 2px 12px rgba(0, 0, 0, 0.25);
 }
-/* Backlink graph (canvas) */
-.notes-vault-graph-wrap { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
-.notes-vault-graph {
-  /* Fill the remaining pane-body height via the flex chain (the pane has a
-     definite height); never force a viewport height, which overflowed the
-     draggable pane and pushed everything off-screen. */
-  flex: 1 1 auto;
-  min-height: 260px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--fg) 2%, transparent);
-  overflow: hidden;
-  position: relative;
-}
+
+
 .notes-vault-reader-title span { font-size: 11px; opacity: 0.6; margin-left: 8px; }
 .notes-vault-org { display: flex; flex-direction: column; gap: 6px; overflow-y: auto; padding: 4px 2px; max-height: calc(100vh - 230px); }
 .notes-book-upload-progress {
@@ -1530,3 +1518,382 @@ details.md-callout[open] > summary::after { transform: rotate(-135deg); }
   transform: rotate(45deg);
 }
 .today-habit-streak { display: inline-flex; align-items: center; gap: 3px; font-size: 11px; opacity: 0.8; font-weight: 700; }
+
+/* ── leftover top-level fork rules (2nd extraction pass) ── */
+
+/* Hidden-by-default indicator on a tile when "Show hidden" is on. Same
+   translucent-black badge vocabulary as the video play badge. */
+.gallery-card-hidden {
+  position: absolute; top: 4px; left: 4px; z-index: 1;
+  width: 22px; height: 22px;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  border-radius: 50%;
+  pointer-events: none;
+}
+/* Per-card "⋮" actions menu trigger. Same round translucent-black hover
+   button vocabulary as the favorite/download buttons; sits in the bottom-right
+   corner (the conventional spot for a media tile's overflow menu). z-index 3
+   so it floats above the bottom caption bar (.gallery-card-info). */
+.gallery-card-menu-btn {
+  position: absolute; bottom: 4px; right: 4px; z-index: 3;
+  background: rgba(0,0,0,0.4); border: none; border-radius: 50%;
+  width: 26px; height: 26px;
+  color: rgba(255,255,255,0.75); cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  opacity: 0; transition: opacity 0.15s, background 0.15s;
+  padding: 0;
+}
+.gallery-card:hover .gallery-card-menu-btn { opacity: 1; }
+.gallery-card-menu-btn:hover { background: rgba(0,0,0,0.7); color: #fff; }
+/* In select mode the per-thumbnail hover buttons (favorite + download) just
+   get in the way of picking — hide them so the card is a clean select target.
+   `body.gallery-selecting` is the authoritative signal (one class for the
+   whole grid) — the per-card .gallery-card-selectable is kept as a backup
+   in case the body class is missed. */
+body.gallery-selecting .gallery-fav-btn,
+body.gallery-selecting .gallery-dl-btn,
+body.gallery-selecting .gallery-card-menu-btn,
+.gallery-card-selectable .gallery-fav-btn,
+.gallery-card-selectable .gallery-dl-btn,
+.gallery-card-selectable .gallery-card-menu-btn {
+  display: none !important;
+}
+.notes-pane-header .doc-action-icon-btn.notes-header-spacer {
+  visibility: hidden;
+  pointer-events: none;
+}
+.notes-pane-vault .notes-pane-body,
+.notes-pane-books .notes-pane-body {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  min-height: 0;
+  padding: 8px;
+}
+.notes-pane-vault .notes-pane-header,
+.notes-pane-books .notes-pane-header {
+  background: color-mix(in srgb, var(--accent-primary, var(--red)) 6%, var(--panel));
+}
+.book-search-input {
+  flex: 1;
+  background: color-mix(in srgb, var(--fg) 6%, transparent);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  color: var(--fg);
+  font: inherit;
+  font-size: 13px;
+  padding: 6px 10px;
+}
+.book-search-hit {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-radius: 8px;
+  padding: 8px 9px;
+  cursor: pointer;
+  color: var(--fg);
+}
+.book-search-hit:hover { background: color-mix(in srgb, var(--fg) 7%, transparent); }
+.book-hit-loc { display: block; font-size: 10px; font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase; opacity: 0.5; margin-bottom: 2px; }
+.book-hit-snip { display: block; font-size: 12px; line-height: 1.5; opacity: 0.9; }
+/* ── Books / E-Reader — its own standalone tool window (books.js). A "book" IS a
+   PDF/EPUB in the native Books store; this window is the reading view. The reader
+   reuses the global .notes-book-* / .notes-vault-* classes, so only the window
+   shell + the two inner views are styled here. These #books-modal rules mirror
+   the .notes-pane-books scoped rules that wrapped the reader when Books was a
+   mode inside the Notes pane. ── */
+.books-modal-content {
+  width: min(1040px, 96vw);
+  max-width: 1040px;
+  height: min(88vh, 1000px);
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.books-modal-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;          /* the two inner views own their scroll */
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+.books-toolbar {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-shrink: 0;
+  padding: 10px 12px 8px;
+}
+.books-toolbar .books-search { flex: 1 1 auto; min-width: 0; }
+/* .notes-select-trigger ships a top:3px nudge for its Notes-search-bar home;
+   in this align-items:center row the nudge breaks centering against the 32px
+   search input (button sat 3px low). Neutralize it here only. */
+.books-toolbar .notes-select-trigger { top: 0; }
+.books-upload-slot:not(:empty) { padding: 0 12px 8px; flex-shrink: 0; }
+/* Reader view: for EPUBs this IS the continuous scroller the chapter-streaming
+   logic drives (the role the notes-pane body played when Books lived in Notes). */
+.books-reader-view {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  /* No top padding: the sticky reader chrome must sit flush at the scrollport
+     top, else content scrolls past it through the gap. */
+  padding: 0 8px 8px;
+  scrollbar-width: thin;
+}
+/* ── Pings & Reminders feed ────────────────────────────────────────────────── */
+.pings-modal-content {
+  width: min(640px, 94vw);
+  max-width: 640px;
+  height: min(80vh, 820px);
+  display: flex;
+  flex-direction: column;
+}
+.pings-modal-content .modal-body {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: 10px 12px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.pings-empty { padding: 24px 8px; text-align: center; opacity: 0.6; font-size: 13px; }
+.rail-ping-badge {
+  position: absolute;
+  top: 1px;
+  right: 1px;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  border-radius: 999px;
+  background: var(--red);
+  color: var(--bg);
+  font-size: 9px;
+  font-weight: 800;
+  line-height: 14px;
+  text-align: center;
+  pointer-events: none;
+}
+/* ---- "Today" dashboard ---- */
+.today-modal-content {
+  width: min(620px, 94vw);
+  max-width: 620px;
+  height: min(82vh, 860px);
+  display: flex;
+  flex-direction: column;
+}
+.today-modal-content .modal-body {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: 8px 14px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.today-date-label {
+  font-size: 12px;
+  font-weight: 600;
+  opacity: 0.65;
+  margin-left: 4px;
+  white-space: nowrap;
+}
+.today-refresh-btn {
+  background: transparent;
+  border: none;
+  color: color-mix(in srgb, var(--fg) 65%, transparent);
+  font-size: 16px;
+  cursor: pointer;
+  padding: 2px 8px;
+  border-radius: 6px;
+  line-height: 1;
+}
+.today-refresh-btn:hover { color: var(--fg); background: color-mix(in srgb, var(--fg) 8%, transparent); }
+.today-empty { padding: 28px 8px; text-align: center; opacity: 0.6; font-size: 13px; }
+.today-allclear {
+  text-align: center;
+  padding: 14px 12px;
+  font-size: 13px;
+  opacity: 0.75;
+  background: color-mix(in srgb, var(--green) 9%, transparent);
+  border: 1px solid color-mix(in srgb, var(--green) 22%, var(--border));
+  border-radius: 10px;
+}
+.today-count {
+  font-size: 10px;
+  font-weight: 800;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--fg) 11%, transparent);
+  color: color-mix(in srgb, var(--fg) 78%, transparent);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.today-cf-btn {
+  margin-left: auto;
+  background: transparent;
+  border: 1px solid color-mix(in srgb, var(--red) 40%, var(--border));
+  color: color-mix(in srgb, var(--red) 92%, var(--fg));
+  border-radius: 7px;
+  padding: 2px 10px;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.today-cf-btn:hover { background: color-mix(in srgb, var(--red) 12%, transparent); }
+.today-cf-btn:disabled { opacity: 0.5; cursor: default; }
+.today-list { display: flex; flex-direction: column; gap: 4px; }
+.today-item {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 7px 10px;
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--fg) 4%, transparent);
+  border: 1px solid var(--border);
+  font-size: 13px;
+}
+.today-time {
+  flex: 0 0 auto;
+  min-width: 48px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  font-size: 12px;
+  opacity: 0.8;
+}
+.today-item-main { flex: 1 1 auto; min-width: 0; }
+.today-loc { opacity: 0.55; font-size: 12px; }
+.today-due {
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-weight: 600;
+  opacity: 0.6;
+  font-variant-numeric: tabular-nums;
+}
+/* Small read-only tag pill for file tags in the Library "Files" tab
+   (documentLibrary.js). */
+.doclib-tag-chip { font-size: 10px; padding: 1px 7px; border: 1px solid var(--border); border-radius: 10px; background: color-mix(in srgb, var(--fg) 10%, transparent); opacity: 0.8; }
+
+@media (hover: none) {
+  .gallery-card-menu-btn { opacity: 0.55; }
+  .notes-vault-file-actions { opacity: 1; }
+}
+
+
+@media (max-width: 768px) {
+  .book-tool-panel { right: 50%; transform: translateX(50%); width: 94vw; top: 56px; }
+  .health-modal-content { width: 100vw; max-width: 100vw; height: 100%; }
+  .health-profile-grid { grid-template-columns: 1fr; }
+  .health-habit-stats { width: 100%; justify-content: space-between; }
+  .pings-modal-content { width: 100vw; max-width: 100vw; height: 100%; }
+  .today-modal-content { width: 100vw; max-width: 100vw; height: 100%; }
+  .today-date-label { display: none; }
+}
+
+
+@media (max-width: 760px) {
+  .notes-pane-books .notes-pane-body {
+      display: flex;
+      flex-direction: column;
+      align-items: stretch;
+    }
+  .notes-pane-books .notes-vault-bar,
+    .notes-pane-books .notes-book-upload-progress,
+    .notes-pane-books .notes-vault-list,
+    .notes-pane-books .notes-book-reader,
+    .notes-pane-books .notes-empty-msg,
+    .notes-pane-books .notes-skeleton {
+      width: 100%;
+      min-width: 0;
+      grid-column: 1 / -1;
+      box-sizing: border-box;
+    }
+  .notes-book-head {
+      position: sticky;
+      top: 0;
+      z-index: 3;
+      /* Opaque so scrolling text doesn't bleed through the sticky header (#3). */
+      background: var(--panel, var(--bg));
+      box-shadow: 0 3px 8px color-mix(in srgb, var(--fg) 14%, transparent);
+      padding: 6px 8px;
+    }
+  .notes-book-controls-row {
+      grid-template-columns: 1fr 1fr;
+    }
+  .notes-book-controls-row-with-pdf,
+    .notes-book-controls-row-pdf {
+      grid-template-columns: 1fr 1fr;
+    }
+  .notes-book-select {
+      grid-column: 1 / -1;
+      order: -1;
+    }
+  .notes-book-content {
+      padding: 12px 2px 34px;
+      font-size: 15px;
+      line-height: 1.68;
+    }
+  .notes-book-content-page .notes-book-page {
+      max-height: calc(100dvh - 250px);
+      padding: 2px 8px 22px;
+    }
+  /* Bigger reader area on mobile — less chrome, more page (#8). dvh tracks the
+       browser's collapsing toolbars better than svh/vh. The PDF viewer is a
+       bounded scroll container (continuous-scroll PDF.js), so cap it to the
+       viewport and let overflow-y scroll it. */
+    .notes-book-pdf-viewer {
+      max-height: calc(100dvh - 96px);
+      padding: 8px 4px;
+    }
+  .notes-book-content {
+      padding: 10px 2px 28px;
+    }
+  .notes-book-content-pdf {
+      padding: 0;
+    }
+  .notes-epub-layout {
+      grid-template-columns: 1fr;
+    }
+  .notes-epub-toc {
+      position: static;
+      max-height: 170px;
+    }
+  .notes-epub-controls {
+      width: 100%;
+      margin-left: 0;
+      flex-wrap: wrap;
+    }
+  .notes-epub-select {
+      flex: 1;
+      max-width: none;
+    }
+  .books-modal-content {
+      width: 100vw;
+      max-width: 100vw;
+      height: 100%;
+      min-height: 0;
+      border-radius: 0;
+    }
+  /* Full-width reader/list children on narrow screens (mirrors the old mobile
+       .notes-pane-books rules). */
+    #books-modal .notes-book-reader,
+    #books-modal .notes-vault-list,
+    #books-modal .notes-empty-msg,
+    #books-modal .notes-skeleton {
+      width: 100%;
+      min-width: 0;
+      box-sizing: border-box;
+    }
+}
+
