@@ -13,7 +13,7 @@ import markdownModule from './markdown.js';
 import codeRunnerModule from './codeRunner.js';
 import { langIcon } from './langIcons.js';
 import spinnerModule from './spinner.js';
-import { openLibrary, closeLibrary, isLibraryOpen, initLibrary } from './documentLibrary.js?v=420';
+import { openLibrary, closeLibrary, isLibraryOpen, initLibrary } from './documentLibrary.js?v=456';
 import signatureModule from './signature.js';
 import * as Modals from './modalManager.js';
 
@@ -6209,10 +6209,14 @@ import * as Modals from './modalManager.js';
 
     try {
       const res = await fetch(`${API_BASE}/api/documents/${sessionId}`);
-      const allDocs = await res.json();
+      // Guard: error responses (e.g. 403 {"detail":"Authentication required"}
+      // or a 422 {"detail":[...]}) return a non-array body, on which .filter
+      // would throw. Treat any non-OK / non-array response as "no docs".
+      const allDocs = res.ok ? await res.json() : [];
       _hideLoadingOverlay();
       // Only load active docs
-      const activeDocs = allDocs.filter(d => d.is_active);
+      const list = Array.isArray(allDocs) ? allDocs : [];
+      const activeDocs = list.filter(d => d.is_active);
       if (activeDocs.length === 0) {
         // No docs yet — show empty editor, doc will be created when user types
         if (!restoreMode || shouldRestoreOpen) {
@@ -8756,9 +8760,9 @@ import * as Modals from './modalManager.js';
             const title = wl.getAttribute('data-wikilink') || '';
             if (!title) return;
             fetch(`${API_BASE}/api/documents/library?search=${encodeURIComponent(title)}&limit=20`, { credentials: 'same-origin' })
-              .then(r => r.json())
+              .then(r => r.ok ? r.json() : null)
               .then(data => {
-                const items = (data && data.documents) || [];
+                const items = Array.isArray(data && data.documents) ? data.documents : [];
                 const exact = items.find(d => (d.title || '').toLowerCase() === title.toLowerCase());
                 const target = exact || items[0];
                 if (target && target.id) loadDocument(target.id);

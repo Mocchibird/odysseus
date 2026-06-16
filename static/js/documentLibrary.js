@@ -330,10 +330,11 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
       if (!res.ok) throw new Error(res.statusText);
       const data = await res.json();
 
+      const docList = Array.isArray(data.documents) ? data.documents : [];
       if (append) {
-        _libraryDocs = _libraryDocs.concat(data.documents);
+        _libraryDocs = _libraryDocs.concat(docList);
       } else {
-        _libraryDocs = data.documents;
+        _libraryDocs = docList;
         _docsVisibleLimit = 20;  // reset chunk on a fresh load / search / sort
       }
       _libraryTotal = data.total;
@@ -2701,9 +2702,9 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
       ]).then(([s, d, r]) => {
         // These are all archived by definition — flag them so the expanded
         // chat preview hides its (redundant) "Archive" button.
-        _arcSessions = (s.sessions || []).map(x => ({ ...x, archived: true }));
-        _arcDocs = d.documents || [];
-        _arcResearch = (r.research || []).map(x => ({ ...x, archived: true }));
+        _arcSessions = (Array.isArray(s.sessions) ? s.sessions : []).map(x => ({ ...x, archived: true }));
+        _arcDocs = Array.isArray(d.documents) ? d.documents : [];
+        _arcResearch = (Array.isArray(r.research) ? r.research : []).map(x => ({ ...x, archived: true }));
         _renderArcGrid();
         _renderArcChips();
       }).catch(() => { grid.innerHTML = '<div class="doclib-empty">Failed to load</div>'; });

@@ -2974,8 +2974,10 @@ async function _renderLibDocuments(grid) {
     const params = new URLSearchParams({ limit: '50', sort: _lib.sort });
     if (_lib.search) params.set('search', _lib.search);
     const res = await fetch(`${API_BASE}/api/documents/library?${params}`);
-    const data = await res.json();
-    const docs = data.documents || [];
+    // Guard: error responses (e.g. a 422 {"detail":[...]} when limit > 50)
+    // return a non-dict/array body — fall back to an empty list.
+    const data = res.ok ? await res.json() : {};
+    const docs = Array.isArray(data.documents) ? data.documents : [];
     const stats = document.getElementById('lib-stats');
     if (stats) stats.textContent = `(${data.total || docs.length})`;
     if (!docs.length) { grid.innerHTML = '<div class="doclib-empty">No documents found</div>'; return; }
