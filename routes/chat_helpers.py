@@ -15,7 +15,7 @@ from src.llm_core import normalize_model_id
 from src.endpoint_resolver import normalize_base
 from src.bg import spawn
 from src.context_compactor import maybe_compact, trim_for_context
-from src.auth_helpers import get_current_user
+from src.auth_helpers import effective_user
 from src.prompt_security import untrusted_context_message
 from routes.prefs_routes import _load_for_user as load_prefs_for_user
 
@@ -82,7 +82,7 @@ def _enforce_chat_privileges(request, sess) -> None:
     which means unrestricted allowed_models / zero cap -> no-op for them.
     """
     try:
-        user = get_current_user(request)
+        user = effective_user(request)
     except Exception:
         user = None
     if not user:
@@ -181,17 +181,9 @@ async def auto_name_session(session_manager, sess):
             return
 
         owner = getattr(sess, "owner", None)
-        t_url, t_model, t_headers = resolve_task_endpoint(owner=owner)
-        if not t_model:
-            # If no task/utility model is configured at all, fall back to
-            # the session's own model so auto-naming still works even on
-            # minimal setups.
-            from src.endpoint_resolver import resolve_endpoint
-            _fallback = resolve_endpoint("default", owner=owner)
-            if _fallback and _fallback[1]:
-                t_url, t_model, t_headers = _fallback
-            else:
-                t_url, t_model, t_headers = sess.endpoint_url, sess.model, sess.headers
+        t_url, t_model, t_headers = resolve_task_endpoint(
+            sess.endpoint_url, sess.model, sess.headers, owner=owner
+        )
         if not t_model:
             logger.debug("[auto-name] No model provided, skipping")
             return
@@ -372,11 +364,11 @@ def add_user_message(sess, chat_handler, preprocessed: PreprocessedMessage, inco
 def fire_message_event(request, webhook_manager, session_id: str, sess, message: str, compare_mode: bool = False):
     """Fire webhook and event_bus events for a new user message."""
     if webhook_manager and not compare_mode:
-        spawn(webhook_manager.fire("chat.message", {
+        webhook_manager.fire_and_forget("chat.message", {
             "session_id": session_id, "model": sess.model, "message": message[:2000],
-        }), "webhook chat.message")
+        })
     from src.event_bus import fire_event
-    user = get_current_user(request)
+    user = effective_user(request)
     fire_event("message_sent", user)
 
 
@@ -602,8 +594,9 @@ async def build_chat_context(
     if not incognito:
         fire_message_event(request, webhook_manager, session_id, sess, message, compare_mode)
 
-    # Resolve user prefs
-    user = get_current_user(request)
+    # Resolve owner-scoped prefs/context. Browser requests keep the cookie user;
+    # bearer-token chat requests use the token owner instead of the "api" sentinel.
+    user = effective_user(request)
     uprefs = load_prefs_for_user(user)
 
     # Memory enabled?
@@ -1172,10 +1165,10 @@ def run_post_response_tasks(
 
     # Webhook
     if webhook_manager and not compare_mode:
-        spawn(webhook_manager.fire("chat.completed", {
+        webhook_manager.fire_and_forget("chat.completed", {
             "session_id": session_id, "model": sess.model,
             "user_message": message, "response": full_response[:2000],
-        }), "webhook chat.completed")
+        })
 
     # Auto-name
     if needs_auto_name(sess.name):

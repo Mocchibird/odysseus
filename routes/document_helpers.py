@@ -108,12 +108,12 @@ def _owner_session_filter(q, user):
 
     The owner backfill runs in init_db before the app serves requests, so
     by the time this filter is live there are no NULL-owner rows to leak;
-    we therefore match the owner strictly.
+    we therefore match the owner strictly for authenticated callers.
 
     Exception: in single-user mode (auth explicitly disabled) the operator owns
     everything, so don't filter — mirrors the gallery/files owner filter."""
-    if user is None:
-        if _auth_disabled():
+    if not user:
+        if user == "" or _auth_disabled():
             return q
         return q.filter(False)
     return q.filter(Document.owner == user)

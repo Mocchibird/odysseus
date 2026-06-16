@@ -1,6 +1,5 @@
 """Webhook, API Token, and sync chat routes."""
 
-import asyncio
 import uuid
 import logging
 from typing import Optional
@@ -11,7 +10,6 @@ from pydantic import BaseModel, Field
 
 from core.database import SessionLocal, Webhook, ModelEndpoint
 from src.auth_helpers import owner_filter
-from src.bg import spawn
 from src.url_security import validate_public_http_url
 from src.webhook_manager import WebhookManager, validate_webhook_url, validate_events
 
@@ -386,10 +384,10 @@ def setup_webhook_routes(
         sess.add_message(ChatMessage("assistant", reply))
         session_manager.save_sessions()
 
-        spawn(webhook_manager.fire("chat.completed", {
+        webhook_manager.fire_and_forget("chat.completed", {
             "session_id": session_id, "model": sess.model,
             "user_message": message[:2000], "response": reply[:2000],
-        }), "webhook chat.completed")
+        })
 
         return {"response": reply, "session_id": session_id, "model": sess.model}
 
