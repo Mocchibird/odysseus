@@ -196,7 +196,9 @@ body.bg-pattern-sparkles {
       flex-shrink: 0;
       position: relative;
       z-index: 2;
-      padding: 5px 0 0;
+      /* +safe-area-inset-top clears the notch/status bar in a standalone PWA
+         (0 on desktop / non-notch, so harmless elsewhere). */
+      padding: calc(5px + env(safe-area-inset-top, 0px)) 0 0;
       min-height: 25px;
       box-sizing: border-box;
     }
@@ -529,7 +531,9 @@ body.bg-pattern-sparkles {
       align-items: center;
       justify-content: flex-end; /* right-align when sidebar is on left */
       gap: 8px;
-      padding: 15px 10px 0 40px; /* top padding aligns logo with fixed hamburger */
+      /* top padding aligns logo with the fixed hamburger; +safe-area-inset-top
+         clears the notch/status bar in a standalone PWA. */
+      padding: calc(15px + env(safe-area-inset-top, 0px)) 10px 0 40px;
       flex-shrink: 0;
       min-height: 40px;
       border: none !important;
@@ -603,7 +607,9 @@ body.bg-pattern-sparkles {
     /* Fixed hamburger — always visible, toggles sidebar */
     .hamburger-btn {
       position: fixed;
-      top: 12px;
+      /* Clear the iPhone status bar / notch in a standalone PWA (the app uses
+         viewport-fit=cover + black-translucent, so content extends under it). */
+      top: calc(12px + env(safe-area-inset-top, 0px));
       left: 9px;
       right: auto;
       z-index: 210;
@@ -645,7 +651,9 @@ body.bg-pattern-sparkles {
       display: flex;
       flex-direction: column;
       align-items: center;
-      padding: 48px 4px 8px 4px;
+      /* +safe-area-inset-top keeps the first icon below the notch/status bar
+         (and below the fixed hamburger, which is also inset) in a PWA. */
+      padding: calc(48px + env(safe-area-inset-top, 0px)) 4px 8px 4px;
       gap: 4px;
       margin: 0;
       position: relative;
@@ -4300,7 +4308,8 @@ body.bg-pattern-sparkles {
       .hamburger-btn {
         width: 44px;
         height: 44px;
-        top: 6px;
+        /* +safe-area-inset-top clears the iPhone notch/status bar in a PWA. */
+        top: calc(6px + env(safe-area-inset-top, 0px));
         /* Follow the sidebar side (body.hamburger-left/right, set by
            sidebar-layout.js) like desktop does — the drawer + edge swipe
            live on that side, so the toggle must too. The old rule forced
@@ -18193,6 +18202,12 @@ body.gallery-selecting .gallery-card-menu-btn,
   background: #000;
   border-radius: 0;
 }
+/* In fullscreen the control bar (inline top:8px) and the rotate hint would sit
+   UNDER the iPhone status bar / notch — push them below the safe area so the
+   "settings" stay reachable. */
+.gallery-detail-img-frame.video360-fullscreen .video360-bar {
+  top: calc(8px + env(safe-area-inset-top, 0px)) !important;
+}
 .gallery-detail-img-frame.video360-fullscreen img,
 .gallery-detail-img-frame.video360-fullscreen video {
   max-height: none;
@@ -18206,7 +18221,8 @@ body.gallery-selecting .gallery-card-menu-btn,
   .gallery-detail-img-frame.video360-fullscreen::after {
     content: 'Rotate your device for landscape';
     position: absolute;
-    top: 12px;
+    /* below the control bar + clear of the notch/status bar */
+    top: calc(52px + env(safe-area-inset-top, 0px));
     left: 50%;
     transform: translateX(-50%);
     background: rgba(0, 0, 0, 0.6);
