@@ -56,7 +56,10 @@ def test_books_has_dedicated_reader_ui_hooks():
     notes = (ROOT / "static" / "js" / "notes.js").read_text(encoding="utf-8")
     index = (ROOT / "static" / "index.html").read_text(encoding="utf-8")
     app = (ROOT / "static" / "app.js").read_text(encoding="utf-8")
-    css = (ROOT / "static" / "style.css").read_text(encoding="utf-8")
+    # Shipped CSS = style.css + fork.css (fork-only rules were extracted into
+    # fork.css to keep style.css aligned with upstream; see fork-ui.js strategy).
+    css = ((ROOT / "static" / "style.css").read_text(encoding="utf-8")
+           + (ROOT / "static" / "fork.css").read_text(encoding="utf-8"))
     sw = (ROOT / "static" / "sw.js").read_text(encoding="utf-8")
 
     # Books is now its OWN standalone tool window (books.js), no longer a mode
@@ -150,7 +153,10 @@ def test_agent_tool_registration_for_books():
 
 def test_markdown_hidden_answer_quiz_syntax_exists():
     markdown = (ROOT / "static" / "js" / "markdown.js").read_text(encoding="utf-8")
-    css = (ROOT / "static" / "style.css").read_text(encoding="utf-8")
+    # Shipped CSS = style.css + fork.css (fork-only rules were extracted into
+    # fork.css to keep style.css aligned with upstream; see fork-ui.js strategy).
+    css = ((ROOT / "static" / "style.css").read_text(encoding="utf-8")
+           + (ROOT / "static" / "fork.css").read_text(encoding="utf-8"))
 
     assert "quiz/cloze syntax" in markdown
     assert "spoiler and quiz/cloze syntax" in markdown

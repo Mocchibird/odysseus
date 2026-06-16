@@ -7797,50 +7797,22 @@ button.hamburger {
 }
 .msg blockquote p { margin: 0.3em 0; }
 
-/* Markdown callouts / admonitions (`> [!info]`, `[!warning]`, …) rendered by
-   markdown.js. Accent + tint come from --callout-accent (set per type below
-   from existing theme color vars — no new colors). Works in every markdown
-   surface (chat, documents, notes), so kept unscoped. */
-.md-callout {
-  margin: 0.6em 0;
-  padding: 8px 12px;
-  border: 1px solid var(--border);
-  border-left: 3px solid var(--callout-accent, var(--accent, var(--red)));
-  border-radius: 6px;
-  background: color-mix(in srgb, var(--callout-accent, var(--accent, var(--red))) 8%, transparent);
-}
-.md-callout-title {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  font-weight: 600;
-  color: var(--callout-accent, var(--accent, var(--red)));
-}
-.md-callout-title svg { flex-shrink: 0; }
-.md-callout-body { margin-top: 4px; }
-.md-callout-body > :first-child { margin-top: 0; }
-.md-callout-body > :last-child { margin-bottom: 0; }
-.md-callout-body p { margin: 0.3em 0; }
-/* Foldable variants (`[!info]-` collapsed, `[!info]+` expanded). */
-details.md-callout > summary { cursor: pointer; list-style: none; }
-details.md-callout > summary::-webkit-details-marker { display: none; }
-details.md-callout > summary::after {
-  content: "";
-  margin-left: auto;
-  width: 7px; height: 7px;
-  border-right: 2px solid currentColor;
-  border-bottom: 2px solid currentColor;
-  transform: rotate(45deg);
-  transition: transform 0.15s;
-  opacity: 0.6;
-}
-details.md-callout[open] > summary::after { transform: rotate(-135deg); }
-/* Per-type accent, mapped onto existing :root color vars. */
-.md-callout-note { --callout-accent: var(--color-brand-blue, var(--accent, var(--red))); }
-.md-callout-tip { --callout-accent: var(--color-success, var(--green)); }
-.md-callout-warn { --callout-accent: var(--accent-warm, var(--red)); }
-.md-callout-danger { --callout-accent: var(--color-danger, var(--red)); }
-.md-callout-quote { --callout-accent: var(--color-muted, var(--border)); }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 /* Horizontal rules */
 .msg hr {
@@ -17676,16 +17648,7 @@ body.gallery-selecting .gallery-card-menu-btn,
   color: var(--red, #ff5555);
 }
 
-/* The scroll lives on this PLAIN block wrapper, never on the grid itself. On
-   iOS, a CSS grid that is ALSO an overflow scroll container mis-positions its
-   auto rows under height pressure — square cells get crammed to fit and
-   overlap instead of scrolling (worse when the keyboard shrinks the viewport),
-   and align-content:start does NOT fix it. A normal block scroller containing
-   a naturally-growing grid is immune. */
-.gallery-grid-scroll {
-  max-height: 60vh;
-  overflow-y: auto;
-}
+
 .gallery-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
@@ -18187,33 +18150,9 @@ body.gallery-selecting .gallery-card-menu-btn,
   object-fit: contain;
   display: block;
 }
-/* CSS pseudo-fullscreen for the 360 viewer — the Fullscreen API can't target a
-   <div>/<canvas> on iOS (only <video>), so pin the frame to the whole viewport
-   instead. The WebGL canvas (position:absolute; inset:0) fills it and the
-   viewer's _resize() updates the renderer + camera aspect each frame. */
-.gallery-detail-img-frame.video360-fullscreen {
-  position: fixed;
-  inset: 0;
-  z-index: 99999;
-  max-width: none;
-  max-height: none;
-  width: 100vw;
-  height: 100dvh;
-  background: #000;
-  border-radius: 0;
-}
-/* In fullscreen the control bar (inline top:8px) and the rotate hint would sit
-   UNDER the iPhone status bar / notch — push them below the safe area so the
-   "settings" stay reachable. */
-.gallery-detail-img-frame.video360-fullscreen .video360-bar {
-  top: calc(8px + env(safe-area-inset-top, 0px)) !important;
-}
-.gallery-detail-img-frame.video360-fullscreen img,
-.gallery-detail-img-frame.video360-fullscreen video {
-  max-height: none;
-  width: 100%;
-  height: 100%;
-}
+
+
+
 .gallery-detail-nav {
   position: absolute;
   top: 50%;
@@ -23488,37 +23427,12 @@ details.hwfit-serve-advanced > .hwfit-serve-checks:last-of-type {
   cursor: pointer;
   transition: border-color 0.12s, color 0.12s;
 }
-/* Chat/agent model allowlist (admin) — endpoint-grouped checkbox list */
-.settings-allowlist {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  max-height: 280px;
-  overflow-y: auto;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 8px 10px;
-}
-.settings-allowlist-group { display: flex; flex-direction: column; gap: 3px; }
-.settings-allowlist-ep {
-  font-size: 10px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  opacity: 0.5;
-  margin-bottom: 1px;
-}
-.settings-allowlist-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 13px;
-  padding: 3px 4px;
-  border-radius: 5px;
-  cursor: pointer;
-}
-.settings-allowlist-item:hover { background: color-mix(in srgb, var(--fg) 6%, transparent); }
-.settings-allowlist-item input { cursor: pointer; flex: 0 0 auto; }
+
+
+
+
+
+
 .settings-fallback-add:hover {
   border-color: var(--red);
   color: var(--red);
@@ -24381,11 +24295,7 @@ details.hwfit-serve-advanced > .hwfit-serve-checks:last-of-type {
   border-color: var(--red);
   background: color-mix(in srgb, var(--red) 5%, transparent);
 }
-/* Books list shares the same drop-to-upload affordance. */
-.books-list-view.gallery-dragover {
-  border-color: var(--red);
-  background: color-mix(in srgb, var(--red) 5%, transparent);
-}
+
 .gallery-albums-empty {
   display: flex; flex-direction: column; align-items: center; gap: 12px;
   padding: 48px 16px;
@@ -32959,17 +32869,8 @@ body.notes-mobile-mode.notes-drag-mode .note-card-pin.active {
   color: var(--accent);
   border-color: color-mix(in srgb, var(--accent) 50%, var(--border));
 }
-.notes-pane-header .doc-action-icon-btn.hidden,
-.notes-search-bar .notes-select-trigger.hidden,
-.notes-select-trigger.notes-vault-only,
-.notes-select-trigger.notes-books-only {
-  display: none;
-}
-.notes-select-trigger.notes-vault-only.visible,
-.notes-select-trigger.notes-books-only.visible {
-  display: inline-flex;
-  align-items: center;
-}
+
+
 .notes-pane-vault .notes-pane-body,
 .notes-pane-books .notes-pane-body {
   display: flex;
@@ -32982,627 +32883,108 @@ body.notes-mobile-mode.notes-drag-mode .note-card-pin.active {
 .notes-pane-books .notes-pane-header {
   background: color-mix(in srgb, var(--accent-primary, var(--red)) 6%, var(--panel));
 }
-.notes-vault-bar {
-  width: 100%;
-  box-sizing: border-box;
-  flex: 0 0 auto;
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 7px 8px;
-  margin-bottom: 8px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: color-mix(in srgb, var(--fg) 4%, transparent);
-  font-size: 11px;
-  font-weight: 650;
-}
-.notes-vault-bar-sub {
-  font-size: 10px;
-  font-weight: 500;
-  opacity: 0.55;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.notes-vault-list {
-  width: 100%;
-  min-width: 0;
-  box-sizing: border-box;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-.notes-vault-tree {
-  gap: 5px;
-}
-.notes-vault-folder {
-  width: 100%;
-  min-height: 34px;
-  box-sizing: border-box;
-  display: grid;
-  grid-template-columns: 18px 26px minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 7px;
-  padding: 5px 8px 5px calc(8px + var(--vault-indent, 0px));
-  border: 1px solid color-mix(in srgb, var(--border) 82%, transparent);
-  border-radius: 7px;
-  background: color-mix(in srgb, var(--fg) 3%, transparent);
-  color: var(--fg);
-  font-family: inherit;
-  text-align: left;
-  cursor: pointer;
-}
-.notes-vault-folder:hover {
-  border-color: color-mix(in srgb, var(--accent-primary, var(--red)) 42%, var(--border));
-  background: color-mix(in srgb, var(--accent-primary, var(--red)) 5%, var(--panel));
-}
-.notes-vault-folder-chevron {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  opacity: 0.62;
-  transition: transform 0.15s ease;
-}
-.notes-vault-folder.open .notes-vault-folder-chevron {
-  transform: rotate(90deg);
-}
-.notes-vault-folder-icon {
-  width: 26px;
-  height: 26px;
-  border-radius: 6px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--accent-primary, var(--red));
-  background: color-mix(in srgb, var(--accent-primary, var(--red)) 10%, transparent);
-}
-.notes-vault-folder-name {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 12px;
-  font-weight: 700;
-}
-.notes-vault-folder-count {
-  font-size: 10px;
-  opacity: 0.55;
-}
-.notes-vault-tree .notes-vault-file {
-  padding-left: calc(10px + var(--vault-indent, 0px));
-}
-.notes-vault-file {
-  width: 100%;
-  height: auto !important;
-  min-height: 56px;
-  max-height: 76px;
-  box-sizing: border-box;
-  display: grid;
-  grid-template-columns: 34px minmax(0, 1fr) auto auto;
-  align-items: center;
-  gap: 10px;
-  text-align: left;
-  border: 1px solid var(--border);
-  border-radius: 7px;
-  background: var(--panel);
-  color: var(--fg);
-  padding: 8px 10px;
-  font-family: inherit;
-  font-style: normal !important;
-  cursor: pointer;
-  overflow: hidden;
-  transition: border-color 0.15s, background 0.15s, transform 0.12s;
-}
-.notes-vault-file:hover {
-  border-color: color-mix(in srgb, var(--accent-primary, var(--red)) 45%, var(--border));
-  background: color-mix(in srgb, var(--accent-primary, var(--red)) 5%, var(--panel));
-}
-.notes-vault-file-actions {
-  flex: 0 0 auto;
-  width: 26px;
-  height: 26px;
-  border: none;
-  border-radius: 6px;
-  background: transparent;
-  color: color-mix(in srgb, var(--fg) 55%, transparent);
-  font-size: 16px;
-  line-height: 1;
-  cursor: pointer;
-  opacity: 0;
-  transition: opacity 0.12s, background 0.12s, color 0.12s;
-}
-.notes-vault-file:hover .notes-vault-file-actions,
-.notes-vault-file:focus-within .notes-vault-file-actions { opacity: 1; }
-.notes-vault-file-actions:hover { background: color-mix(in srgb, var(--fg) 12%, transparent); color: var(--fg); }
-@media (hover: none) { .notes-vault-file-actions { opacity: 1; } }  /* always visible on touch */
-/* The vault file ⋯ menu reuses the shared .dropdown / .dropdown-item-compact
-   styling (see calendar's event menu), so no bespoke menu CSS is needed here. */
-.notes-vault-file.loading {
-  opacity: 0.65;
-  pointer-events: none;
-}
-.notes-vault-file-icon {
-  width: 34px;
-  height: 34px;
-  border-radius: 6px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--accent-primary, var(--red));
-  background: color-mix(in srgb, var(--accent-primary, var(--red)) 11%, transparent);
-}
-.notes-vault-file-main {
-  min-width: 0;
-  display: grid;
-  grid-template-rows: auto auto auto;
-  gap: 3px;
-  overflow: hidden;
-}
-.notes-vault-file-title {
-  display: block;
-  min-width: 0;
-  font-size: 13px;
-  font-weight: 700;
-  line-height: 1.2;
-  font-style: normal !important;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.notes-vault-file-path {
-  display: block;
-  min-width: 0;
-  font-size: 11px;
-  line-height: 1.15;
-  opacity: 0.5;
-  font-style: normal !important;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.notes-vault-file-excerpt {
-  display: block;
-  min-width: 0;
-  font-size: 11px;
-  line-height: 1.2;
-  max-height: 1.2em;
-  opacity: 0.6;
-  font-style: normal !important;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.notes-vault-file-meta {
-  align-self: center;
-  font-size: 11px;
-  line-height: 1;
-  opacity: 0.62;
-  white-space: nowrap;
-  font-style: normal !important;
-}
-.notes-pane-books .notes-vault-list {
-  gap: 8px;
-}
-.notes-pane-books .notes-vault-file.notes-book-file {
-  grid-template-columns: 44px minmax(0, 1fr) auto auto;
-  min-height: 88px;
-  max-height: none;
-  align-items: start;
-  padding: 10px;
-  gap: 10px;
-}
-.notes-book-cover {
-  width: 44px;
-  height: 64px;
-  border-radius: 4px;
-  overflow: hidden;
-  position: relative;
-  background: color-mix(in srgb, var(--fg) 8%, transparent);
-  border: 1px solid var(--border);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex: 0 0 auto;
-}
-.notes-book-cover-img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  display: block;
-}
-.notes-book-cover.no-cover .notes-book-cover-img { display: none; }
-.notes-book-cover-fallback {
-  font-size: 10px;
-  font-weight: 800;
-  letter-spacing: 0.04em;
-  opacity: 0.5;
-  display: none;
-}
-.notes-book-cover.no-cover .notes-book-cover-fallback { display: block; }
-.notes-book-cover.has-cover { background: transparent; }
-.notes-book-row-main {
-  min-width: 0;
-  display: grid;
-  gap: 6px;
-}
-.notes-book-row-top {
-  min-width: 0;
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  align-items: start;
-  gap: 8px;
-}
-.notes-book-kind-pill {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 44px;
-  min-height: 24px;
-  padding: 0 7px;
-  border: 1px solid color-mix(in srgb, var(--accent-primary, var(--red)) 45%, var(--border));
-  border-radius: 6px;
-  color: color-mix(in srgb, var(--fg) 78%, transparent);
-  background: color-mix(in srgb, var(--accent-primary, var(--red)) 7%, transparent);
-  font-size: 11px;
-  line-height: 1;
-  font-weight: 700;
-}
-.notes-book-row-title {
-  min-width: 0;
-  color: var(--fg);
-  font-size: 13px;
-  font-weight: 750;
-  line-height: 1.25;
-  white-space: normal;
-  overflow-wrap: anywhere;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-.notes-book-row-path,
-.notes-book-row-meta {
-  min-width: 0;
-  font-size: 11px;
-  line-height: 1.2;
-  opacity: 0.55;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.notes-book-row-meta {
-  opacity: 0.72;
-}
-.notes-book-title-edit {
-  width: 30px;
-  height: 30px;
-  border-radius: 6px;
-  border: 1px solid var(--border);
-  background: color-mix(in srgb, var(--fg) 4%, transparent);
-  color: color-mix(in srgb, var(--fg) 74%, transparent);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  flex-shrink: 0;
-}
-.notes-book-title-edit:hover {
-  color: var(--accent-primary, var(--red));
-  border-color: color-mix(in srgb, var(--accent-primary, var(--red)) 45%, var(--border));
-  background: color-mix(in srgb, var(--accent-primary, var(--red)) 9%, transparent);
-}
-/* Favourite (star) toggle — matches the row's edit button; gold when starred. */
-.notes-book-fav {
-  width: 30px;
-  height: 30px;
-  border-radius: 6px;
-  border: 1px solid var(--border);
-  background: color-mix(in srgb, var(--fg) 4%, transparent);
-  color: color-mix(in srgb, var(--fg) 55%, transparent);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  flex-shrink: 0;
-}
-.notes-book-fav:hover { color: var(--accent-primary, var(--red)); border-color: color-mix(in srgb, var(--accent-primary, var(--red)) 45%, var(--border)); }
-.notes-book-fav.is-fav { color: var(--accent-primary, var(--red)); border-color: color-mix(in srgb, var(--accent-primary, var(--red)) 40%, var(--border)); }
-.notes-book-fav.loading { opacity: 0.5; pointer-events: none; }
-.notes-book-reader-edit {
-  margin-left: 0;
-}
-.notes-vault-reader {
-  border: 1px solid var(--border);
-  border-radius: 7px;
-  background: var(--panel);
-  overflow: hidden;
-}
-.notes-vault-reader-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 9px;
-  border-bottom: 1px solid var(--border);
-  background: color-mix(in srgb, var(--fg) 4%, transparent);
-}
-.notes-vault-back {
-  width: 28px;
-  height: 28px;
-  border-radius: 6px;
-  border: 1px solid var(--border);
-  background: transparent;
-  color: var(--fg);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-}
-.notes-vault-back:hover {
-  border-color: color-mix(in srgb, var(--accent-primary, var(--red)) 45%, var(--border));
-  color: var(--accent-primary, var(--red));
-}
-.notes-vault-reader-title {
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-}
-.notes-vault-reader-title strong {
-  font-size: 12px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.notes-vault-reader-title span {
-  font-size: 10px;
-  opacity: 0.55;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.notes-vault-reader-content {
-  margin: 0;
-  padding: 12px;
-  max-height: calc(100vh - 230px);
-  overflow: auto;
-  white-space: pre-wrap;
-  word-break: break-word;
-  font: 12px/1.5 var(--mono-font, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
-  background: color-mix(in srgb, var(--fg) 3%, transparent);
-}
-/* Inline image preview in the reader. */
-.notes-vault-image-wrap {
-  display: flex;
-  justify-content: center;
-  padding: 12px;
-  max-height: calc(100vh - 230px);
-  overflow: auto;
-  background: color-mix(in srgb, var(--fg) 3%, transparent);
-  border-radius: 8px;
-}
-.notes-vault-image {
-  max-width: 100%;
-  height: auto;
-  border-radius: 6px;
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.25);
-}
-/* Backlink graph (canvas) */
-.notes-vault-graph-wrap { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
-.notes-vault-graph {
-  /* Fill the remaining pane-body height via the flex chain (the pane has a
-     definite height); never force a viewport height, which overflowed the
-     draggable pane and pushed everything off-screen. */
-  flex: 1 1 auto;
-  min-height: 260px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--fg) 2%, transparent);
-  overflow: hidden;
-  position: relative;
-}
-.notes-vault-reader-title span { font-size: 11px; opacity: 0.6; margin-left: 8px; }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+@media (hover: none) { .notes-vault-file-actions { opacity: 1; } }  
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 @media (max-width: 768px) { .notes-vault-graph { min-height: 50svh; } }
-.notes-vault-org { display: flex; flex-direction: column; gap: 6px; overflow-y: auto; padding: 4px 2px; max-height: calc(100vh - 230px); }
-.notes-book-upload-progress {
-  display: grid;
-  gap: 5px;
-  padding: 8px;
-  margin-bottom: 8px;
-  border: 1px solid color-mix(in srgb, var(--border) 82%, transparent);
-  border-radius: 7px;
-  background: color-mix(in srgb, var(--fg) 4%, transparent);
-  font-size: 11px;
-}
-.notes-book-upload-top {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-.notes-book-upload-top span:first-child,
-.notes-book-upload-detail {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.notes-book-upload-detail {
-  opacity: 0.58;
-}
-.notes-book-upload-track {
-  height: 6px;
-  border-radius: 999px;
-  overflow: hidden;
-  background: color-mix(in srgb, var(--fg) 10%, transparent);
-}
-.notes-book-upload-track span {
-  display: block;
-  height: 100%;
-  border-radius: inherit;
-  background: var(--accent-primary, var(--red));
-  transition: width 0.12s ease;
-}
-.notes-book-upload-progress.indeterminate .notes-book-upload-track span {
-  width: 34% !important;
-  animation: notes-book-upload-indeterminate 1.1s ease-in-out infinite;
-}
-.notes-book-upload-progress.error {
-  border-color: color-mix(in srgb, var(--red) 45%, var(--border));
-}
+
+
+
+
+
+
+
+
+
 @keyframes notes-book-upload-indeterminate {
   0% { transform: translateX(-110%); }
   100% { transform: translateX(310%); }
 }
-.notes-book-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-/* Pin the reader chrome (head + chapter/page nav) to the top so scrolling —
-   which prepends the previous chapter in continuous mode — can't carry the
-   menu out of reach (it used to scroll up into the just-prepended chapter). */
-.notes-book-chrome {
-  position: sticky;
-  top: 0;
-  z-index: 6;
-  background: var(--panel, var(--bg));
-}
-.notes-book-head .notes-vault-reader-title {
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow: hidden;
-}
-.notes-book-head .notes-vault-reader-title strong,
-.notes-book-head .notes-vault-reader-title span {
-  display: block;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.notes-book-head-tools {
-  flex: 0 0 auto;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-/* Collapsible chapter/page nav row — hidden until the list toggle is on. */
-.notes-book-nav-row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  max-height: 0;
-  opacity: 0;
-  overflow: hidden;
-  padding: 0 9px;
-  border-bottom: 1px solid var(--border);
-  transition: max-height 0.2s ease, opacity 0.18s ease, padding 0.2s ease;
-}
-.notes-book-nav-open .notes-book-nav-row {
-  max-height: 60px;
-  opacity: 1;
-  padding: 8px 9px;
-}
-.notes-book-nav-row .notes-book-select { flex: 1 1 auto; min-width: 0; }
-.notes-book-nav-toggle.active {
-  color: var(--fg);
-  background: color-mix(in srgb, var(--accent-primary, var(--red)) 18%, transparent);
-  border-color: color-mix(in srgb, var(--accent-primary, var(--red)) 45%, var(--border));
-}
-.notes-book-reader {
-  width: 100%;
-  min-width: 0;
-  box-sizing: border-box;
-  display: flex;
-  flex: 1 1 auto;
-  flex-direction: column;
-}
-.notes-book-title-row {
-  min-width: 0;
-  display: grid;
-  grid-template-columns: 30px minmax(0, 1fr) 30px;
-  align-items: center;
-  gap: 8px;
-}
-.notes-book-controls-row {
-  min-width: 0;
-  display: grid;
-  grid-template-columns: auto minmax(150px, 1fr) auto auto;
-  align-items: center;
-  gap: 6px;
-  width: 100%;
-}
-.notes-book-controls-row-with-pdf {
-  grid-template-columns: auto auto minmax(150px, 1fr) auto auto;
-}
-.notes-book-controls-row-pdf {
-  /* Native PDF view has no page nav — just the PDF/Text toggle + reader tools.
-     Flex them to opposite ends instead of the multi-column grid. */
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 8px;
-}
-.notes-book-controls-row .notes-select-trigger {
-  height: 30px;
-  min-height: 30px;
-}
-.notes-book-select {
-  width: 100%;
-  min-width: 0;
-  max-width: none;
-}
-/* ---- Reader tools: search / bookmark / annotations / read-aloud ---- */
-.notes-book-tools { display: inline-flex; gap: 2px; align-items: center; }
-.notes-book-tool {
-  box-sizing: border-box;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 30px;
-  height: 28px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: color-mix(in srgb, var(--fg) 4%, transparent);
-  color: color-mix(in srgb, var(--fg) 70%, transparent);
-  cursor: pointer;
-  transition: color 0.15s, background 0.15s, border-color 0.15s;
-}
-.notes-book-tool:hover { color: var(--fg); border-color: color-mix(in srgb, var(--fg) 30%, var(--border)); }
-.notes-book-tool.active { color: var(--fg); background: color-mix(in srgb, var(--accent-primary, var(--red)) 18%, transparent); border-color: color-mix(in srgb, var(--accent-primary, var(--red)) 45%, var(--border)); }
-.notes-book-tool.flash { animation: bookToolFlash 0.6s ease; }
-.notes-book-tool.loading { opacity: 0.5; pointer-events: none; }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 @keyframes bookToolFlash {
   0% { background: color-mix(in srgb, var(--green) 40%, transparent); }
   100% { background: color-mix(in srgb, var(--fg) 4%, transparent); }
 }
 
-/* Floating tool panels (search + annotations) */
-.book-tool-panel {
-  position: fixed;
-  top: 64px;
-  right: 24px;
-  z-index: 10050;
-  width: min(380px, 92vw);
-  max-height: min(70vh, 560px);
-  display: flex;
-  flex-direction: column;
-  background: var(--bg, #111);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4);
-  overflow: hidden;
-}
-.book-tool-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 9px 10px;
-  border-bottom: 1px solid var(--border);
-}
-.book-tool-head strong { font-size: 13px; }
+
+
+
 .book-search-input {
   flex: 1;
   background: color-mix(in srgb, var(--fg) 6%, transparent);
@@ -33613,19 +32995,11 @@ body.notes-mobile-mode.notes-drag-mode .note-card-pin.active {
   font-size: 13px;
   padding: 6px 10px;
 }
-.book-tool-close {
-  background: transparent;
-  border: none;
-  color: color-mix(in srgb, var(--fg) 60%, transparent);
-  font-size: 14px;
-  cursor: pointer;
-  padding: 2px 6px;
-  border-radius: 6px;
-}
-.book-tool-close:hover { color: var(--fg); background: color-mix(in srgb, var(--fg) 8%, transparent); }
-.book-tool-body { overflow-y: auto; padding: 6px; }
-.book-tool-hint { padding: 16px 10px; opacity: 0.55; font-size: 12px; text-align: center; }
-.book-tool-meta { padding: 4px 8px 8px; font-size: 11px; font-weight: 700; opacity: 0.55; }
+
+
+
+
+
 .book-search-hit {
   display: block;
   width: 100%;
@@ -33640,281 +33014,59 @@ body.notes-mobile-mode.notes-drag-mode .note-card-pin.active {
 .book-search-hit:hover { background: color-mix(in srgb, var(--fg) 7%, transparent); }
 .book-hit-loc { display: block; font-size: 10px; font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase; opacity: 0.5; margin-bottom: 2px; }
 .book-hit-snip { display: block; font-size: 12px; line-height: 1.5; opacity: 0.9; }
-.book-hit-snip mark, .book-annot-text mark { background: color-mix(in srgb, var(--accent-primary, #ffd24a) 45%, transparent); color: inherit; border-radius: 2px; padding: 0 1px; }
-.book-annot {
-  display: flex;
-  align-items: stretch;
-  gap: 4px;
-  border-radius: 8px;
-}
-.book-annot:hover { background: color-mix(in srgb, var(--fg) 6%, transparent); }
-.book-annot-jump {
-  flex: 1;
-  display: flex;
-  gap: 8px;
-  align-items: flex-start;
-  text-align: left;
-  background: transparent;
-  border: 0;
-  cursor: pointer;
-  color: var(--fg);
-  padding: 8px 8px;
-  min-width: 0;
-}
-.book-annot-badge { flex: 0 0 auto; font-size: 13px; opacity: 0.8; }
-.book-annot-main { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-.book-annot-loc { font-size: 10px; font-weight: 800; letter-spacing: 0.03em; text-transform: uppercase; opacity: 0.5; }
-.book-annot-text { font-size: 12px; line-height: 1.45; border-left: 2px solid color-mix(in srgb, var(--accent-primary, var(--red)) 50%, var(--border)); padding-left: 7px; }
-.book-annot.highlight .book-annot-text { font-style: italic; }
-.book-annot-note { font-size: 12px; opacity: 0.7; }
-.book-annot-del {
-  flex: 0 0 auto;
-  align-self: center;
-  background: transparent;
-  border: 0;
-  color: color-mix(in srgb, var(--fg) 45%, transparent);
-  cursor: pointer;
-  font-size: 12px;
-  padding: 0 8px;
-  border-radius: 6px;
-}
-.book-annot-del:hover { color: var(--red); }
 
-/* Selection mini-toolbar */
-.book-sel-popover {
-  position: absolute;
-  z-index: 10060;
-  display: flex;
-  gap: 2px;
-  padding: 4px;
-  background: var(--bg, #111);
-  border: 1px solid var(--border);
-  border-radius: 9px;
-  box-shadow: 0 8px 26px rgba(0, 0, 0, 0.45);
-}
-.book-sel-btn {
-  background: transparent;
-  border: 0;
-  border-radius: 6px;
-  color: var(--fg);
-  font: inherit;
-  font-size: 12px;
-  font-weight: 650;
-  padding: 5px 9px;
-  cursor: pointer;
-  white-space: nowrap;
-}
-.book-sel-btn:hover { background: color-mix(in srgb, var(--fg) 10%, transparent); }
 
-/* Explain popover */
-.book-explain-popover {
-  position: absolute;
-  z-index: 10061;
-  width: min(340px, 92vw);
-  background: var(--bg, #111);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
-  overflow: hidden;
-}
-.book-explain-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 8px 10px;
-  font-size: 12px;
-  font-weight: 800;
-  border-bottom: 1px solid var(--border);
-}
-.book-explain-head button { background: transparent; border: 0; color: color-mix(in srgb, var(--fg) 60%, transparent); cursor: pointer; font-size: 13px; }
-.book-explain-quote {
-  margin: 9px 10px;
-  padding-left: 8px;
-  border-left: 2px solid color-mix(in srgb, var(--accent-primary, var(--red)) 50%, var(--border));
-  font-size: 12px;
-  font-style: italic;
-  opacity: 0.7;
-  max-height: 72px;
-  overflow: auto;
-}
-.book-explain-body { padding: 4px 12px 14px; font-size: 13px; line-height: 1.6; white-space: pre-wrap; }
-.book-explain-err { color: var(--red); }
-.book-explain-spin {
-  display: inline-block;
-  width: 11px; height: 11px;
-  border: 2px solid color-mix(in srgb, var(--fg) 25%, transparent);
-  border-top-color: var(--fg);
-  border-radius: 50%;
-  animation: bookSpin 0.7s linear infinite;
-  vertical-align: -1px;
-}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 @keyframes bookSpin { to { transform: rotate(360deg); } }
 @media (max-width: 768px) {
   .book-tool-panel { right: 50%; transform: translateX(50%); width: 94vw; top: 56px; }
 }
 
-.notes-book-content {
-  max-width: 820px;
-  width: 100%;
-  margin: 0 auto;
-  padding: 18px 8px 42px;
-  font-size: 16px;
-  line-height: 1.72;
-}
-.notes-book-page {
-  outline: 0;
-}
-.notes-book-content-page .notes-book-page {
-  min-height: 280px;
-  max-height: calc(100vh - 250px);
-  overflow: auto;
-  padding: 2px 12px 24px;
-  border-radius: 7px;
-  background: color-mix(in srgb, var(--fg) 2%, transparent);
-  overscroll-behavior: contain;
-  scroll-behavior: smooth;
-}
-.notes-book-content-scroll .notes-book-page {
-  overflow: visible;
-}
-.notes-book-content-continuous {
-  max-width: 780px;
-}
-.notes-book-stream {
-  display: grid;
-  gap: 30px;
-}
-.notes-book-chapter-section {
-  padding-bottom: 30px;
-  border-bottom: 1px solid color-mix(in srgb, var(--fg) 9%, transparent);
-}
-.notes-book-chapter-section:last-child {
-  border-bottom: 0;
-}
-.notes-book-content h2 {
-  font-size: 22px;
-  line-height: 1.25;
-  margin: 2px 0 16px;
-}
-.notes-book-html p {
-  margin: 0 0 1em;
-}
-.notes-book-loading {
-  opacity: 0.65;
-}
-.notes-book-stream-loading {
-  padding: 12px 0 20px;
-  font-size: 12px;
-  opacity: 0.58;
-}
-.notes-book-reader-pdf {
-  display: flex;
-  flex-direction: column;
-  flex: 1 1 auto;
-  min-height: 0;
-}
-.notes-book-content-pdf {
-  /* Override the centered reading column — the PDF viewer fills the width and is
-     its own scroll container. */
-  max-width: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  flex: 1 1 auto;
-  min-height: 0;
-}
-/* Continuous-scroll PDF: pdfReader.js renders PDF.js canvases into this div and
-   drives it via scrollTop + an IntersectionObserver rooted on it, so it MUST be a
-   bounded overflow scroller (NOT overflow:hidden). The flex chain bounds it to the
-   available height; max-height is a viewport fallback so it always scrolls. */
-.notes-book-pdf-viewer {
-  width: 100%;
-  min-width: 0;
-  flex: 1 1 auto;
-  min-height: 0;
-  max-height: calc(100dvh - 110px);
-  overflow-y: auto;
-  -webkit-overflow-scrolling: touch;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--fg) 3%, transparent);
-  padding: 12px 10px;
-  box-sizing: border-box;
-}
-.notes-book-pdf-frame {
-  display: block;
-  width: 100%;
-  height: 100%;
-  min-height: inherit;
-  border: 0;
-  background: #fff;
-}
-.notes-book-pdf-open { text-decoration: none; }
-.pdfjs-reader {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: var(--pdfjs-gap, 14px);
-}
-.pdfjs-page {
-  position: relative;
-  width: 100%;
-  max-width: 900px;
-  /* CRITICAL: pages are flex items in the .pdfjs-reader column — without
-     flex-shrink:0 the column squashes every page to a sliver and overflow:hidden
-     clips it (you'd see only the top of each page, "a sample of all pages").
-     flex-shrink:0 keeps each page at its full aspect-ratio height; the viewer
-     scrolls. */
-  flex-shrink: 0;
-  background: #fff;
-  border-radius: 4px;
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.3);
-  overflow: hidden;
-}
-.pdfjs-canvas {
-  display: block;
-  width: 100%;
-  height: auto;
-}
-.pdfjs-page-num {
-  position: absolute;
-  top: 6px;
-  right: 8px;
-  font-size: 10px;
-  font-weight: 700;
-  padding: 1px 6px;
-  border-radius: 999px;
-  background: rgba(0, 0, 0, 0.55);
-  color: #fff;
-  pointer-events: none;
-  opacity: 0;
-  transition: opacity 0.15s ease;
-}
-.pdfjs-page:hover .pdfjs-page-num { opacity: 1; }
-/* Visible per-page render error (instead of a silent blank page). */
-.pdfjs-page-err {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 14px;
-  text-align: center;
-  font: 12px/1.4 ui-monospace, Menlo, Consolas, monospace;
-  color: #b00020;
-  background: #fff;
-}
-/* Center + show the page number on placeholders that haven't rasterized yet. */
-.pdfjs-page:not(:has(.pdfjs-canvas)) .pdfjs-page-num {
-  opacity: 0.45;
-  top: 50%;
-  right: auto;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  font-size: 13px;
-  background: color-mix(in srgb, #000 35%, transparent);
-}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 @media (max-width: 760px) {
   .notes-pane-books .notes-pane-body {
     display: flex;
@@ -33976,179 +33128,34 @@ body.notes-mobile-mode.notes-drag-mode .note-card-pin.active {
     padding: 0;
   }
 }
-.notes-epub-reader {
-  display: flex;
-  flex-direction: column;
-  min-height: 100%;
-}
-.notes-epub-head {
-  gap: 10px;
-  align-items: center;
-}
-.notes-epub-controls {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-left: auto;
-  min-width: 0;
-}
-.notes-epub-controls .notes-select-trigger {
-  height: 30px;
-  min-height: 30px;
-}
-.notes-epub-select {
-  max-width: 220px;
-}
-.notes-epub-layout {
-  display: grid;
-  grid-template-columns: minmax(150px, 220px) minmax(0, 1fr);
-  gap: 14px;
-  align-items: start;
-}
-.notes-epub-toc {
-  position: sticky;
-  top: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  max-height: calc(100vh - 190px);
-  overflow: auto;
-  padding-right: 4px;
-}
-.notes-epub-chapter {
-  border: 1px solid var(--border);
-  background: color-mix(in srgb, var(--panel) 78%, transparent);
-  color: var(--fg);
-  border-radius: 6px;
-  padding: 8px;
-  text-align: left;
-  cursor: pointer;
-}
-.notes-epub-chapter.active,
-.notes-epub-chapter:hover {
-  border-color: color-mix(in srgb, var(--red) 55%, var(--border));
-  background: color-mix(in srgb, var(--red) 9%, var(--panel));
-}
-.notes-epub-chapter span {
-  display: block;
-  font-size: 12px;
-  font-weight: 650;
-  line-height: 1.25;
-}
-.notes-epub-chapter small {
-  display: block;
-  margin-top: 3px;
-  font-size: 10px;
-  opacity: 0.55;
-}
-.notes-epub-content {
-  max-width: 760px;
-  width: 100%;
-  margin: 0 auto;
-  font-size: 16px;
-  line-height: 1.72;
-}
-.notes-epub-content h2 {
-  font-size: 22px;
-  line-height: 1.25;
-  margin: 2px 0 16px;
-}
-.notes-epub-html p {
-  margin: 0 0 1em;
-}
-.notes-epub-html blockquote {
-  margin: 1em 0;
-  padding-left: 14px;
-  border-left: 3px solid color-mix(in srgb, var(--fg) 20%, transparent);
-  opacity: 0.9;
-}
-.notes-epub-progress-line {
-  height: 3px;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--fg) 9%, transparent);
-  overflow: hidden;
-  margin-bottom: 14px;
-}
-.notes-epub-progress-line span {
-  display: block;
-  height: 100%;
-  background: var(--red);
-}
-.quiz-reveal {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 1.65em;
-  border: 1px solid color-mix(in srgb, var(--fg) 20%, transparent);
-  background: color-mix(in srgb, var(--fg) 6%, transparent);
-  color: var(--fg);
-  border-radius: 6px;
-  padding: 1px 7px;
-  font: inherit;
-  line-height: 1.35;
-  cursor: pointer;
-  vertical-align: baseline;
-  transition: background-color .16s ease, border-color .16s ease, color .16s ease;
-}
-.quiz-reveal::before {
-  content: none;
-}
-.quiz-reveal:not(.revealed)::before {
-  content: attr(data-hidden-label);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  color: color-mix(in srgb, var(--fg) 76%, transparent);
-  white-space: nowrap;
-  pointer-events: none;
-}
-.quiz-reveal .quiz-reveal-text {
-  transition: opacity .16s ease, filter .16s ease;
-}
-.quiz-reveal:not(.revealed) .quiz-reveal-text {
-  position: absolute;
-  opacity: 0;
-  pointer-events: none;
-  user-select: none;
-}
-.quiz-reveal.revealed {
-  background: color-mix(in srgb, var(--red) 10%, transparent);
-  border-color: color-mix(in srgb, var(--red) 45%, var(--border));
-}
-.quiz-reveal.revealed::before {
-  content: none;
-}
-.quiz-spoiler:not(.revealed) {
-  background: repeating-linear-gradient(
-    135deg,
-    color-mix(in srgb, var(--fg) 8%, transparent),
-    color-mix(in srgb, var(--fg) 8%, transparent) 6px,
-    color-mix(in srgb, var(--panel) 90%, var(--bg)) 6px,
-    color-mix(in srgb, var(--panel) 90%, var(--bg)) 12px
-  );
-}
-.quiz-flashcard {
-  display: block;
-  width: 100%;
-  margin: 8px 0;
-  padding: 12px 14px;
-  border: 1px solid color-mix(in srgb, var(--fg) 18%, transparent);
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--panel) 88%, var(--bg));
-  color: var(--fg);
-  text-align: left;
-  font: inherit;
-  cursor: pointer;
-}
-.quiz-flashcard span {
-  display: block;
-  line-height: 1.45;
-}
-.quiz-flashcard.revealed {
-  border-color: color-mix(in srgb, var(--red) 45%, var(--border));
-  background: color-mix(in srgb, var(--red) 8%, var(--panel));
-}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 @media (max-width: 760px) {
   .notes-epub-layout {
     grid-template-columns: 1fr;
@@ -39018,13 +38025,7 @@ body.theme-frosted .modal {
   display: flex;
   flex-direction: column;
 }
-/* List view: fixed toolbar + upload slot, then a scrolling library list. */
-.books-list-view {
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  flex: 1 1 auto;
-}
+
 .books-toolbar {
   display: flex;
   gap: 8px;
@@ -39038,13 +38039,7 @@ body.theme-frosted .modal {
    search input (button sat 3px low). Neutralize it here only. */
 .books-toolbar .notes-select-trigger { top: 0; }
 .books-upload-slot:not(:empty) { padding: 0 12px 8px; flex-shrink: 0; }
-.books-list-scroll {
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow-y: auto;
-  padding: 0 12px 12px;
-  scrollbar-width: thin;
-}
+
 /* Reader view: for EPUBs this IS the continuous scroller the chapter-streaming
    logic drives (the role the notes-pane body played when Books lived in Notes). */
 .books-reader-view {
@@ -39060,29 +38055,10 @@ body.theme-frosted .modal {
   padding: 0 8px 8px;
   scrollbar-width: thin;
 }
-/* Span the chrome across the scroller's side gutters so scrolling text can't
-   bleed past it in the 8px padding strips. */
-.books-reader-view .notes-book-chrome {
-  margin: 0 -8px;
-  padding: 8px 8px 6px;
-}
-/* Inside the opaque chrome the head reads as a contained bar, like the
-   chapter select under it (it looked like a borderless flat strip). */
-.notes-book-chrome .notes-book-head {
-  border: 1px solid var(--border);
-  border-radius: 6px;
-}
-/* Library list spacing + the book-row grid (was .notes-pane-books .notes-vault-list
-   / .notes-vault-file.notes-book-file). */
-#books-modal .notes-vault-list { gap: 8px; }
-#books-modal .notes-vault-file.notes-book-file {
-  grid-template-columns: 44px minmax(0, 1fr) auto auto;
-  min-height: 88px;
-  max-height: none;
-  align-items: start;
-  padding: 10px;
-  gap: 10px;
-}
+
+
+
+
 @media (max-width: 760px) {
   .books-modal-content {
     width: 100vw;
@@ -39103,34 +38079,12 @@ body.theme-frosted .modal {
   }
 }
 
-/* ── Health / Habits / Training panel ──────────────────────────────────────── */
-.health-modal-content {
-  width: min(760px, 94vw);
-  max-width: 760px;
-  height: min(82vh, 860px);
-  display: flex;
-  flex-direction: column;
-}
-.health-modal-content .modal-body {
-  flex: 1 1 auto;
-  overflow-y: auto;
-  padding: 12px 14px 18px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-/* Children are content-sized; the body scrolls. Without this, default
-   flex-shrink squashed the Profile & goals <details> (overflow:hidden from the
-   collapsible idiom) into a 2px sliver. */
-.health-modal-content .modal-body > * { flex-shrink: 0; }
-.health-loading, .health-error, .health-empty {
-  padding: 18px 8px;
-  font-size: 13px;
-  opacity: 0.7;
-  text-align: center;
-}
-.health-error { color: var(--red); opacity: 0.95; }
-.health-muted { opacity: 0.6; font-weight: 400; font-size: 11px; }
+
+
+
+
+
+
 
 #health-modal .admin-card, #habits-modal .admin-card { margin-bottom: 0; }
 /* The fork panels lay buttons out in gap-spaced flex/grid rows next to inputs
@@ -39147,174 +38101,106 @@ body.theme-frosted .modal {
 #books-modal .modal-body .memory-search-input,
 #pings-modal .modal-body .memory-search-input,
 #today-modal .modal-body .memory-search-input { margin-top: 0; }
-.health-card-head {
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
-  flex-wrap: wrap;
-  margin-bottom: 10px;
-}
-.health-card-head strong { font-size: 13px; }
-.health-big { font-size: 22px; font-weight: 700; line-height: 1; }
-.health-unit { font-size: 12px; font-weight: 500; opacity: 0.6; }
-.health-delta { font-size: 12px; font-weight: 700; padding: 1px 7px; border-radius: 10px; }
-.health-delta.down { color: var(--green); background: color-mix(in srgb, var(--green) 15%, transparent); }
-.health-delta.up { color: var(--warn); background: color-mix(in srgb, var(--warn) 15%, transparent); }
-.health-chip {
-  font-size: 11px;
-  padding: 2px 8px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--fg) 8%, transparent);
-  opacity: 0.85;
-}
 
-/* Form controls use the app-global input/select/button styling; these helpers
-   only size them. (Buttons are .admin-btn-add / .admin-btn-sm; row edit/delete
-   actions are .memory-item-btn.) */
-.health-input-sm { width: 78px; flex: 0 0 auto; }
-.health-input-icon { width: 52px; flex: 0 0 auto; text-align: center; }
-.health-add-habit, .health-inline-form {
-  display: flex;
-  gap: 7px;
-  align-items: center;
-  flex-wrap: wrap;
-}
-/* display:flex above would defeat the hidden attribute — keep hidden forms hidden. */
-.health-add-habit[hidden], .health-inline-form[hidden] { display: none; }
-.health-add-habit input, .health-inline-form input, .health-inline-form select {
-  height: 32px;
-  min-width: 0;
-  /* Match the admin-button radius so the whole row reads as one aligned bar. */
-  border-radius: 6px;
-}
-.health-add-habit input[name="name"], .health-inline-form input:first-child { flex: 1 1 140px; }
-/* <label>-as-button (camera, CSV import): labels miss the global button height. */
-.health-file-btn { height: 32px; box-sizing: border-box; display: inline-flex; align-items: center; gap: 5px; cursor: pointer; }
-.health-toolbar { margin-bottom: 2px; }
 
-/* Habit cards + GitHub-style heatmap */
-.health-habit-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  flex-wrap: wrap;
-  margin-bottom: 10px;
-}
-.health-habit-title { display: flex; align-items: center; gap: 7px; min-width: 0; }
-.health-habit-title strong { font-size: 13px; }
-.health-habit-icon { font-size: 15px; }
-.health-habit-stats { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.health-streak { font-size: 12px; font-weight: 700; display: inline-flex; align-items: center; gap: 3px; }
-.health-30d { font-size: 11px; opacity: 0.6; }
-/* Check buttons are .memory-toolbar-btn (+.active when done); only the gap
-   for the inline check icon is ours. */
-.health-check-btn { gap: 4px; }
-.health-hm-scroll { overflow-x: auto; padding-bottom: 4px; }
-.health-hm { display: block; }
-.health-hm-cell { fill: color-mix(in srgb, var(--fg) 9%, transparent); }
-.health-hm-cell.done { fill: var(--accent-primary, var(--red)); }
-.health-hm-cell.today { stroke: var(--fg); stroke-width: 1.2; }
-.health-hm-month, .health-hm-dow { fill: color-mix(in srgb, var(--fg) 55%, transparent); font-size: 9px; }
 
-/* Charts */
-.health-chart { width: 100%; height: auto; display: block; }
-.health-line { fill: none; stroke: var(--accent-primary, var(--red)); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
-.health-line-dot { fill: var(--accent-primary, var(--red)); }
-.health-bar { fill: color-mix(in srgb, var(--accent-primary, var(--red)) 60%, transparent); }
-.health-bar.over { fill: var(--warn); }
-.health-target-line { stroke: color-mix(in srgb, var(--fg) 40%, transparent); stroke-width: 1; stroke-dasharray: 4 3; }
-.health-axis-label { fill: color-mix(in srgb, var(--fg) 50%, transparent); font-size: 9px; }
 
-/* Today calorie progress + macros + lists */
-.health-progress {
-  height: 8px;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--fg) 9%, transparent);
-  overflow: hidden;
-  margin: 4px 0 8px;
-}
-.health-progress span { display: block; height: 100%; background: var(--green); transition: width 0.25s ease; }
-.health-progress span.over { background: var(--warn); }
-.health-macros { display: flex; gap: 14px; font-size: 12px; opacity: 0.75; margin-bottom: 8px; }
-.health-macros-extra { margin: -2px 0 8px; }
-.health-macros-extra summary { cursor: pointer; font-size: 12px; padding: 2px 0; list-style-position: inside; }
-.health-macros-extra summary:hover { color: var(--fg); }
-/* Macro rings */
-.health-rings { display: flex; gap: 18px; justify-content: center; margin: 6px 0 10px; flex-wrap: wrap; }
-.health-ring { display: flex; flex-direction: column; align-items: center; gap: 4px; }
-.health-ring svg { transform: rotate(-90deg); }
-.health-ring-bg { fill: none; stroke: color-mix(in srgb, var(--fg) 12%, transparent); stroke-width: 6; }
-.health-ring-fg { fill: none; stroke-width: 6; stroke-linecap: round; transition: stroke-dashoffset 0.4s ease; }
-.health-ring-fg.over { stroke: var(--warn) !important; }
-.health-ring-val { transform: rotate(90deg); transform-origin: 32px 32px; fill: var(--fg); font-size: 13px; font-weight: 700; text-anchor: middle; }
-.health-ring-unit { transform: rotate(90deg); transform-origin: 32px 32px; fill: color-mix(in srgb, var(--fg) 55%, transparent); font-size: 8px; text-anchor: middle; }
-.health-ring-label { font-size: 11px; opacity: 0.8; }
-.health-ring-label span { opacity: 0.55; }
-/* Weight projection line */
-.health-proj { font-size: 12px; margin: 6px 0 8px; padding: 5px 9px; border-radius: 7px; background: color-mix(in srgb, var(--green) 12%, transparent); }
-.health-proj.off { background: color-mix(in srgb, var(--warn) 14%, transparent); }
-/* Weekly habit summary */
-.health-week-rows { display: flex; flex-direction: column; gap: 5px; }
-.health-week-row { display: flex; align-items: center; gap: 10px; font-size: 12px; }
-.health-week-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.health-week-dots { display: inline-flex; gap: 3px; flex: 0 0 auto; }
-.health-week-dots i { width: 9px; height: 9px; border-radius: 2px; background: color-mix(in srgb, var(--fg) 12%, transparent); }
-.health-week-dots i.on { background: var(--accent-primary, var(--red)); }
-.health-week-num { flex: 0 0 auto; font-size: 11px; opacity: 0.6; width: 30px; text-align: right; }
-.health-list { display: flex; flex-direction: column; gap: 2px; }
-.health-row {
-  display: flex;
-  justify-content: space-between;
-  gap: 10px;
-  font-size: 12px;
-  padding: 5px 2px;
-  border-bottom: 1px solid color-mix(in srgb, var(--fg) 7%, transparent);
-}
-.health-row:last-child { border-bottom: 0; }
-.health-meal-form, .health-train-form { margin: 8px 0; }
-/* Expandable + editable logged-meal rows */
-.health-meal { border-bottom: 1px solid color-mix(in srgb, var(--fg) 7%, transparent); }
-.health-meal:last-child { border-bottom: 0; }
-.health-meal .health-meal-head { border-bottom: 0; cursor: pointer; border-radius: 6px; }
-.health-meal .health-meal-head:hover { background: color-mix(in srgb, var(--fg) 5%, transparent); }
-.health-meal-desc { display: inline-flex; align-items: center; gap: 6px; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.health-meal-right { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
-.health-meal-caret { opacity: 0.5; transition: transform 0.15s ease; display: inline-flex; align-items: center; }
-.health-meal.expanded .health-meal-caret { transform: rotate(90deg); }
-.health-meal-detail { padding: 2px 6px 8px 18px; }
-.health-meal-macros { font-size: 12px; color: color-mix(in srgb, var(--fg) 60%, transparent); }
-.health-meal.editing .health-meal-macros { display: none; }
-.health-meal-edit { margin-top: 6px; flex-wrap: wrap; }
-.health-check-btn.health-check-yday { opacity: 0.72; }
-.health-check-btn.health-check-yday.active { opacity: 1; }
 
-/* Meal photo: small row thumbnail + expanded full image with a remove button */
-.health-meal-thumb { width: 26px; height: 26px; border-radius: 5px; object-fit: cover; flex: 0 0 auto; }
-.health-meal-photo { margin: 4px 0 6px; }
-.health-meal-photo img { max-width: 160px; max-height: 160px; border-radius: 8px; object-fit: cover; display: block; }
-#health-modal .health-meal-photo .admin-btn-sm { margin-top: 6px; } /* outweigh the panel-wide margin reset */
-/* Per-day meal history groups (Calories tab) */
-.health-day-group { margin-bottom: 10px; }
-.health-day-group:last-child { margin-bottom: 0; }
-.health-day-head { display: flex; justify-content: space-between; gap: 10px; font-size: 12px; font-weight: 700; padding: 4px 2px; border-bottom: 1px solid color-mix(in srgb, var(--fg) 12%, transparent); margin-bottom: 2px; }
-/* Editable weight / training history entries (inline edit form toggles) */
-.health-entry { border-bottom: 1px solid color-mix(in srgb, var(--fg) 7%, transparent); }
-.health-entry:last-child { border-bottom: 0; }
-.health-entry .health-row { border-bottom: 0; }
-.health-entry-edit { margin: 2px 0 8px; flex-wrap: wrap; }
 
-/* Profile / goals — the <details> itself uses the app-global collapsible idiom. */
-.health-profile-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 10px;
-  margin: 0;
-  padding: 12px 14px;
-}
-.health-profile-grid label { display: flex; flex-direction: column; gap: 4px; font-size: 11px; opacity: 0.8; }
-.health-profile-grid .admin-btn-add { grid-column: 1 / -1; justify-self: start; }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+ 
+
+
+
+
+
+
+
+
+
+
 
 @media (max-width: 768px) {
   .health-modal-content { width: 100vw; max-width: 100vw; height: 100%; }
@@ -39339,45 +38225,19 @@ body.theme-frosted .modal {
   gap: 8px;
 }
 .pings-empty { padding: 24px 8px; text-align: center; opacity: 0.6; font-size: 13px; }
-.ping-card {
-  border: 1px solid var(--border);
-  border-radius: 9px;
-  background: color-mix(in srgb, var(--fg) 2.5%, transparent);
-  padding: 9px 11px 8px;
-}
-.ping-card.unread {
-  border-color: color-mix(in srgb, var(--accent-primary, var(--red)) 40%, var(--border));
-  background: color-mix(in srgb, var(--accent-primary, var(--red)) 6%, transparent);
-}
-.ping-card-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.ping-kind {
-  font-size: 10px;
-  font-weight: 800;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  padding: 1px 6px;
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--fg) 10%, transparent);
-  color: color-mix(in srgb, var(--fg) 75%, transparent);
-  flex: 0 0 auto;
-}
-.ping-kind-reminder { background: color-mix(in srgb, var(--accent-primary, var(--red)) 22%, transparent); color: var(--fg); }
-.ping-kind-brief    { background: color-mix(in srgb, var(--color-accent) 22%, transparent); color: var(--fg); }
-.ping-kind-task     { background: color-mix(in srgb, var(--green) 20%, transparent); color: var(--fg); }
-.ping-title { font-size: 13px; font-weight: 600; flex: 1 1 auto; min-width: 0; }
-.ping-keep-flag { color: var(--warn); display: inline-flex; align-items: center; }
-.ping-time { font-size: 11px; opacity: 0.55; flex: 0 0 auto; }
-.ping-body {
-  font-size: 12px;
-  line-height: 1.5;
-  opacity: 0.85;
-  margin: 5px 0 7px;
-  white-space: pre-wrap;
-  max-height: 8.5em;
-  overflow: auto;
-}
-.ping-actions { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-.ping-del { margin-left: auto; }
+
+
+
+
+
+
+
+
+
+
+
+
+
 /* Rail unread badge on the bell */
 #rail-pings { position: relative; }
 .rail-ping-badge {
@@ -39444,15 +38304,9 @@ body.theme-frosted .modal {
   border: 1px solid color-mix(in srgb, var(--green) 22%, var(--border));
   border-radius: 10px;
 }
-.today-section { display: flex; flex-direction: column; gap: 6px; }
-.today-section-head { display: flex; align-items: center; gap: 8px; }
-.today-section-title {
-  font-size: 11px;
-  font-weight: 800;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  opacity: 0.55;
-}
+
+
+
 .today-count {
   font-size: 10px;
   font-weight: 800;
@@ -39480,7 +38334,7 @@ body.theme-frosted .modal {
 .today-cf-btn:hover { background: color-mix(in srgb, var(--red) 12%, transparent); }
 .today-cf-btn:disabled { opacity: 0.5; cursor: default; }
 .today-list { display: flex; flex-direction: column; gap: 4px; }
-.today-section-empty { font-size: 12px; opacity: 0.5; padding: 4px 2px; }
+
 .today-item {
   display: flex;
   align-items: baseline;
@@ -39501,16 +38355,9 @@ body.theme-frosted .modal {
 }
 .today-item-main { flex: 1 1 auto; min-width: 0; }
 .today-loc { opacity: 0.55; font-size: 12px; }
-.today-reminder .today-dot {
-  flex: 0 0 auto;
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: color-mix(in srgb, var(--fg) 35%, transparent);
-  align-self: center;
-}
-.today-reminder.overdue { border-color: color-mix(in srgb, var(--red) 45%, var(--border)); }
-.today-reminder.overdue .today-dot { background: var(--red); }
+
+
+
 .today-due {
   flex: 0 0 auto;
   font-size: 11px;
@@ -39518,49 +38365,16 @@ body.theme-frosted .modal {
   opacity: 0.6;
   font-variant-numeric: tabular-nums;
 }
-.today-reminder.overdue .today-due { color: var(--red); opacity: 0.95; }
-.today-habits { display: flex; flex-wrap: wrap; gap: 7px; }
-.today-habit {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  padding: 7px 12px;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--fg) 5%, transparent);
-  border: 1px solid var(--border);
-  color: var(--fg);
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: background 0.15s, border-color 0.15s, opacity 0.25s, transform 0.15s;
-}
-.today-habit:hover { border-color: color-mix(in srgb, var(--green) 50%, var(--border)); background: color-mix(in srgb, var(--green) 9%, transparent); }
-.today-habit-check {
-  width: 15px;
-  height: 15px;
-  border-radius: 50%;
-  border: 2px solid color-mix(in srgb, var(--fg) 30%, transparent);
-  flex: 0 0 auto;
-  position: relative;
-  transition: background 0.15s, border-color 0.15s;
-}
-.today-habit:hover .today-habit-check { border-color: var(--green); }
-.today-habit.checked {
-  background: color-mix(in srgb, var(--green, #50fa7b) 16%, transparent);
-  border-color: color-mix(in srgb, var(--green) 55%, var(--border));
-  opacity: 0.6;
-}
-.today-habit.checked .today-habit-check { background: var(--green); border-color: var(--green); }
-.today-habit.checked .today-habit-check::after {
-  content: '';
-  position: absolute;
-  left: 4px; top: 1px;
-  width: 4px; height: 8px;
-  border: solid var(--bg);
-  border-width: 0 2px 2px 0;
-  transform: rotate(45deg);
-}
-.today-habit-streak { display: inline-flex; align-items: center; gap: 3px; font-size: 11px; opacity: 0.8; font-weight: 700; }
+
+
+
+
+
+
+
+
+
+
 @media (max-width: 768px) {
   .today-modal-content { width: 100vw; max-width: 100vw; height: 100%; }
   .today-date-label { display: none; }
