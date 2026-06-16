@@ -106,8 +106,65 @@ function _injectRailTools() {
   }
 }
 
+// ── Settings rows/cards (admin Settings modal) ───────────────────────────────
+// Fork-only settings UI. The wiring stays in settings.js — it runs lazily inside
+// settingsModule.open() → initAll() (which re-queries idempotently on every
+// open), so mounting the markup once at import time is enough; the listeners
+// attach on first open. All anchors are upstream-stable. (The reminder ntfy-topic
+// enhancements are NOT here: they edit an existing upstream row in place, so they
+// stay inlined as unavoidable divergence.)
+function _afterAnchor(anchorId, html, closestSel) {
+  const a = document.getElementById(anchorId);
+  if (!a) return null;
+  const ref = closestSel ? a.closest(closestSel) : a;
+  if (!ref) return null;
+  const tpl = document.createElement('template');
+  tpl.innerHTML = html.trim();
+  const node = tpl.content.firstElementChild;
+  if (node) ref.insertAdjacentElement('afterend', node);
+  return node;
+}
+function _injectSettingsRows() {
+  // Persona dropdown — after the default Model row in the General card.
+  if (!document.getElementById('set-defaultPersonaSelect')) {
+    _afterAnchor('set-defaultModelSelect',
+      '<div class="settings-row"><label class="settings-label">Persona</label><select id="set-defaultPersonaSelect" class="settings-select"><option value="">No persona</option></select></div>',
+      '.settings-row');
+  }
+  // "Chat & Agent models for users" allow-list card — after the General card.
+  if (!document.getElementById('set-chatAllowedModels')) {
+    _afterAnchor('set-defaultChatMsg',
+      '<div class="admin-card"><h2><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px;opacity:0.6"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>Chat &amp; Agent models for users</h2>' +
+      '<div class="admin-toggle-sub" style="margin-bottom:8px">Pick which models non-admin users may choose for chat &amp; agent. Leave all unchecked = no restriction (every enabled model shows). Models you enable only for image / research / email keep working for those roles — they just won\'t appear in users\' chat picker. You (admin) are never restricted.</div>' +
+      '<div class="settings-col"><div id="set-chatAllowedModels" class="settings-allowlist"></div>' +
+      '<div style="display:flex;align-items:center;gap:10px;margin-top:4px;"><button type="button" class="admin-btn-sm" id="set-chatAllowedSave">Save allowed models</button>' +
+      '<span id="set-chatAllowedMsg" style="font-size:11px;color:color-mix(in srgb, var(--fg) 45%, transparent);"></span></div></div></div>',
+      '.admin-card');
+  }
+  // Language card — after the Two-Factor Authentication card (Account panel).
+  if (!document.getElementById('set-language')) {
+    _afterAnchor('settings-2fa-card',
+      '<div class="admin-card"><h2><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px;opacity:0.6"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>Language</h2>' +
+      '<div class="settings-row" style="align-items:center;"><div class="admin-toggle-sub" style="margin:0;flex:1;">Iris replies, reminders, and briefs use this language. New chats default to the matching Iris persona.</div>' +
+      '<select id="set-language" class="settings-select" style="width:auto;flex-shrink:0;"><option value="en">English</option><option value="ko">한국어 (Korean)</option><option value="de">Deutsch (German)</option></select></div></div>');
+  }
+  // Quiet-hours toggle + range rows — after the reminder channel hint.
+  if (!document.getElementById('set-quiet-hours-enabled')) {
+    const toggle = _afterAnchor('set-reminder-channel-hint',
+      '<div class="settings-row" style="margin-top:6px"><label class="settings-label" for="set-quiet-hours-enabled">Quiet hours</label>' +
+      '<label style="display:flex;align-items:center;gap:8px;flex:1;cursor:pointer;"><input type="checkbox" id="set-quiet-hours-enabled" />' +
+      '<span style="font-size:12px;opacity:0.7;">Don\'t push reminders overnight — they still appear in Pings</span></label></div>');
+    if (toggle) {
+      toggle.insertAdjacentHTML('afterend',
+        '<div id="set-quiet-hours-row" class="settings-row" style="display:none"><label class="settings-label">From / to</label>' +
+        '<div style="display:flex;gap:8px;align-items:center;flex:1;"><input id="set-quiet-hours-start" class="settings-select" type="time" style="flex:0 0 auto;width:auto;" />' +
+        '<span style="opacity:0.6;">to</span><input id="set-quiet-hours-end" class="settings-select" type="time" style="flex:0 0 auto;width:auto;" /></div></div>');
+    }
+  }
+}
+
 // Registry of injectors — add fork panels here as they're moved out of index.html.
-const _INJECTORS = [_injectApiTokensPanel, _injectEndpointTypeSelect, _injectRailTools];
+const _INJECTORS = [_injectApiTokensPanel, _injectEndpointTypeSelect, _injectRailTools, _injectSettingsRows];
 
 export function injectForkUI() {
   for (const inject of _INJECTORS) {

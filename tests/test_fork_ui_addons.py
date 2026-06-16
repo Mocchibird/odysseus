@@ -41,6 +41,9 @@ FORK_CRITICAL_IDS = {
     "adm-epType",
     # Rail tool launchers (wiring in app.js _railToolMap).
     "rail-today", "rail-books", "rail-health", "rail-habits", "rail-pings",
+    # Settings rows/cards (wiring stays lazy in settings.js).
+    "set-defaultPersonaSelect", "set-chatAllowedModels", "set-language",
+    "set-quiet-hours-enabled", "set-quiet-hours-row",
 }
 
 _RE_ID_CREATED = re.compile(r'id=["\']([A-Za-z][\w-]*)["\']')
@@ -89,7 +92,8 @@ def test_fork_ui_anchors_exist_in_index_html():
     """Every upstream anchor fork-ui.js mounts into must still exist in index.html."""
     fu = FORK_UI.read_text(encoding="utf-8")
     mounted = _created_by_fork_ui(fu)   # ids fork-ui.js creates (markup + .id= + id-map keys)
-    looked_up = _read(fu)               # ids fork-ui.js queries
+    # Anchors come from getElementById() lookups AND _afterAnchor('anchor', …) calls.
+    looked_up = _read(fu) | set(re.findall(r"_afterAnchor\(\s*['\"]([A-Za-z][\w-]*)['\"]", fu))
     anchors = looked_up - mounted       # → external, upstream-owned anchors
     index_ids = _created(INDEX.read_text(encoding="utf-8"))
     missing = sorted(a for a in anchors if a not in index_ids)
