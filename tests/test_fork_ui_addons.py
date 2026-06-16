@@ -39,14 +39,28 @@ FORK_CRITICAL_IDS = {
     "adm-tokenMsg", "adm-tokenReveal", "adm-tokenValue", "adm-tokenCopyBtn",
     # Endpoint LLM/Image Type selector in the Add-Models form.
     "adm-epType",
+    # Rail tool launchers (wiring in app.js _railToolMap).
+    "rail-today", "rail-books", "rail-health", "rail-habits", "rail-pings",
 }
 
 _RE_ID_CREATED = re.compile(r'id=["\']([A-Za-z][\w-]*)["\']')
 _RE_ID_READ = re.compile(r'(?:\bel|getElementById)\(\s*[\'"]([A-Za-z][\w-]*)[\'"]')
+# fork-ui.js also creates ids dynamically: via `el.id = 'x'` and via object-literal
+# maps keyed by id (e.g. _RAIL = {'rail-today': [...]}) whose keys are set with
+# `b.id = key`. Count those as "created" so they aren't mistaken for anchors.
+_RE_ID_ASSIGNED = re.compile(r'\.id\s*=\s*[\'"]([A-Za-z][\w-]*)[\'"]')
+_RE_ID_MAPKEY = re.compile(r'[\'"]([a-z]+-[\w-]+)[\'"]\s*:')
 
 
 def _created(text: str) -> set:
     return set(_RE_ID_CREATED.findall(text))
+
+
+def _created_by_fork_ui(text: str) -> set:
+    """Ids fork-ui.js mounts — markup ids + `.id=` assignments + id-map keys."""
+    return (set(_RE_ID_CREATED.findall(text))
+            | set(_RE_ID_ASSIGNED.findall(text))
+            | set(_RE_ID_MAPKEY.findall(text)))
 
 
 def _read(text: str) -> set:
@@ -59,7 +73,7 @@ def test_fork_ui_exists():
 
 def test_fork_critical_ids_are_mounted_somewhere():
     """Every fork-critical id must be created in index.html OR fork-ui.js."""
-    sources = _created(INDEX.read_text(encoding="utf-8")) | _created(
+    sources = _created(INDEX.read_text(encoding="utf-8")) | _created_by_fork_ui(
         FORK_UI.read_text(encoding="utf-8")
     )
     missing = sorted(i for i in FORK_CRITICAL_IDS if i not in sources)
@@ -74,9 +88,9 @@ def test_fork_critical_ids_are_mounted_somewhere():
 def test_fork_ui_anchors_exist_in_index_html():
     """Every upstream anchor fork-ui.js mounts into must still exist in index.html."""
     fu = FORK_UI.read_text(encoding="utf-8")
-    mounted = _created(fu)          # ids fork-ui.js creates itself
-    looked_up = _read(fu)           # ids fork-ui.js queries
-    anchors = looked_up - mounted   # → external, upstream-owned anchors
+    mounted = _created_by_fork_ui(fu)   # ids fork-ui.js creates (markup + .id= + id-map keys)
+    looked_up = _read(fu)               # ids fork-ui.js queries
+    anchors = looked_up - mounted       # → external, upstream-owned anchors
     index_ids = _created(INDEX.read_text(encoding="utf-8"))
     missing = sorted(a for a in anchors if a not in index_ids)
     assert not missing, (

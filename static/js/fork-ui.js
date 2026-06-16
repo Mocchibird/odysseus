@@ -70,8 +70,44 @@ function _injectEndpointTypeSelect() {
   else row.appendChild(label);
 }
 
+// ── Rail tool launchers (icon rail) ──────────────────────────────────────────
+// Fork-only tools today/books/health/habits/pings. The click wiring lives in
+// app.js (_railToolMap delegates rail-X → tool-X-btn) and runs at boot, after
+// this module is imported, so the buttons exist when it wires. We mount them at
+// the upstream-stable anchors rail-documents (today, books) and rail-tasks
+// (health, habits, pings), preserving the original DOM order.
+const _RAIL = {
+  'rail-today':  ['Today',  '<path d="M12 2v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="M20 12h2"/><path d="m17.66 6.34 1.41-1.41"/><path d="M22 18H2"/><path d="M16 18a4 4 0 0 0-8 0"/><path d="M2 12h2"/>'],
+  'rail-books':  ['Books',  '<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>'],
+  'rail-health': ['Health', '<path d="M22 12h-4l-3 9L9 3l-3 9H2"/>'],
+  'rail-habits': ['Habits', '<path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>'],
+  'rail-pings':  ['Pings & Reminders', '<path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/>'],
+};
+function _railBtn(id) {
+  const [title, paths] = _RAIL[id];
+  const b = document.createElement('button');
+  b.type = 'button'; b.className = 'icon-rail-btn'; b.id = id; b.title = title;
+  b.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' + paths + '</svg>';
+  return b;
+}
+function _injectRailTools() {
+  // After rail-documents → today, books (insert in reverse so DOM order is today, books).
+  const docs = document.getElementById('rail-documents');
+  if (docs && !document.getElementById('rail-today')) {
+    docs.insertAdjacentElement('afterend', _railBtn('rail-books'));
+    docs.insertAdjacentElement('afterend', _railBtn('rail-today'));
+  }
+  // After rail-tasks → health, habits, pings (insert in reverse for that order).
+  const tasks = document.getElementById('rail-tasks');
+  if (tasks && !document.getElementById('rail-health')) {
+    tasks.insertAdjacentElement('afterend', _railBtn('rail-pings'));
+    tasks.insertAdjacentElement('afterend', _railBtn('rail-habits'));
+    tasks.insertAdjacentElement('afterend', _railBtn('rail-health'));
+  }
+}
+
 // Registry of injectors — add fork panels here as they're moved out of index.html.
-const _INJECTORS = [_injectApiTokensPanel, _injectEndpointTypeSelect];
+const _INJECTORS = [_injectApiTokensPanel, _injectEndpointTypeSelect, _injectRailTools];
 
 export function injectForkUI() {
   for (const inject of _INJECTORS) {
