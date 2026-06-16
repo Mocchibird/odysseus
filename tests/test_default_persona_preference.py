@@ -13,7 +13,10 @@ def test_default_persona_is_user_scoped_setting():
 
 
 def test_settings_exposes_default_persona_selector():
-    html = (ROOT / "static/index.html").read_text(encoding="utf-8")
+    # The Persona selector markup moved into the fork-ui.js runtime injector
+    # (keeps index.html aligned with upstream); shipped source = both files.
+    html = ((ROOT / "static/index.html").read_text(encoding="utf-8")
+            + (ROOT / "static/js/fork-ui.js").read_text(encoding="utf-8"))
     settings_js = (ROOT / "static/js/settings.js").read_text(encoding="utf-8")
 
     assert 'id="set-defaultPersonaSelect"' in html

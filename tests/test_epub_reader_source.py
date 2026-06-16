@@ -101,10 +101,13 @@ def test_books_has_dedicated_reader_ui_hooks():
     assert "_bookOpenBook" not in notes
     assert "_removeLegacyBooksModal" not in notes
 
-    # Buttons stay in index.html; books.js is loaded via app.js (not a direct
-    # <script> in index), so a stale cached index can't import it twice.
+    # The Books sidebar item stays in index.html; the rail launcher moved to the
+    # fork-ui.js runtime injector (keeps the icon rail aligned with upstream).
+    # books.js is loaded via app.js (not a direct <script> in index), so a stale
+    # cached index can't import it twice.
     assert "tool-books-btn" in index
-    assert "rail-books" in index
+    fork_ui = (ROOT / "static" / "js" / "fork-ui.js").read_text(encoding="utf-8")
+    assert "rail-books" in fork_ui
     assert "/static/js/books.js" not in index
 
     # app.js opens the standalone window via booksModule — no legacy-modal shim.

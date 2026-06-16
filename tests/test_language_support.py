@@ -293,7 +293,9 @@ def test_server_side_korean_prompt_matches_client():
 
 
 def test_settings_ui_has_language_select():
-    index_html = _read("static/index.html")
+    # The Language select markup was moved into the fork-ui.js runtime injector
+    # (keeps index.html aligned with upstream); the shipped source is both files.
+    index_html = _read("static/index.html") + _read("static/js/fork-ui.js")
     assert 'id="set-language"' in index_html
     assert '<option value="en">' in index_html.split('id="set-language"', 1)[1][:400]
     assert '<option value="ko">' in index_html.split('id="set-language"', 1)[1][:400]
@@ -355,7 +357,9 @@ def test_server_side_german_prompt_matches_client():
 
 
 def test_settings_select_offers_all_languages():
-    index_html = _read("static/index.html")
+    # The Language select markup was moved into the fork-ui.js runtime injector
+    # (keeps index.html aligned with upstream); the shipped source is both files.
+    index_html = _read("static/index.html") + _read("static/js/fork-ui.js")
     block = index_html.split('id="set-language"', 1)[1][:600]
     for opt in ('<option value="en">', '<option value="ko">', '<option value="de">'):
         assert opt in block
