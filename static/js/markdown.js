@@ -664,6 +664,47 @@ export function mdToHtml(src, opts) {
     '$1[#$2](#$2)',
   );
 
+  // Obsidian-style wiki-links + image embeds. A wiki-link is resolved to a
+  // document on CLICK (see the .wiki-link handler in document.js), so the
+  // target can be renamed later and we avoid a fetch per render. Emitted as a
+  // stashed allowed-HTML block (escaped) so it survives the escape/sanitize
+  // passes. The page/alias are escaped, so no injection.
+  const _wikiLink = (display, page) => {
+    const ph = `___ALLOWED_HTML_${allowedHtmlBlocks.length}___`;
+    allowedHtmlBlocks.push(`<a href="#" class="chat-link wiki-link" data-wikilink="${escapeHtml(page)}">${escapeHtml(display)}</a>`);
+    return ph;
+  };
+  const _mdImage = (alt, url) => {
+    const safe = safeLinkUrl(url);
+    if (!safe) return null;
+    const ph = `___ALLOWED_HTML_${allowedHtmlBlocks.length}___`;
+    allowedHtmlBlocks.push(`<img class="md-img" src="${escapeHtml(safe)}" alt="${escapeHtml(alt || '')}" loading="lazy">`);
+    return ph;
+  };
+  // `![[name]]` Obsidian embed — MUST run before the `[[name]]` wiki-link pass
+  // (else the inner `[[name]]` is consumed, leaving a stray `!`) and before
+  // flashcards. A bare image-looking filename resolves to the gallery serving
+  // path; an explicit /api path or http(s) URL is used as-is; anything else
+  // degrades to a wiki-link so it's never broken text.
+  s = s.replace(/!\[\[([^\[\]\n|]+?)\]\]/g, (match, name) => {
+    name = name.trim();
+    let url = name;
+    if (!/^(https?:|\/)/i.test(name)) {
+      if (/\.(png|jpe?g|gif|webp|svg|avif|bmp)$/i.test(name)) url = '/api/generated-image/' + name;
+      else return _wikiLink(name, name);
+    }
+    return _mdImage(name, url) || _wikiLink(name, name);
+  });
+  // `[[Page]]` / `[[Page|alias]]` wiki-links. Excludes `[[a::b]]` (flashcards,
+  // handled next) by bailing when the inner text contains `::`.
+  s = s.replace(/\[\[([^\[\]\n]+?)\]\]/g, (match, inner) => {
+    if (inner.includes('::')) return match;
+    const pipe = inner.indexOf('|');
+    const page = (pipe >= 0 ? inner.slice(0, pipe) : inner).trim();
+    const alias = (pipe >= 0 ? inner.slice(pipe + 1) : inner).trim();
+    return page ? _wikiLink(alias || page, page) : match;
+  });
+
   // Lightweight flashcard syntax: [[front::back]] renders as a click-to-flip
   // card. Code blocks have already been extracted, so examples inside fenced
   // or inline code are left untouched.
@@ -691,6 +732,14 @@ export function mdToHtml(src, opts) {
   });
   s = s.replace(/\{\{([^{}\n]{1,300})\}\}/g, (match, answer) => {
     return pushReveal(answer, { kind: 'hidden', label: 'Reveal' }) || match;
+  });
+
+  // Images ![alt](url) — MUST run before the [text](url) link pass so the
+  // image isn't turned into a plain link. URL gated by safeLinkUrl (http(s) +
+  // same-origin relative, e.g. /api/generated-image/… or /api/files/…/raw);
+  // unsafe → plain alt text (no broken <img>).
+  s = s.replace(/!\[([^\]]*)\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g, (match, alt, url) => {
+    return _mdImage(alt, url) || escapeHtml(alt);
   });
 
   // Convert markdown links [text](url) to clickable links
@@ -832,24 +881,58 @@ export function mdToHtml(src, opts) {
        .replace(/^## (.*)$/gm, '<h2>$1</h2>')
        .replace(/^# (.*)$/gm, '<h1>$1</h1>');
 
-  // Ordered lists (1. 2. 3. etc.)
-  s = s.replace(/^(\d+)\. (.*)$/gm, '<oli>$2</oli>');
-  s = s.replace(/(?:^|\n)(<oli>[\s\S]*?)(?=\n(?!<oli>)|$)/g, m => `<ol>${m.trim().replace(/<\/?oli>/g, (t) => t === '<oli>' ? '<li>' : '</li>')}</ol>`);
-
-  // GitHub-style task lists (- [ ] / - [x]) → checkbox items. Must run before
-  // the generic unordered-list rule so the "- " prefix isn't consumed first.
-  // Emits <uli> (with a class) so the unordered-list wrapper below treats it
-  // as a list item. Used by plan mode: plan + progress render as a checklist.
-  s = s.replace(/^(?:- |\* )\[([ xX])\] (.*)$/gm, (_m, mark, text) => {
-    const done = mark.toLowerCase() === 'x';
-    return `<uli class="task-item${done ? ' task-done' : ''}"><span class="task-check" aria-hidden="true"></span><span class="task-text">${text}</span></uli>`;
-  });
-
-  // Unordered lists. <uli> may carry attributes (task-item class), so the
-  // wrapper preserves them when converting <uli ...> → <li ...>.
-  s = s.replace(/^(?:- |\* )(.*)$/gm, '<uli>$1</uli>');
-  s = s.replace(/(^|\n)((?:<uli\b[^>]*>[^\n]*<\/uli>(?:\n|$))+)/g, (_, prefix, block) =>
-    `${prefix}<ul>${block.trim().replace(/<uli\b([^>]*)>/g, '<li$1>').replace(/<\/uli>/g, '</li>')}</ul>`);
+  // Lists — indentation-aware (nested) parser. Replaces the old flat per-line
+  // regexes so `  - sub` / `  - [ ]` actually NEST in the reader. Runs on the
+  // already-escaped string; an item's `content` may carry ___…___ placeholders
+  // and <strong>/<a> from earlier passes, so it is passed through untouched
+  // (never re-escaped). Emits final <ul>/<ol>/<li> with nested lists placed
+  // INSIDE the parent <li> (proper HTML). Task items keep the exact markup the
+  // task CSS expects. A blank line inside a list is a continuation (it does not
+  // split the list); only a non-blank, non-list line ends it.
+  s = (function _parseLists(src) {
+    const lines = src.split('\n');
+    const out = [];
+    const stack = [];                                   // frames: {indent, type, openLi}
+    const tabW = (ws) => ws.replace(/\t/g, '    ').length;  // a tab counts as 4 cols
+    const top = () => stack[stack.length - 1];
+    const closeLi = () => { if (stack.length && top().openLi) { out.push('</li>'); top().openLi = false; } };
+    const closeList = () => { closeLi(); out.push(`</${stack.pop().type}>`); };
+    const classify = (line) => {
+      let m;
+      if ((m = /^([ \t]*)(?:[-*] )\[([ xX])\] (.*)$/.exec(line))) return { type: 'ul', indent: tabW(m[1]), task: m[2], content: m[3] };
+      if ((m = /^([ \t]*)(?:[-*] )(.*)$/.exec(line)))             return { type: 'ul', indent: tabW(m[1]), task: null, content: m[2] };
+      if ((m = /^([ \t]*)(\d+)\. (.*)$/.exec(line)))              return { type: 'ol', indent: tabW(m[1]), task: null, content: m[3] };
+      return null;
+    };
+    const liOpen = (item) => {
+      if (item.task !== null) {
+        const done = item.task.toLowerCase() === 'x';
+        return `<li class="task-item${done ? ' task-done' : ''}"><span class="task-check" aria-hidden="true"></span><span class="task-text">${item.content}</span>`;
+      }
+      return `<li>${item.content}`;
+    };
+    for (const line of lines) {
+      const item = classify(line);
+      if (!item) {
+        if (line.trim() === '' && stack.length) { out.push(line); continue; }  // blank → continuation
+        while (stack.length) closeList();
+        out.push(line);
+        continue;
+      }
+      while (stack.length && item.indent < top().indent) closeList();          // dedent
+      if (!stack.length || item.indent > top().indent) {                       // indent → nest inside the open <li>
+        stack.push({ indent: item.indent, type: item.type, openLi: false });
+        out.push(`<${item.type}>`);
+      } else {                                                                 // same level
+        closeLi();
+        if (top().type !== item.type) { closeList(); stack.push({ indent: item.indent, type: item.type, openLi: false }); out.push(`<${item.type}>`); }
+      }
+      out.push(liOpen(item));
+      top().openLi = true;
+    }
+    while (stack.length) closeList();
+    return out.join('\n');
+  })(s);
 
   // Blockquotes + callouts (Obsidian/GitHub admonitions: `> [!info] …`).
   // `>` was escaped to `&gt;` above. Mark each quoted line (allow a bare
@@ -879,7 +962,7 @@ export function mdToHtml(src, opts) {
   });
 
   // Paragraphs - but NOT for code block placeholders or allowed HTML
-  s = s.replace(/^(?!<h\d|<ul>|<ol>|<li|<oli>|<\/li>|<pre>|<blockquote>|<bq>|<hr>|___CODE_BLOCK_|___ALLOWED_HTML_|___MATH_BLOCK_|___MERMAID_BLOCK_)([^\n]+)$/gm, '<p>$1</p>');
+  s = s.replace(/^(?!<h\d|<ul>|<ol>|<li|<oli>|<\/li>|<\/ul>|<\/ol>|<pre>|<blockquote>|<bq>|<hr>|___CODE_BLOCK_|___ALLOWED_HTML_|___MATH_BLOCK_|___MERMAID_BLOCK_)([^\n]+)$/gm, '<p>$1</p>');
 
   // Line breaks within paragraphs
   s = s.replace(/<p>([\s\S]*?)<\/p>/g, (match, content) => {
