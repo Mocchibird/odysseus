@@ -285,7 +285,7 @@ import * as Modals from './modalManager.js';
         : '';
       const langChip = `<span class="doc-tab-lang">${lic}</span>`;
       html += `<div class="doc-tab${isActive ? ' active' : ''}" draggable="true" data-doc-id="${id}" title="${title}">
-        ${verChip}${langChip}<span class="doc-tab-title">${shortTitle}</span>
+        ${verChip}${langChip}<span class="doc-tab-title" title="Double-click to rename">${shortTitle}</span>
         <button class="doc-tab-close" data-doc-id="${id}" title="Unlink from chat (kept in the Library)">&times;</button>
       </div>`;
     }
@@ -3991,8 +3991,8 @@ import * as Modals from './modalManager.js';
       <div class="doc-md-toolbar" id="doc-md-toolbar" style="display:none">
         <div class="md-toolbar-items" id="md-toolbar-items">
           <span class="md-view-toggle" id="doc-md-view-toggle" style="display:none" role="group" aria-label="Edit or preview">
-            <button type="button" class="md-view-opt" data-mdview="edit" title="Edit source (Ctrl+Alt+M to toggle)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button>
-            <button type="button" class="md-view-opt" data-mdview="preview" title="Preview (Ctrl+Alt+M to toggle)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button>
+            <button type="button" class="md-view-opt" data-mdview="edit" title="Edit source (⌘/Ctrl+E or Ctrl+Alt+M to toggle)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button>
+            <button type="button" class="md-view-opt" data-mdview="preview" title="Preview (⌘/Ctrl+E or Ctrl+Alt+M to toggle)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button>
           </span>
           <span class="md-view-toggle" id="doc-render-view-toggle" style="display:none" role="group" aria-label="Code or run">
             <button type="button" class="md-view-opt" data-renderview="code" title="Edit code"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg></button>
@@ -4508,22 +4508,28 @@ import * as Modals from './modalManager.js';
         }
       });
     }
-    // Ctrl+Alt+M (and Cmd+Opt+M on mac) flips Edit ↔ Preview on a markdown
-    // doc. Bound once globally; gated on the doc panel being open and the
-    // active doc being markdown so it doesn't fire while the user is typing
-    // in a non-markdown context.
+    // Ctrl+Alt+M and Cmd/Ctrl+E (the Obsidian shortcut) flip Edit ↔ Preview on
+    // a markdown doc. Bound once globally; gated on the doc panel being open,
+    // the active doc being markdown, and focus being inside the doc pane (or
+    // nowhere) so Cmd/Ctrl+E doesn't fire while typing in chat or elsewhere.
     if (!window._docMdToggleBound) {
       window._docMdToggleBound = true;
       document.addEventListener('keydown', (e) => {
-        if ((e.ctrlKey || e.metaKey) && e.altKey && !e.shiftKey && (e.key === 'm' || e.key === 'M' || e.code === 'KeyM')) {
-          if (!isOpen) return;
-          const doc = activeDocId && docs.get(activeDocId);
-          const lang = (doc?.language || 'markdown').toLowerCase();
-          if (lang !== 'markdown') return;
-          e.preventDefault();
-          toggleMarkdownPreview();
-          _syncHeaderActions();
-        }
+        const mod = e.ctrlKey || e.metaKey;
+        const isM = mod && e.altKey && !e.shiftKey && (e.key === 'm' || e.key === 'M' || e.code === 'KeyM');
+        const isE = mod && !e.altKey && !e.shiftKey && (e.key === 'e' || e.key === 'E' || e.code === 'KeyE');
+        if (!isM && !isE) return;
+        if (!isOpen) return;
+        const doc = activeDocId && docs.get(activeDocId);
+        const lang = (doc?.language || 'markdown').toLowerCase();
+        if (lang !== 'markdown') return;
+        // Don't steal Cmd/Ctrl+E when focus is on an input OUTSIDE the doc pane.
+        const ae = document.activeElement;
+        const pane = document.getElementById('doc-editor-pane');
+        if (ae && ae !== document.body && pane && !pane.contains(ae)) return;
+        e.preventDefault();
+        toggleMarkdownPreview();
+        _syncHeaderActions();
       });
     }
     document.getElementById('doc-email-draft-btn')?.addEventListener('click', () => {
@@ -4883,13 +4889,21 @@ import * as Modals from './modalManager.js';
           closePanel('down');
           return;
         }
+        const lang = document.getElementById('doc-language-select')?.value;
+        const isMd = lang === 'markdown';
         if (e.key === 'Tab') {
           e.preventDefault();
-          document.execCommand('insertText', false, '\t');
+          if (isMd) _mdIndent(ta, e.shiftKey);          // 2-space indent/outdent, selection-aware
+          else document.execCommand('insertText', false, '\t');
+          return;
+        }
+        // List auto-continue on Enter (markdown): repeat the marker, or remove
+        // it when the item is empty (terminates the list) — Obsidian behavior.
+        if (e.key === 'Enter' && isMd && !e.shiftKey && !e.isComposing) {
+          if (_mdListContinue(ta)) { e.preventDefault(); return; }
         }
         // Markdown shortcuts (only when language is markdown)
-        const lang = document.getElementById('doc-language-select')?.value;
-        if (lang === 'markdown' && (e.ctrlKey || e.metaKey)) {
+        if (isMd && (e.ctrlKey || e.metaKey)) {
           if (e.key === 'b') { e.preventDefault(); applyMdFormat('bold'); }
           else if (e.key === 'i') { e.preventDefault(); applyMdFormat('italic'); }
           else if (e.key === 'k') { e.preventDefault(); applyMdFormat('link'); }
@@ -8730,6 +8744,38 @@ import * as Modals from './modalManager.js';
       if (markdownModule && markdownModule.renderMermaid) {
         markdownModule.renderMermaid(preview);
       }
+      // Fork (Obsidian-like): wiki-link navigation + interactive task checkboxes.
+      // Delegated on the persistent preview element, bound once.
+      if (!preview.dataset.forkClicks) {
+        preview.dataset.forkClicks = '1';
+        preview.addEventListener('click', (ev) => {
+          const t = ev.target;
+          const wl = t.closest && t.closest('a.wiki-link[data-wikilink]');
+          if (wl) {
+            ev.preventDefault();
+            const title = wl.getAttribute('data-wikilink') || '';
+            if (!title) return;
+            fetch(`${API_BASE}/api/documents/library?search=${encodeURIComponent(title)}&limit=20`, { credentials: 'same-origin' })
+              .then(r => r.json())
+              .then(data => {
+                const items = (data && data.documents) || [];
+                const exact = items.find(d => (d.title || '').toLowerCase() === title.toLowerCase());
+                const target = exact || items[0];
+                if (target && target.id) loadDocument(target.id);
+                else if (uiModule) uiModule.showToast(`No document named “${title}”`);
+              })
+              .catch(() => { if (uiModule) uiModule.showError('Could not open link'); });
+            return;
+          }
+          const chk = t.closest && t.closest('.task-item .task-check');
+          if (chk) {
+            ev.preventDefault();
+            const tasks = Array.from(preview.querySelectorAll('.task-item'));
+            const idx = tasks.indexOf(chk.closest('.task-item'));
+            if (idx >= 0) _toggleSourceTask(idx);
+          }
+        });
+      }
       preview.style.display = '';
       wrap.style.display = 'none';
     } else {
@@ -8750,6 +8796,77 @@ import * as Modals from './modalManager.js';
   function toggleMarkdownPreview() {
     const preview = document.getElementById('doc-md-preview');
     _setMarkdownPreviewActive(!(preview && preview.style.display !== 'none'));
+  }
+
+  // Fork: flip the Nth source task line (- [ ] ↔ - [x]) when its preview
+  // checkbox is clicked, then re-render + autosave. The renderer emits task
+  // items in source order, so the preview index maps 1:1 to the Nth task line.
+  function _toggleSourceTask(idx) {
+    const ta = document.getElementById('doc-editor-textarea');
+    if (!ta) return;
+    const lines = ta.value.split('\n');
+    let n = -1;
+    for (let i = 0; i < lines.length; i++) {
+      if (/^\s*[-*] \[[ xX]\] /.test(lines[i])) {
+        n++;
+        if (n === idx) {
+          const done = /\[[xX]\]/.test(lines[i]);
+          lines[i] = lines[i].replace(/^(\s*[-*] )\[[ xX]\]/, `$1[${done ? ' ' : 'x'}]`);
+          break;
+        }
+      }
+    }
+    ta.value = lines.join('\n');
+    ta.dispatchEvent(new Event('input', { bubbles: true }));   // change-tracking + 2s autosave
+    _setMarkdownPreviewActive(true, { remember: false });      // re-render with new state
+  }
+
+  // Indent (Tab) / outdent (Shift+Tab) the current or selected lines by 2
+  // spaces. execCommand keeps the editor's native undo intact.
+  function _mdIndent(ta, outdent) {
+    const val = ta.value, s = ta.selectionStart, e = ta.selectionEnd;
+    const lineStart = val.lastIndexOf('\n', s - 1) + 1;
+    let lineEnd = val.indexOf('\n', e); if (lineEnd === -1) lineEnd = val.length;
+    const block = val.slice(lineStart, lineEnd);
+    const collapsed = s === e;
+    const firstRemoved = outdent ? ((block.match(/^(\t| {1,2})/) || [''])[0].length) : 0;
+    const newBlock = outdent ? block.replace(/^(\t| {1,2})/gm, '') : block.replace(/^/gm, '  ');
+    if (newBlock === block) return;
+    ta.selectionStart = lineStart; ta.selectionEnd = lineEnd;
+    document.execCommand('insertText', false, newBlock);
+    if (collapsed) {
+      const pos = outdent ? Math.max(lineStart, s - firstRemoved) : s + 2;
+      ta.selectionStart = ta.selectionEnd = pos;
+    } else {
+      ta.selectionStart = lineStart; ta.selectionEnd = lineStart + newBlock.length;
+    }
+    ta.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+
+  // On Enter inside a list item, continue the list (same indent + marker, next
+  // number for ordered, fresh unchecked box for tasks). An empty item removes
+  // its marker, ending the list. Returns true when it handled the Enter.
+  function _mdListContinue(ta) {
+    const val = ta.value, s = ta.selectionStart;
+    if (s !== ta.selectionEnd) return false;
+    const lineStart = val.lastIndexOf('\n', s - 1) + 1;
+    const line = val.slice(lineStart, s);
+    const m = line.match(/^(\s*)(- \[[ xX]\] |[-*] |(\d+)\. )(.*)$/);
+    if (!m) return false;
+    const indent = m[1], marker = m[2], num = m[3], rest = m[4];
+    if (rest.trim() === '') {                          // empty item → end the list
+      ta.selectionStart = lineStart; ta.selectionEnd = s;
+      document.execCommand('insertText', false, '');
+      ta.dispatchEvent(new Event('input', { bubbles: true }));
+      return true;
+    }
+    let next;
+    if (num) next = `${parseInt(num, 10) + 1}. `;
+    else if (marker.startsWith('- [')) next = '- [ ] ';   // new task starts unchecked
+    else next = marker;
+    document.execCommand('insertText', false, '\n' + indent + next);
+    ta.dispatchEvent(new Event('input', { bubbles: true }));
+    return true;
   }
 
   /** Parse CSV text into a 2D array (handles quoted fields) */

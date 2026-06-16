@@ -1897,3 +1897,24 @@ body.gallery-selecting .gallery-card-menu-btn,
     }
 }
 
+
+/* ── Obsidian-like markdown rendering (fork; see odysseus markdown features) ──
+   The renderer (markdown.js) now emits nested <ul>/<ol>, clickable task
+   checkboxes, [[wiki-links]] and inline <img class="md-img"> embeds. These
+   style those fork-rendered elements (chat + document preview). */
+.doc-md-preview ul ul, .doc-md-preview ol ol,
+.doc-md-preview ul ol, .doc-md-preview ol ul { margin-bottom: 0; }
+.doc-md-preview li.task-item .task-check { cursor: pointer; }
+/* A nested list under a task-item must break onto its own line and indent —
+   the upstream task-item is a flex row (checkbox + text), so without this a
+   nested <ul>/<ol> flows inline as a third flex child, to the right of the text. */
+.doc-md-preview li.task-item { flex-wrap: wrap; }
+.doc-md-preview li.task-item > ul,
+.doc-md-preview li.task-item > ol { flex-basis: 100%; margin: 0 0 0 1.6em; }
+.md-img { max-width: 100%; height: auto; border-radius: 6px; }
+.wiki-link {
+  text-decoration: none;
+  border-bottom: 1px dashed color-mix(in srgb, var(--accent, var(--red)) 55%, transparent);
+  cursor: pointer;
+}
+.wiki-link:hover { border-bottom-style: solid; }

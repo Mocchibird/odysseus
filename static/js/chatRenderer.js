@@ -1097,7 +1097,7 @@ document.addEventListener('click', function(e) {
       if (fn) fn(id);
     });
   } else if (kind === 'document') {
-    import('./document.js?v=440').then(mod => {
+    import('./document.js?v=455').then(mod => {
       const open = mod.loadDocument
         || mod.openDocument
         || (mod.default && (mod.default.loadDocument || mod.default.openDocument));
