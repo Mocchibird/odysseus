@@ -17667,19 +17667,23 @@ body.gallery-selecting .gallery-card-menu-btn,
   color: var(--red, #ff5555);
 }
 
+/* The scroll lives on this PLAIN block wrapper, never on the grid itself. On
+   iOS, a CSS grid that is ALSO an overflow scroll container mis-positions its
+   auto rows under height pressure — square cells get crammed to fit and
+   overlap instead of scrolling (worse when the keyboard shrinks the viewport),
+   and align-content:start does NOT fix it. A normal block scroller containing
+   a naturally-growing grid is immune. */
+.gallery-grid-scroll {
+  max-height: 60vh;
+  overflow-y: auto;
+}
 .gallery-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
   gap: 8px;
-  max-height: 60vh;
-  overflow-y: auto;
   padding: 2px;
   transition: border-color 0.15s, background 0.15s;
-  /* align-content:start is the on-device-verified fix for the iOS squish:
-     when the grid is height-constrained (keyboard open / short viewport),
-     WebKit otherwise compresses the auto rows to fit instead of letting the
-     square cells overflow and scroll. start = rows keep their natural
-     aspect-ratio height and the grid scrolls. (Diag: fix A = square OK.) */
+  /* No max-height / overflow here — see .gallery-grid-scroll above. */
   align-content: start;
 }
 .gallery-grid.gallery-dragover {
