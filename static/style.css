@@ -18214,27 +18214,6 @@ body.gallery-selecting .gallery-card-menu-btn,
   width: 100%;
   height: 100%;
 }
-/* iPhone Safari tabs can't lock orientation (only an installed PWA / iPad /
-   desktop can), so when the 360 viewer is fullscreen in portrait, nudge the
-   user to rotate. Hides itself in landscape. */
-@media (orientation: portrait) {
-  .gallery-detail-img-frame.video360-fullscreen::after {
-    content: 'Rotate your device for landscape';
-    position: absolute;
-    /* below the control bar + clear of the notch/status bar */
-    top: calc(52px + env(safe-area-inset-top, 0px));
-    left: 50%;
-    transform: translateX(-50%);
-    background: rgba(0, 0, 0, 0.6);
-    color: rgba(255, 255, 255, 0.9);
-    font-size: 12px;
-    padding: 6px 12px;
-    border-radius: 6px;
-    pointer-events: none;
-    white-space: nowrap;
-    z-index: 2;
-  }
-}
 .gallery-detail-nav {
   position: absolute;
   top: 50%;
