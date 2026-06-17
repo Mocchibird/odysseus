@@ -1918,3 +1918,20 @@ body.gallery-selecting .gallery-card-menu-btn,
   cursor: pointer;
 }
 .wiki-link:hover { border-bottom-style: solid; }
+
+/* ── Doc pane fullscreen: kill the leftover entrance transform (fork) ──
+   The upstream `doc-pane-enter` open animation slides the pane in from the
+   right (transform-origin:right; from{ translateX(24px) }, fill:both). If that
+   animation strands at its first frame — a real-browser race on a rapid
+   open→fullscreen, and 100% reproducible whenever animations are paused — the
+   leftover translateX(24px) shifts the pane ~24px past the viewport's right
+   edge, clipping text at the window edge (worst in fullscreen, where text
+   reaches the edge). Once fullscreen, cancel the animation and any stranded
+   transform so the expanded pane always fills exactly the viewport. The
+   two-class selector + !important beats the running animation (important-author
+   outranks animations in the cascade). */
+.doc-editor-pane.doc-fullscreen {
+  animation: none !important;
+  transform: none !important;
+  will-change: auto !important;
+}

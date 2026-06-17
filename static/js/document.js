@@ -4183,7 +4183,9 @@ import * as Modals from './modalManager.js';
         if (mode === 'fullscreen' || mode === 'unfullscreen') toggleFullscreen();
         else closePanel('down');
       });
-      const HYSTERESIS = 24;
+      // Tight dead-zone: the chevron flips side/mode the moment the cursor
+      // crosses the divider line, instead of forcing a long drag past it.
+      const HYSTERESIS = 4;
       const _applyMode = (ev) => {
         // Fullscreen state takes precedence — once the pane is fullscreen the
         // chevron always offers the "exit fullscreen" affordance regardless
