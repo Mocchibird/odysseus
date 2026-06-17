@@ -681,19 +681,34 @@ export function mdToHtml(src, opts) {
     allowedHtmlBlocks.push(`<img class="md-img" src="${escapeHtml(safe)}" alt="${escapeHtml(alt || '')}" loading="lazy">`);
     return ph;
   };
+  // A gallery embed by human NAME (e.g. `![[beach sunset]]`). The renderer is
+  // synchronous and can't hit the gallery API mid-render, so emit a graceful
+  // inline chip (image icon + name) carrying the name in data-gallery-name; a
+  // consumer that supports it (the document preview) calls resolveGalleryEmbeds
+  // afterwards to swap a match in. Where no resolver runs (e.g. chat) the chip
+  // just shows the name — never a broken image.
+  const _galleryEmbed = (name) => {
+    const ph = `___ALLOWED_HTML_${allowedHtmlBlocks.length}___`;
+    const esc = escapeHtml(name);
+    allowedHtmlBlocks.push(
+      `<span class="md-gallery-embed md-gallery-pending" data-gallery-name="${esc}">` +
+      `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.5-3.5a2 2 0 0 0-2.8 0L5 21"/></svg>` +
+      `<span class="md-gallery-name">${esc}</span></span>`
+    );
+    return ph;
+  };
   // `![[name]]` Obsidian embed — MUST run before the `[[name]]` wiki-link pass
   // (else the inner `[[name]]` is consumed, leaving a stray `!`) and before
-  // flashcards. A bare image-looking filename resolves to the gallery serving
-  // path; an explicit /api path or http(s) URL is used as-is; anything else
-  // degrades to a wiki-link so it's never broken text.
+  // flashcards. An explicit /api path or http(s) URL is used as-is; a stored
+  // content-hash filename hits the serving path directly; anything else is a
+  // human gallery NAME → resolved against the gallery after render.
   s = s.replace(/!\[\[([^\[\]\n|]+?)\]\]/g, (match, name) => {
     name = name.trim();
-    let url = name;
-    if (!/^(https?:|\/)/i.test(name)) {
-      if (/\.(png|jpe?g|gif|webp|svg|avif|bmp)$/i.test(name)) url = '/api/generated-image/' + name;
-      else return _wikiLink(name, name);
+    if (/^(https?:|\/)/i.test(name)) return _mdImage(name, name) || _galleryEmbed(name);
+    if (/^[a-f0-9]{8,64}\.(png|jpe?g|gif|webp|svg|avif|bmp|mp4|mov|webm|mkv|m4v)$/i.test(name)) {
+      return _mdImage(name, '/api/generated-image/' + name) || _galleryEmbed(name);
     }
-    return _mdImage(name, url) || _wikiLink(name, name);
+    return _galleryEmbed(name);
   });
   // `[[Page]]` / `[[Page|alias]]` wiki-links. Excludes `[[a::b]]` (flashcards,
   // handled next) by bailing when the inner text contains `::`.
@@ -1049,6 +1064,49 @@ export function renderMermaid(container) {
   }
 }
 
+/**
+ * Resolve `![[name]]` gallery embeds (emitted as `.md-gallery-pending` chips by
+ * mdToHtml) against the gallery BY NAME. For each pending chip under `root`,
+ * search the gallery; on a match swap the chip for an <img>, on no match mark it
+ * `.md-gallery-missing` so it reads as "no image: name" rather than vanishing.
+ * Best-effort + idempotent (only touches `.md-gallery-pending`); each distinct
+ * name is fetched once per call. Front-end only — call after the HTML is in DOM.
+ */
+export async function resolveGalleryEmbeds(root) {
+  const scope = root || document;
+  if (!scope.querySelectorAll) return;
+  const pend = scope.querySelectorAll('.md-gallery-pending[data-gallery-name]');
+  if (!pend.length) return;
+  const cache = new Map();
+  const lookup = (name) => {
+    if (!cache.has(name)) {
+      cache.set(name, fetch(`/api/gallery/library?search=${encodeURIComponent(name)}&limit=1`, { credentials: 'same-origin' })
+        .then(r => r.ok ? r.json() : null)
+        .then(d => (d && Array.isArray(d.items) && d.items[0]) ? d.items[0] : null)
+        .catch(() => null));
+    }
+    return cache.get(name);
+  };
+  await Promise.all(Array.from(pend).map(async (el) => {
+    el.classList.remove('md-gallery-pending');
+    const name = el.getAttribute('data-gallery-name') || '';
+    const hit = name ? await lookup(name) : null;
+    let url = hit && (hit.url || (hit.filename ? '/api/generated-image/' + hit.filename : ''));
+    if (url && !/^\/(api|static)\//.test(url)) url = '';  // same-origin api/static paths only
+    if (url) {
+      const img = document.createElement('img');
+      img.className = 'md-img';
+      img.src = url;
+      img.alt = name;
+      img.loading = 'lazy';
+      el.replaceWith(img);
+    } else {
+      el.classList.add('md-gallery-missing');
+      el.title = `No gallery image matches "${name}"`;
+    }
+  }));
+}
+
 const markdownModule = {
   escapeHtml,
   mdToHtml,
@@ -1060,7 +1118,8 @@ const markdownModule = {
   extractThinkingBlocks,
   normalizeThinkingMarkup,
   startsWithReasoningPrefix,
-  renderMermaid
+  renderMermaid,
+  resolveGalleryEmbeds
 };
 
 export default markdownModule;

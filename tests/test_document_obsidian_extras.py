@@ -1,0 +1,173 @@
+"""Obsidian-like document extras (fork): the `/api/documents/titles` list that
+backs the `[[` autocomplete, and the `/api/document/{id}/related` See-also feed.
+
+Handlers are invoked directly with a fake request — the same direct-closure
+pattern the other document route tests use (no middleware spin-up). RAG is
+stubbed so the related endpoint's shaping logic (self-exclusion, dedup, snippet)
+is covered without a live vector store.
+"""
+
+import tempfile
+import uuid
+from types import SimpleNamespace
+from unittest.mock import MagicMock
+
+import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import NullPool
+
+from tests.helpers.import_state import clear_fake_database_modules
+
+clear_fake_database_modules()
+
+import core.database as cdb
+import routes.document_routes as droutes
+import src.content_rag as content_rag
+from core.database import Document
+
+_TMPDB = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
+_ENGINE = create_engine(
+    f"sqlite:///{_TMPDB.name}",
+    connect_args={"check_same_thread": False},
+    poolclass=NullPool,
+)
+cdb.Base.metadata.create_all(_ENGINE)
+_TS = sessionmaker(bind=_ENGINE, autoflush=False, autocommit=False)
+
+
+def _req(user="alice"):
+    return SimpleNamespace(state=SimpleNamespace(current_user=user))
+
+
+def _endpoint(method, path):
+    router = droutes.setup_document_routes(MagicMock(), None)
+    for route in router.routes:
+        if getattr(route, "path", None) == path and method in getattr(route, "methods", set()):
+            return route.endpoint
+    raise RuntimeError(f"{method} {path} not found")
+
+
+def _bind_test_db():
+    previous = droutes.SessionLocal
+    droutes.SessionLocal = _TS
+    return previous
+
+
+def _doc(doc_id, title, owner, *, archived=False, content="body"):
+    return Document(
+        id=doc_id, title=title, language="markdown", current_content=content,
+        version_count=1, is_active=True, archived=archived, owner=owner,
+    )
+
+
+def _seed():
+    alice_a = str(uuid.uuid4())
+    alice_archived = str(uuid.uuid4())
+    bob = str(uuid.uuid4())
+    db = _TS()
+    try:
+        db.query(Document).delete()  # clean slate (temp DB persists across tests in this module)
+        db.add(_doc(alice_a, "Alpha Notes", "alice", content="alpha topic body"))
+        db.add(_doc(alice_archived, "Archived One", "alice", archived=True))
+        db.add(_doc(bob, "Bob Secret", "bob"))
+        db.commit()
+        return alice_a, alice_archived, bob
+    finally:
+        db.close()
+
+
+@pytest.mark.asyncio
+async def test_titles_lists_only_owner_active_unarchived_docs():
+    previous = _bind_test_db()
+    try:
+        titles_ep = _endpoint("GET", "/api/documents/titles")
+        alice_a, _alice_archived, bob = _seed()
+        res = await titles_ep(_req("alice"))
+        titles = {t["title"] for t in res["titles"]}
+        ids = {t["id"] for t in res["titles"]}
+        assert "Alpha Notes" in titles
+        assert "Bob Secret" not in titles       # owner-scoped
+        assert "Archived One" not in titles      # archived excluded
+        assert alice_a in ids and bob not in ids
+        assert res["count"] == len(res["titles"])
+        assert all(set(t.keys()) == {"id", "title"} for t in res["titles"])
+    finally:
+        droutes.SessionLocal = previous
+
+
+@pytest.mark.asyncio
+async def test_related_excludes_self_dedups_and_shapes(monkeypatch):
+    previous = _bind_test_db()
+    try:
+        related_ep = _endpoint("GET", "/api/document/{doc_id}/related")
+        alice_a, _alice_archived, bob = _seed()
+        # Fake RAG hits: the doc itself, a duplicate of another, and that other —
+        # the endpoint must drop self, dedup by kb_id, and carry title/kind/snippet.
+        fake = [
+            {"kb_id": alice_a, "filename": "Alpha Notes", "kind": "document", "text": "self"},
+            {"kb_id": bob, "filename": "Bob Secret", "kind": "document", "text": "  bob   body   here  "},
+            {"kb_id": bob, "filename": "Bob Secret", "kind": "document", "text": "dup"},
+        ]
+        captured = {}
+
+        def _fake_search(owner, q, k=5, kinds=None):
+            captured["owner"], captured["kinds"] = owner, kinds
+            return list(fake)
+
+        monkeypatch.setattr(content_rag, "semantic_search", _fake_search)
+        res = await related_ep(_req("alice"), alice_a, k=6)
+        rel = res["related"]
+        ids = [r["id"] for r in rel]
+        assert alice_a not in ids                 # self excluded
+        assert ids.count(bob) == 1                # deduped
+        assert rel[0]["title"] == "Bob Secret"
+        assert rel[0]["kind"] == "document"
+        assert rel[0]["snippet"] == "bob body here"   # whitespace-collapsed
+        assert captured["owner"] == "alice"           # owner-scoped query
+        assert captured["kinds"] == ["document"]
+    finally:
+        droutes.SessionLocal = previous
+
+
+@pytest.mark.asyncio
+async def test_related_empty_when_rag_cold(monkeypatch):
+    previous = _bind_test_db()
+    try:
+        related_ep = _endpoint("GET", "/api/document/{doc_id}/related")
+        alice_a, _archived, _bob = _seed()
+        monkeypatch.setattr(content_rag, "semantic_search", lambda *a, **k: [])
+        res = await related_ep(_req("alice"), alice_a, k=6)
+        assert res == {"related": []}
+    finally:
+        droutes.SessionLocal = previous
+
+
+def test_obsidian_extras_frontend_wiring_present():
+    """Guard the front-end hooks so a refactor can't silently drop them."""
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    markdown = (root / "static" / "js" / "markdown.js").read_text(encoding="utf-8")
+    document = (root / "static" / "js" / "document.js").read_text(encoding="utf-8")
+    fork_css = (root / "static" / "fork.css").read_text(encoding="utf-8")
+
+    # Renderer: `![[name]]` -> gallery-pending chip + the exported async resolver.
+    assert "_galleryEmbed" in markdown
+    assert "md-gallery-pending" in markdown
+    assert "resolveGalleryEmbeds" in markdown
+    assert "/api/gallery/library?search=" in markdown
+
+    # document.js: gallery resolve hook, related panel, and `[[` autocomplete.
+    assert "resolveGalleryEmbeds(preview)" in document
+    assert "_renderRelatedNotes" in document
+    assert "/api/document/${docId}/related" in document
+    assert "_wikiACUpdate" in document and "_wikiACKeydown" in document
+    assert "/api/documents/titles" in document
+    assert "doc-wikilink-ac" in document
+    # the cache-poison guard on the titles fetch (empty/failure must not stick)
+    assert "_wikiTitlesPromise = null" in document
+
+    # fork.css: styles for all three (kept out of style.css for upstream alignment).
+    for sel in (".md-gallery-embed", ".doc-related-top", ".doc-related-foot", ".doc-wikilink-ac"):
+        assert sel in fork_css

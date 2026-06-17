@@ -4870,6 +4870,8 @@ import * as Modals from './modalManager.js';
       });
       // Tab key inserts a real tab; Escape clears selection
       ta.addEventListener('keydown', (e) => {
+        // `[[` autocomplete steals nav/select keys while its dropdown is open.
+        if (_wikiACKeydown(e, ta)) return;
         if (e.key === 'Escape') {
           if (_diffModeActive) { exitDiffMode(true); return; }
           // First Esc clears any pinned selection without closing the
@@ -4911,6 +4913,13 @@ import * as Modals from './modalManager.js';
           else if (e.key === 'k') { e.preventDefault(); applyMdFormat('link'); }
         }
       });
+      // `[[` wiki-link autocomplete: refresh on input (markdown only), dismiss on blur.
+      ta.addEventListener('input', () => {
+        const lang = document.getElementById('doc-language-select')?.value;
+        if ((lang || 'markdown') === 'markdown') _wikiACUpdate(ta);
+        else _wikiACClose();
+      });
+      ta.addEventListener('blur', () => setTimeout(_wikiACClose, 150));
 
       // ── In-document find (Ctrl+F) ──
       let _findMatches = [];
@@ -8750,6 +8759,12 @@ import * as Modals from './modalManager.js';
       if (markdownModule && markdownModule.renderMermaid) {
         markdownModule.renderMermaid(preview);
       }
+      // Fork (Obsidian-like): resolve ![[name]] gallery embeds against the
+      // gallery, then surface semantically-related docs (top strip + See also).
+      if (markdownModule && markdownModule.resolveGalleryEmbeds) {
+        markdownModule.resolveGalleryEmbeds(preview);
+      }
+      _renderRelatedNotes(preview, activeDocId);
       // Fork (Obsidian-like): wiki-link navigation + interactive task checkboxes.
       // Delegated on the persistent preview element, bound once.
       if (!preview.dataset.forkClicks) {
@@ -8771,6 +8786,13 @@ import * as Modals from './modalManager.js';
                 else if (uiModule) uiModule.showToast(`No document named “${title}”`);
               })
               .catch(() => { if (uiModule) uiModule.showError('Could not open link'); });
+            return;
+          }
+          const rel = t.closest && t.closest('.doc-related-item[data-doc-id]');
+          if (rel) {
+            ev.preventDefault();
+            const rid = rel.getAttribute('data-doc-id');
+            if (rid) loadDocument(rid);
             return;
           }
           const chk = t.closest && t.closest('.task-item .task-check');
@@ -8802,6 +8824,193 @@ import * as Modals from './modalManager.js';
   function toggleMarkdownPreview() {
     const preview = document.getElementById('doc-md-preview');
     _setMarkdownPreviewActive(!(preview && preview.style.display !== 'none'));
+  }
+
+  // Fork (Obsidian-like "See also"): one related-doc row.
+  function _relItemHtml(d, isTop) {
+    const id = _escHtml(String(d.id || ''));
+    const title = _escHtml(d.title || 'Untitled');
+    const snip = (!isTop && d.snippet) ? `<span class="doc-related-item-snippet">${_escHtml(d.snippet)}</span>` : '';
+    return `<a href="#" class="doc-related-item${isTop ? ' doc-related-item-top' : ''}" data-doc-id="${id}" title="Open “${title}”">` +
+      `<span class="doc-related-item-title">${title}</span>${snip}</a>`;
+  }
+
+  // Fork (Obsidian-like): fetch docs semantically related to the open one and
+  // render them INTO the preview — the 1–2 most relevant as a strip at the top,
+  // the rest as a "See also" list at the bottom. Rebuilt on every preview render
+  // (innerHTML is wiped each time); a per-render token drops a stale fetch that
+  // resolves after the user has switched docs. Best-effort, never blocks.
+  function _renderRelatedNotes(preview, docId) {
+    if (!preview || !docId) return;
+    const token = String((preview.__relSeq = (preview.__relSeq || 0) + 1));
+    preview.dataset.relToken = token;
+    fetch(`${API_BASE}/api/document/${docId}/related?k=6`, { credentials: 'same-origin' })
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (preview.dataset.relToken !== token) return;            // superseded by a newer render
+        const items = (data && Array.isArray(data.related)) ? data.related : [];
+        if (!items.length) return;
+        const top = items.slice(0, 2);
+        const rest = items.slice(2);
+        if (top.length) {
+          const strip = document.createElement('div');
+          strip.className = 'doc-related-top';
+          strip.innerHTML = `<span class="doc-related-label">Most relevant</span>` +
+            top.map(d => _relItemHtml(d, true)).join('');
+          preview.insertBefore(strip, preview.firstChild);
+        }
+        if (rest.length) {
+          const foot = document.createElement('div');
+          foot.className = 'doc-related-foot';
+          foot.innerHTML = `<div class="doc-related-foot-title">See also</div>` +
+            `<div class="doc-related-list">${rest.map(d => _relItemHtml(d, false)).join('')}</div>`;
+          preview.appendChild(foot);
+        }
+      })
+      .catch(() => {});
+  }
+
+  // ── Fork (Obsidian-like): `[[` wiki-link autocomplete ───────────────────
+  // Type `[[` in a markdown doc → dropdown of your document titles; pick one
+  // (↑/↓ + Enter/Tab, or click) to insert `[[Title]]`. Titles are fetched once
+  // and filtered client-side; the box is anchored at the caret (mirror-div
+  // measurement so it tracks wrapped lines). Skips `![[` (image embeds).
+  const _wikiAC = { box: null, items: [], active: -1, start: -1 };
+  let _wikiTitles = null, _wikiTitlesPromise = null;
+
+  function _wikiLoadTitles() {
+    if (_wikiTitles) return Promise.resolve(_wikiTitles);
+    if (!_wikiTitlesPromise) {
+      _wikiTitlesPromise = fetch(`${API_BASE}/api/documents/titles`, { credentials: 'same-origin' })
+        .then(r => r.ok ? r.json() : Promise.reject(new Error('http ' + r.status)))
+        .then(d => {
+          const list = (d && Array.isArray(d.titles)) ? d.titles : [];
+          // Cache only a real, non-empty result. An empty list (no docs yet) or a
+          // failure must NOT poison the cache — reset so a later `[[` retries and
+          // picks up docs created since (and recovers from a transient failure).
+          if (list.length) _wikiTitles = list;
+          else _wikiTitlesPromise = null;
+          return list;
+        })
+        .catch(() => { _wikiTitlesPromise = null; return []; });
+    }
+    return _wikiTitlesPromise;
+  }
+
+  // Caret pixel coords inside a textarea via a hidden mirror div (wrap-accurate).
+  function _taCaretXY(ta) {
+    const cs = getComputedStyle(ta);
+    const div = document.createElement('div');
+    ['boxSizing','paddingTop','paddingRight','paddingBottom','paddingLeft',
+     'borderTopWidth','borderRightWidth','borderBottomWidth','borderLeftWidth',
+     'fontStyle','fontWeight','fontSize','fontFamily','lineHeight','letterSpacing',
+     'wordSpacing','tabSize','textIndent'].forEach(p => { div.style[p] = cs[p]; });
+    div.style.position = 'absolute';
+    div.style.visibility = 'hidden';
+    div.style.whiteSpace = 'pre-wrap';
+    div.style.overflowWrap = 'break-word';
+    div.style.width = ta.offsetWidth + 'px';
+    div.textContent = ta.value.slice(0, ta.selectionStart);
+    const marker = document.createElement('span');
+    marker.textContent = ta.value.slice(ta.selectionStart) || '.';
+    div.appendChild(marker);
+    document.body.appendChild(div);
+    const r = ta.getBoundingClientRect();
+    const x = r.left + marker.offsetLeft - ta.scrollLeft;
+    const y = r.top + marker.offsetTop - ta.scrollTop;
+    const lh = parseFloat(cs.lineHeight) || parseFloat(cs.fontSize) * 1.45;
+    document.body.removeChild(div);
+    return { x, y, lh };
+  }
+
+  // Find an open `[[query` ending at the caret on the current line (not `![[`).
+  function _wikiACDetect(ta) {
+    const pos = ta.selectionStart;
+    if (pos == null || pos !== ta.selectionEnd) return null;
+    const upto = ta.value.slice(0, pos);
+    const open = upto.lastIndexOf('[[');
+    if (open < 0) return null;
+    if (open > 0 && upto[open - 1] === '!') return null;   // ![[ = image embed
+    const frag = upto.slice(open + 2);
+    if (/[\]\n]/.test(frag) || frag.includes('::')) return null;  // closed / multi-line / flashcard
+    return { start: open, query: frag };
+  }
+
+  function _wikiACClose() {
+    if (_wikiAC.box) _wikiAC.box.style.display = 'none';
+    _wikiAC.active = -1; _wikiAC.items = []; _wikiAC.start = -1;
+  }
+
+  function _wikiACSetActive(i) {
+    const box = _wikiAC.box; if (!box) return;
+    const rows = box.querySelectorAll('.doc-wikilink-ac-item');
+    if (!rows.length) return;
+    _wikiAC.active = (i + rows.length) % rows.length;
+    rows.forEach((r, j) => r.classList.toggle('active', j === _wikiAC.active));
+    rows[_wikiAC.active].scrollIntoView({ block: 'nearest' });
+  }
+
+  function _wikiACInsert(ta, title) {
+    if (!title) { _wikiACClose(); return; }
+    const det = _wikiACDetect(ta);
+    const start = det ? det.start : _wikiAC.start;
+    if (start < 0) { _wikiACClose(); return; }
+    const pos = ta.selectionStart;
+    const before = ta.value.slice(0, start);
+    const insert = `[[${title}]]`;
+    ta.value = before + insert + ta.value.slice(pos);
+    const caret = before.length + insert.length;
+    ta.setSelectionRange(caret, caret);
+    ta.dispatchEvent(new Event('input', { bubbles: true }));   // autosave + overlay sync
+    ta.focus();
+    _wikiACClose();
+  }
+
+  async function _wikiACUpdate(ta) {
+    const det = _wikiACDetect(ta);
+    if (!det) { _wikiACClose(); return; }
+    const titles = await _wikiLoadTitles();
+    const q = det.query.toLowerCase();
+    const matches = titles
+      .filter(t => t.title && (!q || t.title.toLowerCase().includes(q)))
+      .slice(0, 8);
+    if (!matches.length) { _wikiACClose(); return; }
+    _wikiAC.items = matches; _wikiAC.start = det.start; _wikiAC.active = 0;
+    if (!_wikiAC.box) {
+      _wikiAC.box = document.createElement('div');
+      _wikiAC.box.className = 'doc-wikilink-ac';
+      document.body.appendChild(_wikiAC.box);
+    }
+    const box = _wikiAC.box;
+    box.innerHTML = matches.map((t, i) =>
+      `<div class="doc-wikilink-ac-item${i === 0 ? ' active' : ''}" data-i="${i}">${_escHtml(t.title)}</div>`
+    ).join('');
+    box.querySelectorAll('.doc-wikilink-ac-item').forEach(row => {
+      row.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        const i = parseInt(row.getAttribute('data-i'), 10);
+        _wikiACInsert(ta, matches[i] && matches[i].title);
+      });
+    });
+    const { x, y, lh } = _taCaretXY(ta);
+    box.style.left = Math.round(x) + 'px';
+    box.style.top = Math.round(y + lh + 2) + 'px';
+    box.style.display = 'block';
+  }
+
+  // Consume nav/select/close keys while the dropdown is open; returns true then.
+  function _wikiACKeydown(e, ta) {
+    if (!_wikiAC.box || _wikiAC.box.style.display === 'none' || !_wikiAC.items.length) return false;
+    if (e.key === 'ArrowDown') { e.preventDefault(); _wikiACSetActive(_wikiAC.active + 1); return true; }
+    if (e.key === 'ArrowUp')   { e.preventDefault(); _wikiACSetActive(_wikiAC.active - 1); return true; }
+    if (e.key === 'Enter' || e.key === 'Tab') {
+      e.preventDefault();
+      const m = _wikiAC.items[_wikiAC.active];
+      _wikiACInsert(ta, m && m.title);
+      return true;
+    }
+    if (e.key === 'Escape') { e.preventDefault(); _wikiACClose(); return true; }
+    return false;
   }
 
   // Fork: flip the Nth source task line (- [ ] ↔ - [x]) when its preview

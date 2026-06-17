@@ -430,6 +430,80 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
         finally:
             db.close()
 
+    # ── FORK: Obsidian-like extras — a {id,title} list for the editor's `[[`
+    # wiki-link autocomplete, and a semantic "related docs" feed for the
+    # See-also panel. The /titles literal is defined BEFORE the
+    # /api/documents/{session_id} route below so the path matcher doesn't
+    # swallow it as session_id="titles". ──
+    @router.get("/api/documents/titles")
+    async def documents_titles(request: Request) -> Dict[str, Any]:
+        """Lightweight {id,title} list of the caller's documents — powers the
+        editor's `[[` autocomplete (fetched once, filtered client-side)."""
+        user = get_current_user(request)
+        db = SessionLocal()
+        try:
+            _arch = or_(Document.archived == False, Document.archived.is_(None))
+            q = (
+                db.query(Document.id, Document.title)
+                .filter(Document.is_active == True)
+                .filter(_arch)
+            )
+            q = _owner_session_filter(q, user)
+            rows = q.order_by(Document.title.asc()).all()
+            titles = [{"id": r.id, "title": (r.title or "Untitled")} for r in rows if r.id]
+            return {"titles": titles, "count": len(titles)}
+        finally:
+            db.close()
+
+    @router.get("/api/document/{doc_id}/related")
+    async def document_related(
+        request: Request, doc_id: str, k: int = Query(6, ge=1, le=20)
+    ) -> Dict[str, Any]:
+        """Semantically-related documents for the See-also panel. Queries the
+        shared RAG store (kind="document") with this doc's own title+body, drops
+        self + duplicates, and returns the top matches in relevance order. The
+        RAG `filename` carries the doc title and `kb_id` the doc id (see
+        _index_document_rag), so each hit is directly openable. Best-effort: an
+        empty list when RAG is cold or the doc is too short to match anything."""
+        import re as _re
+
+        user = get_current_user(request)
+        db = SessionLocal()
+        try:
+            doc = db.query(Document).filter(Document.id == doc_id).first()
+            if not doc:
+                raise HTTPException(404, "Document not found")
+            _verify_doc_owner(db, doc, user)
+            title = doc.title or ""
+            body = _re.sub(r"<!--.*?-->", "", doc.current_content or "", flags=_re.DOTALL)
+            # Cap the query — embedders truncate anyway and a doc's opening
+            # carries most of its topical signal.
+            query = (title + "\n" + body).strip()[:2000]
+        finally:
+            db.close()
+        if not query:
+            return {"related": []}
+        from src import content_rag
+
+        hits = content_rag.semantic_search(user, query, k=k + 6, kinds=["document"])
+        out: List[Dict[str, Any]] = []
+        seen = set()
+        for h in hits:
+            kid = h.get("kb_id")
+            if not kid or kid == doc_id or kid in seen:
+                continue
+            seen.add(kid)
+            snippet = " ".join((h.get("text") or "").split())[:160]
+            out.append({
+                "id": kid,
+                "title": (h.get("filename") or "Untitled"),
+                "kind": h.get("kind") or "document",
+                "snippet": snippet,
+            })
+            if len(out) >= k:
+                break
+        return {"related": out}
+
     # ---- GET /api/documents/{session_id} ----
     @router.get("/api/documents/{session_id}")
     async def list_documents(request: Request, session_id: str) -> List[Dict[str, Any]]:
