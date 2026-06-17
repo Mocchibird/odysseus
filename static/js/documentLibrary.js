@@ -39,6 +39,10 @@ export function initLibrary(config) {
 
 // ── Library state ──
 let _libraryOpen = false;
+// Live-refresh handlers (documents-refresh / files-refresh). The modal is
+// rebuilt on each open with fresh closures, so these hold the CURRENT open's
+// handlers and get swapped on the next open (see the wiring in openLibrary).
+let _libDocsHandler = null, _libFilesHandler = null;
 // Track which tabs have already played their domino-in cascade so we only
 // animate the *first* time content loads per page session — tab swaps and
 // re-renders after that are instant.
@@ -1869,6 +1873,28 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
     let _activeLibTab = (opts && opts.tab) || 'documents';
     const _tabBtns = modal.querySelectorAll('[data-doclib-tab]');
     const _tabPanels = modal.querySelectorAll('[data-doclib-panel]');
+
+    // ── Live-refresh: re-fetch the visible tab when documents/files change
+    // (user edits OR an agent tool — see chat.js + document.js _emitDocsChanged)
+    // so a new/changed item shows without close+reopen. The modal is rebuilt
+    // each open, so swap out the prior open's handlers and bind fresh ones to
+    // this closure; a DOM-visibility guard makes a stale handler (swipe-dismiss
+    // left _libraryOpen true) a no-op. Debounced to coalesce bursts. ──
+    if (_libDocsHandler) window.removeEventListener('documents-refresh', _libDocsHandler);
+    if (_libFilesHandler) window.removeEventListener('files-refresh', _libFilesHandler);
+    const _libVisible = () => {
+      const m = document.getElementById('doclib-modal');
+      return !!(m && !m.classList.contains('hidden'));
+    };
+    const _libDebounced = (fn) => { clearTimeout(window.__libRefreshT); window.__libRefreshT = setTimeout(fn, 500); };
+    _libDocsHandler = () => {
+      if (_libVisible() && (_activeLibTab === 'documents' || _activeLibTab === 'archive')) _libDebounced(() => libraryFetch(false));
+    };
+    _libFilesHandler = () => {
+      if (_libVisible() && _activeLibTab === 'files') _libDebounced(() => _renderLibFiles());
+    };
+    window.addEventListener('documents-refresh', _libDocsHandler);
+    window.addEventListener('files-refresh', _libFilesHandler);
 
     // Client-side pagination for tabs whose API returns everything at once
     // (chats/archive/research). Render only this many initially; the

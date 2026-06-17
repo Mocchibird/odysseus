@@ -13,7 +13,7 @@ import markdownModule from './markdown.js';
 import codeRunnerModule from './codeRunner.js';
 import { langIcon } from './langIcons.js';
 import spinnerModule from './spinner.js';
-import { openLibrary, closeLibrary, isLibraryOpen, initLibrary } from './documentLibrary.js?v=456';
+import { openLibrary, closeLibrary, isLibraryOpen, initLibrary } from './documentLibrary.js?v=459';
 import signatureModule from './signature.js';
 import * as Modals from './modalManager.js';
 
@@ -3208,7 +3208,9 @@ import * as Modals from './modalManager.js';
     if (!deleteDoc) {
       saveDocument({ silent: true }).catch(() => {});
     }
+    const _closedId = activeDocId;
     docs.delete(activeDocId);
+    if (deleteDoc) _emitDocsChanged('delete', _closedId);  // save path emits via saveDocument
     const remaining = Array.from(docs.keys());
     if (remaining.length > 0) {
       switchToDoc(remaining[0]);
@@ -3763,6 +3765,7 @@ import * as Modals from './modalManager.js';
       });
       const doc = await res.json();
       addDocToTabs(doc, sessionId);
+      _emitDocsChanged('create', doc.id);
       // Set the content into the map so switchToDoc preserves it
       const d = docs.get(doc.id);
       if (d) d.content = content;
@@ -6021,6 +6024,7 @@ import * as Modals from './modalManager.js';
       });
       const doc = await res.json();
       addDocToTabs(doc, sessionId);
+      _emitDocsChanged('create', doc.id);
       if (!isOpen) openPanel();
       // Re-enable editor if it was in empty state
       let textarea = document.getElementById('doc-editor-textarea');
@@ -6061,6 +6065,7 @@ import * as Modals from './modalManager.js';
     if (!doc || !doc.id) return;
     const sessionId = doc.session_id || _lastSessionId || null;
     addDocToTabs(doc, sessionId);
+    _emitDocsChanged('create', doc.id);
     // Use _ensureDocPaneMounted (not `if (!isOpen) openPanel()`): when a draft
     // is composed from the email modal, `isOpen` can be stale-true while the
     // actual pane was torn down — a bare openPanel() early-returns and the doc
@@ -8317,6 +8322,7 @@ import * as Modals from './modalManager.js';
         docs.get(activeDocId).content = textarea.value;
       }
       _syncDocIndicator();
+      _emitDocsChanged('update', activeDocId);
       if (!silent && uiModule) uiModule.showToast('Document saved');
     } catch (e) {
       console.error('Failed to save document:', e);
@@ -8689,6 +8695,7 @@ import * as Modals from './modalManager.js';
       const tab = document.querySelector(`.doc-tab[data-doc-id="${activeDocId}"]`);
       if (tab) tab.remove();
       docs.delete(activeDocId);
+      _emitDocsChanged('delete', activeDocId);
       // Switch to another doc or close panel
       const remaining = Array.from(docs.keys());
       if (remaining.length > 0) {
@@ -8877,6 +8884,20 @@ import * as Modals from './modalManager.js';
   // measurement so it tracks wrapped lines). Skips `![[` (image embeds).
   const _wikiAC = { box: null, items: [], active: -1, start: -1 };
   let _wikiTitles = null, _wikiTitlesPromise = null;
+
+  // Broadcast that documents changed so open windows + caches refresh live —
+  // the Library window (documentLibrary.js listens) and the `[[` titles cache
+  // below. Fired after every create/update/delete/title change, user- AND
+  // agent-driven. Matches the gallery-refresh/calendar-refresh CustomEvent idiom.
+  function _emitDocsChanged(type, docId) {
+    try {
+      window.dispatchEvent(new CustomEvent('documents-refresh', { detail: { type: type || 'update', docId: docId || null } }));
+    } catch (e) {}
+  }
+  // Invalidate the `[[` autocomplete title cache on ANY document change — our own
+  // mutations OR an agent tool (chat.js dispatches the same event). The next `[[`
+  // re-fetches fresh titles (and the fetch no longer poisons its cache on empty).
+  window.addEventListener('documents-refresh', () => { _wikiTitles = null; _wikiTitlesPromise = null; });
 
   function _wikiLoadTitles() {
     if (_wikiTitles) return Promise.resolve(_wikiTitles);
@@ -9808,6 +9829,8 @@ import * as Modals from './modalManager.js';
     }
 
     _syncDocIndicator();
+    // Agent created/updated a doc (SSE doc_update) — refresh open windows + caches.
+    _emitDocsChanged(isExistingDoc ? 'update' : 'create', docId);
 
     // Auto-title from content if still "Untitled" and AI didn't provide a title
     if (!data.title) autoTitleFromContent(newContent, docId);
@@ -10136,6 +10159,7 @@ import * as Modals from './modalManager.js';
         docs.get(docId).title = title;
         renderTabs();
       }
+      _emitDocsChanged('title', docId);
     } catch (e) {
       console.error('Failed to update title:', e);
     }

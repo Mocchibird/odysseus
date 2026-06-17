@@ -13,6 +13,13 @@ const API_BASE = window.location.origin;
 let _open = false;
 let _tasksCascadeNext = false;   // play the domino-in entrance on the next render
 let _tasks = [];
+
+// Live-refresh: when the agent creates/edits tasks while this panel is open
+// (chat.js dispatches 'tasks-refresh' after manage_tasks), refetch + re-render
+// so the new task shows without close+reopen. Mirrors the gallery-refresh idiom.
+window.addEventListener('tasks-refresh', () => {
+  if (_open) _fetchTasks().then(() => _renderMainView());
+});
 let _tasksFetched = false;   // first-fetch sentinel — `false` → show loading row instead of "No tasks yet"
 let _escHandler = null;
 let _viewingRuns = null; // task id when viewing run history

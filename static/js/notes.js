@@ -15,6 +15,13 @@ const API_BASE = window.location.origin;
 let _open = false;
 let _notes = [];
 let _editingId = null;
+
+// Live-refresh: when the agent creates/edits notes while this panel is open
+// (chat.js dispatches 'notes-refresh' after manage_notes), refetch + re-render
+// so the new note shows without close+reopen. Mirrors the gallery-refresh idiom.
+window.addEventListener('notes-refresh', () => {
+  if (_open) _fetchNotes().then(() => _renderNotes());
+});
 let _selectedIds = new Set();
 let _activeLabel = null;
 let _activeFilter = null; // null | 'default' | 'reminders' | 'no-reminders'

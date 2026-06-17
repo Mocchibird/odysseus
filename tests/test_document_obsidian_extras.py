@@ -171,3 +171,35 @@ def test_obsidian_extras_frontend_wiring_present():
     # fork.css: styles for all three (kept out of style.css for upstream alignment).
     for sel in (".md-gallery-embed", ".doc-related-top", ".doc-related-foot", ".doc-wikilink-ac"):
         assert sel in fork_css
+
+
+def test_live_refresh_wiring_present():
+    """Guard the live-refresh-on-change wiring: doc mutations + the agent stream
+    broadcast `documents-refresh`; the Library, the `[[` titles cache, and the
+    sibling windows (Notes/Tasks/Files) listen and refresh if open. Matches the
+    gallery-refresh/calendar-refresh CustomEvent idiom."""
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    j = lambda p: (root / "static" / "js" / p).read_text(encoding="utf-8")
+    document, chat = j("document.js"), j("chat.js")
+    library, notes, tasks = j("documentLibrary.js"), j("notes.js"), j("tasks.js")
+
+    # document.js: a single emit helper fired from user mutations AND the agent
+    # SSE finalize, plus the titles-cache invalidation listener.
+    assert "_emitDocsChanged" in document
+    assert "new CustomEvent('documents-refresh'" in document
+    assert document.count("_emitDocsChanged(") >= 6      # create/autocreate/inject/save/title/delete/agent
+    assert "addEventListener('documents-refresh'" in document  # invalidates `[[` titles cache
+
+    # chat.js: tool-completion -> refresh event for each content-creating tool.
+    for tool in ("create_document", "manage_documents", "manage_notes", "manage_tasks", "manage_files"):
+        assert tool in chat
+    for evt in ("documents-refresh", "notes-refresh", "tasks-refresh", "files-refresh"):
+        assert evt in chat
+
+    # Listeners that refresh-if-open in each window.
+    assert "addEventListener('documents-refresh'" in library
+    assert "addEventListener('files-refresh'" in library
+    assert "addEventListener('notes-refresh'" in notes
+    assert "addEventListener('tasks-refresh'" in tasks

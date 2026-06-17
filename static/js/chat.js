@@ -17,7 +17,7 @@ import spinnerModule from './spinner.js';
 import presetsModule from './presets.js';
 import fileHandlerModule from './fileHandler.js';
 import searchModule from './search.js';
-import documentModule from './document.js?v=458';
+import documentModule from './document.js?v=459';
 import * as emailInbox from './emailInbox.js';
 import codeRunnerModule from './codeRunner.js';
 import slashCommands, { initSlashCommands, isCommand, handleSlashCommand, handleSetupInput, handleSetupWizard, typewriterInto } from './slashCommands.js';
@@ -2275,6 +2275,25 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
                   if (window._manageMemoryTimer) clearTimeout(window._manageMemoryTimer);
                   window._manageMemoryTimer = setTimeout(
                     () => window.dispatchEvent(new CustomEvent('memory-refresh')), 600);
+                }
+                // --- Live-refresh open tool windows after content-creating tools,
+                // so a doc/note/task/file the agent creates shows up without the
+                // user closing + reopening the window. Same debounced-CustomEvent
+                // pattern as gallery/calendar above; each window refreshes only if
+                // it's open. ---
+                const _toolRefresh = {
+                  create_document: 'documents-refresh',
+                  manage_documents: 'documents-refresh',
+                  manage_notes: 'notes-refresh',
+                  manage_tasks: 'tasks-refresh',
+                  manage_files: 'files-refresh',
+                };
+                const _refreshEvt = _toolRefresh[json.tool];
+                if (_refreshEvt) {
+                  window._contentRefreshTimers = window._contentRefreshTimers || {};
+                  clearTimeout(window._contentRefreshTimers[_refreshEvt]);
+                  window._contentRefreshTimers[_refreshEvt] = setTimeout(
+                    () => window.dispatchEvent(new CustomEvent(_refreshEvt, { detail: { source: 'agent' } })), 600);
                 }
                 // --- Apply UI control actions embedded in tool_output ---
                 if (json.ui_event) {

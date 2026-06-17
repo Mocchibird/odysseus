@@ -1097,14 +1097,14 @@ document.addEventListener('click', function(e) {
       if (fn) fn(id);
     });
   } else if (kind === 'document') {
-    import('./document.js?v=458').then(mod => {
+    import('./document.js?v=459').then(mod => {
       const open = mod.loadDocument
         || mod.openDocument
         || (mod.default && (mod.default.loadDocument || mod.default.openDocument));
       if (open) open(id);
     }).catch(() => {});
   } else if (kind === 'note') {
-    import('./notes.js?v=440').then(mod => {
+    import('./notes.js?v=459').then(mod => {
       const open = mod.openNote || (mod.default && mod.default.openNote);
       if (open) open(id);
     }).catch(() => {});

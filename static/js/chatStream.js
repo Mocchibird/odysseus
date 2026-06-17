@@ -145,7 +145,7 @@ export function handleUIControl(uiData) {
     } else if (uiEvent === 'open_panel' || uiData.ui_event === 'open_panel') {
       var panel = uiData.panel;
       if (panel === 'documents') {
-        import('./documentLibrary.js?v=456').then(function(mod) {
+        import('./documentLibrary.js?v=459').then(function(mod) {
           var fn = mod.openLibrary || (mod.default && mod.default.openLibrary);
           if (fn) fn();
         }).catch(function(){});
@@ -170,7 +170,7 @@ export function handleUIControl(uiData) {
           if (fn) fn();
         }).catch(function(){});
       } else if (panel === 'notes') {
-        import('./notes.js?v=440').then(function(mod) {
+        import('./notes.js?v=459').then(function(mod) {
           var fn = mod.openPanel || mod.openNotes || (mod.default && (mod.default.openPanel || mod.default.openNotes));
           if (fn) fn();
         }).catch(function(){});
