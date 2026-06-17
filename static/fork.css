@@ -1918,6 +1918,13 @@ body.gallery-selecting .gallery-card-menu-btn,
   cursor: pointer;
 }
 .wiki-link:hover { border-bottom-style: solid; }
+/* hljs applies `.hljs { padding: 8px }` to the highlighted <code>, which is
+   display:inline — so its left padding lands only on the FIRST visual line and
+   indents it past the rest. (Most visible inside callouts/blockquotes, where
+   hljs often mis-detects the language, e.g. `<username>` -> xml.) Make code
+   blocks display:block so the padding applies uniformly and every line shares
+   the same left edge. */
+.doc-md-preview pre code { display: block; }
 
 /* ── Doc pane fullscreen: kill the leftover entrance transform (fork) ──
    The upstream `doc-pane-enter` open animation slides the pane in from the
