@@ -15,7 +15,7 @@ import logging
 from typing import AsyncGenerator, List, Dict, Optional, Set
 from urllib.parse import urlparse
 
-from src.llm_core import stream_llm, stream_llm_with_fallback, _is_ollama_native_url
+from src.llm_core import stream_llm_with_fallback, _is_ollama_native_url
 from src.model_context import estimate_tokens
 from src.settings import get_setting
 from src.prompt_security import untrusted_context_message
@@ -1006,7 +1006,6 @@ def _build_system_prompt(
         _em_from = active_email.get("from", "") or "(unknown sender)"
         _em_preview = (active_email.get("body_preview", "") or "").strip()
         _preview_block = f"\nBody preview:\n```\n{_em_preview[:1800]}\n```" if _em_preview else ""
-        _acct_arg = f" {_em_account}" if _em_account else ""
         email_ctx = (
             f"ACTIVE EMAIL OPEN (the user has this email open in a reader window right now)\n"
             f"UID: {_em_uid}\n"

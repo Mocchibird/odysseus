@@ -18,7 +18,6 @@ import ntpath
 import shutil
 import subprocess
 from pathlib import Path
-import sys
 from typing import List, Optional
 import platform
 
@@ -253,10 +252,6 @@ def find_bash() -> Optional[str]:
                 break
     _BASH_CACHE = found
     return found
-
-
-def has_bash() -> bool:
-    return find_bash() is not None
 
 
 def which_tool(name: str) -> Optional[str]:

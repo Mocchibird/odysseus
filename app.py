@@ -1,7 +1,6 @@
 # app.py — slim orchestrator
 import mimetypes
 import os
-import sys
 
 
 def register_static_mime_types() -> None:
@@ -46,7 +45,6 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import JSONResponse, FileResponse, HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.middleware.gzip import GZipMiddleware
 

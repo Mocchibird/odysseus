@@ -12,7 +12,7 @@ import os
 import re
 from typing import Any, Dict, List, Optional
 
-from src.constants import MAX_READ_CHARS, DEEP_RESEARCH_DIR, VAULT_FILE
+from src.constants import DEEP_RESEARCH_DIR, VAULT_FILE
 from src.tool_utils import get_mcp_manager
 from core.constants import internal_api_base
 
@@ -42,10 +42,6 @@ def set_active_email(uid: Optional[str], folder: Optional[str] = None, account: 
         "subject": str(subject or ""),
         "from": str(sender or ""),
     }
-
-
-def get_active_email() -> Optional[Dict[str, str]]:
-    return _active_email_ref
 
 
 def clear_active_email() -> None:

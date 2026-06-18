@@ -13,7 +13,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 
 from core.database import SessionLocal, GalleryImage, GalleryAlbum, ModelEndpoint
 from core.database import Session as DbSession
-from src.auth_helpers import get_current_user, owner_filter, require_privilege
+from src.auth_helpers import get_current_user, require_privilege
 from src.upload_limits import (
     read_upload_limited,
     stream_upload_to_path,
@@ -369,7 +369,6 @@ def setup_gallery_routes() -> APIRouter:
     async def gallery_rotate(request: Request, image_id: str):
         """Rotate an image by ±90° or 180°. Updates the file on disk and the
         width/height in the DB. Body: {angle: 90 | -90 | 180}."""
-        from pathlib import Path
         from PIL import Image
         from io import BytesIO
 
@@ -2001,7 +2000,6 @@ def setup_gallery_routes() -> APIRouter:
     async def ai_tag_image(request: Request, image_id: str):
         """Send image to vision model for auto-tagging."""
         import base64, httpx
-        from pathlib import Path
 
         user = get_current_user(request)
         db = SessionLocal()

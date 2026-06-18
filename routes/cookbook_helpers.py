@@ -13,7 +13,6 @@ from pathlib import Path
 from fastapi import HTTPException
 from pydantic import BaseModel
 
-from routes._validators import validate_remote_host, validate_ssh_port
 from core.platform_compat import _ssh_exec_argv
 
 logger = logging.getLogger(__name__)
@@ -238,7 +237,6 @@ def _pip_install_fallback_chain(package: str, *, python_cmd: str = "python3 -m p
     exit code is preserved (no ``| tail`` masking) and the last 5 lines of
     pip output appear in the Cookbook log on failure.
     """
-    from core.platform_compat import IS_WINDOWS
     upgrade_flag = " -U" if upgrade else ""
     # Shell-quote the package spec: an extras spec like ``llama-cpp-python[server]``
     # contains brackets that bash would treat as a glob, so it must be quoted

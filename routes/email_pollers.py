@@ -18,7 +18,6 @@ Pure helpers live in `email_helpers.py`. Routes themselves live in
 
 import email as email_mod
 import email.utils  # the `email` binding is referenced as email.utils.parseaddr inside the pass
-import smtplib
 import json
 import re
 import html
@@ -37,7 +36,6 @@ from routes.email_helpers import (
     _imap_connect, _imap, _decode_header,
     _detect_sent_folder, _detect_spam_folder, _imap_move,
     _extract_attachment_text, _extract_text,
-    _pre_retrieve_context,
     _attach_compose_uploads, _cleanup_compose_uploads, _q,
     SCHEDULED_DB, _EMAIL_REPLY_SYS_PROMPT_BASE, _email_cache_owner_clause,
 )
@@ -448,7 +446,7 @@ async def _auto_summarize_pass_single(days_back: int = 1, account_id: str | None
                     # feel busy. Keep it lightweight: no extra IMAP context
                     # mining here; manual AI Reply can still do that (owner-scoped)
                     # when the user explicitly asks for a draft on one email.
-                    context_snippets, _terms = [], []
+                    context_snippets = []
                     sys_prompt = _EMAIL_REPLY_SYS_PROMPT_BASE
                     if att_text:
                         sys_prompt += "\n\nThe email has attachments (PDFs / docs) — their contents follow the body marked '--- ATTACHMENTS ---'. Reference them in your reply when relevant (e.g. acknowledge the invoice/contract, address specific clauses or amounts)."

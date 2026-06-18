@@ -2,7 +2,6 @@
 
 import asyncio
 import json
-import os
 import time
 import logging
 from datetime import datetime

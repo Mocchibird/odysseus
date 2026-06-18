@@ -7,24 +7,18 @@ Routes tool blocks to MCP servers or native implementations.
 Extracted from agent_tools.py.
 """
 
-import asyncio
-import collections
 import contextvars
 import json
 import logging
 import os
-import pathlib
 import re
-import sys
-import time
 from typing import Any, Awaitable, Callable, Dict, Optional, Tuple
 
 
 
 from src.tool_security import is_public_blocked_tool, owner_is_admin_or_single_user
-from src.tool_policy import ToolPolicy
-from src.constants import MAX_OUTPUT_CHARS, MAX_READ_CHARS, MAX_DIFF_LINES, DATA_DIR
-from src.tool_utils import _truncate, get_mcp_manager
+from src.constants import DATA_DIR
+from src.tool_utils import _truncate
 
 # Persistent working directory for agent subprocesses.
 # Resolves to <repo_root>/data, which is the bind-mounted volume in Docker
@@ -803,10 +797,10 @@ async def _execute_tool_block_impl(
         desc = f"search_chats: {query[:80]}"
         result = await do_search_chats(query, owner=owner)
     elif tool in ("chat_with_model", "ask_teacher", "list_models"):
-        # Migrated to the agent_tools registry (#3629): dispatched through
-        # TOOL_HANDLERS with the owner/session ctx these tools need, instead
-        # of the legacy dispatch_ai_tool elif. The do_* impls stay in
-        # ai_interaction.py (dispatch_ai_tool + the owner-scope test use them).
+        # Migrated to the agent_tools registry (#3629/#4445): dispatched through
+        # TOOL_HANDLERS (via _document_tool_dispatch) with the owner/session ctx
+        # these tools need, instead of the legacy dispatch_ai_tool elif. The
+        # impls now live in src/agent_tools/model_interaction_tools.py.
         first_line = content.split(chr(10))[0].strip()[:60]
         desc = f"{tool}: {first_line}" if first_line else tool
         result = await _document_tool_dispatch(tool, content, session_id, owner) \

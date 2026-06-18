@@ -53,9 +53,8 @@ from routes.email_helpers import (
     _extract_attachment_to_disk, _extract_html, _extract_text,
     _fetch_sender_thread_context, _pre_retrieve_context,
     _EMAIL_REPLY_SYS_PROMPT_BASE, _POOL_HOOKS,
-    _friendly_email_auth_error,
     SendEmailRequest, ExtractStyleRequest,
-    ATTACHMENTS_DIR, COMPOSE_UPLOADS_DIR, SCHEDULED_DB,
+    COMPOSE_UPLOADS_DIR, SCHEDULED_DB,
     attachment_extract_dir, _email_cache_owner_clause,
 )
 from routes.email_pollers import _start_poller
@@ -3609,7 +3608,6 @@ def setup_email_routes():
         error: str = Query(None),
         request: Request = None,
     ):
-        import urllib.parse
         from fastapi.responses import RedirectResponse as _RR
         if error:
             return _RR("/?section=integrations&email_oauth_error=google_error")

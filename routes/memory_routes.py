@@ -24,7 +24,10 @@ def _strip_list_prefix(text: str) -> str:
 from services.memory import MemoryManager
 from core.session_manager import SessionManager
 from src.request_models import MemoryAddRequest
-from core.database import SessionLocal
+# Re-exported as a module attribute so the memory-audit tests can patch
+# `mr.SessionLocal` to guard against a manual-default DB fallback ever running.
+# Not referenced in this module's code path, hence the noqa.
+from core.database import SessionLocal  # noqa: F401
 from src.llm_core import llm_call_async
 from services.memory.memory_extractor import audit_memories
 from src.auth_helpers import get_current_user, require_user
