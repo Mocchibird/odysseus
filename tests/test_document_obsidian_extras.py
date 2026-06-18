@@ -132,6 +132,9 @@ async def test_related_excludes_self_dedups_and_shapes(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_related_empty_when_rag_cold(monkeypatch):
+    # With RAG cold AND no title/link/session neighbours, the feed is empty.
+    # ("Alpha Notes" has no siblings; "Archived One" is archived, "Bob Secret"
+    # is another owner's — neither is a candidate.)
     previous = _bind_test_db()
     try:
         related_ep = _endpoint("GET", "/api/document/{doc_id}/related")
@@ -139,6 +142,64 @@ async def test_related_empty_when_rag_cold(monkeypatch):
         monkeypatch.setattr(content_rag, "semantic_search", lambda *a, **k: [])
         res = await related_ep(_req("alice"), alice_a, k=6)
         assert res == {"related": []}
+    finally:
+        droutes.SessionLocal = previous
+
+
+@pytest.mark.asyncio
+async def test_related_surfaces_title_series_without_rag(monkeypatch):
+    """The reported bug: a lesson in a SERIES must surface its siblings even when
+    RAG is cold or the docs were never indexed — on pure title similarity."""
+    previous = _bind_test_db()
+    try:
+        related_ep = _endpoint("GET", "/api/document/{doc_id}/related")
+        l06, l07, l08, other = (str(uuid.uuid4()) for _ in range(4))
+        db = _TS()
+        try:
+            db.query(Document).delete()
+            db.add(_doc(l06, "Japanese A1.2 Lesson 06", "alice"))
+            db.add(_doc(l07, "Japanese A1.2 Lesson 07", "alice"))
+            db.add(_doc(l08, "Japanese A1.2 Lesson 08", "alice"))
+            db.add(_doc(other, "TileLang Ascend Notes", "alice"))
+            db.commit()
+        finally:
+            db.close()
+        monkeypatch.setattr(content_rag, "semantic_search", lambda *a, **k: [])  # RAG cold
+        res = await related_ep(_req("alice"), l07, k=6)
+        ids = [r["id"] for r in res["related"]]
+        assert l06 in ids and l08 in ids            # siblings surface without RAG
+        assert l07 not in ids                        # self excluded
+        assert other not in ids                      # unrelated title not pulled in
+        by_id = {r["id"]: r for r in res["related"]}
+        assert by_id[l06]["reason"] in ("series", "topic")
+    finally:
+        droutes.SessionLocal = previous
+
+
+@pytest.mark.asyncio
+async def test_related_includes_wikilinks_and_backlinks(monkeypatch):
+    """Manual override: outgoing ``[[links]]`` and backlinks rank at the top,
+    independent of RAG."""
+    previous = _bind_test_db()
+    try:
+        related_ep = _endpoint("GET", "/api/document/{doc_id}/related")
+        hub, target, backref = (str(uuid.uuid4()) for _ in range(3))
+        db = _TS()
+        try:
+            db.query(Document).delete()
+            db.add(_doc(hub, "Grammar Hub", "alice", content="See [[Particle Wa]] for the topic particle."))
+            db.add(_doc(target, "Particle Wa", "alice", content="The topic particle wa."))
+            db.add(_doc(backref, "Lesson Recap", "alice", content="A recap of [[Grammar Hub]]."))
+            db.commit()
+        finally:
+            db.close()
+        monkeypatch.setattr(content_rag, "semantic_search", lambda *a, **k: [])
+        res = await related_ep(_req("alice"), hub, k=6)
+        rel = {r["id"]: r for r in res["related"]}
+        assert target in rel                         # outgoing [[Particle Wa]]
+        assert backref in rel                        # backlink from "Lesson Recap"
+        assert rel[target]["reason"] == "linked"
+        assert rel[backref]["reason"] == "linked"
     finally:
         droutes.SessionLocal = previous
 

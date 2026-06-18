@@ -1,5 +1,6 @@
 """Document routes — CRUD for living documents with version history."""
 
+import re
 import uuid
 import logging
 from datetime import datetime, timezone
@@ -14,6 +15,46 @@ from src.auth_helpers import get_current_user
 from src.constants import MAIL_ATTACHMENTS_DIR
 
 logger = logging.getLogger(__name__)
+
+# ── Related-docs signals (See-also panel) ──────────────────────────────────
+# Pure-DB relatedness used by /api/document/{id}/related so the panel works even
+# when RAG is cold or a doc was never indexed (semantic-only missed obvious
+# neighbours like the previous/next note in a lesson series).
+# Negative lookbehind skips `![[image]]` embeds — those aren't doc links.
+_WIKILINK_RE = re.compile(r"(?<!!)\[\[\s*([^\]|#]+?)\s*(?:[#|][^\]]*)?\]\]")
+_TITLE_WORD_RE = re.compile(r"[0-9A-Za-zÀ-￿]+")
+
+
+def _wikilink_titles(body: str) -> set:
+    """Lowercased doc titles referenced by ``[[wiki-links]]`` in a body
+    (``[[Title|alias]]`` / ``[[Title#anchor]]`` reduced to ``title``)."""
+    return {m.strip().lower() for m in _WIKILINK_RE.findall(body or "") if m.strip()}
+
+
+def _title_similarity(a: str, b: str) -> float:
+    """0..1 similarity of two titles — token-Jaccard blended with a common-prefix
+    bonus. Rewards a lesson SERIES (``Japanese A1.2 Lesson 0X``) and same-topic
+    notes, which pure embeddings of mixed-language grammar tables miss."""
+    a, b = a or "", b or ""
+    ta = {t.lower() for t in _TITLE_WORD_RE.findall(a)}
+    tb = {t.lower() for t in _TITLE_WORD_RE.findall(b)}
+    if not ta or not tb:
+        return 0.0
+    jac = len(ta & tb) / len(ta | tb)
+    la, lb = a.lower(), b.lower()
+    pre = 0
+    for x, y in zip(la, lb):
+        if x != y:
+            break
+        pre += 1
+    pref = pre / max(len(la), len(lb), 1)
+    return 0.6 * jac + 0.4 * pref
+
+
+def _like_escape(s: str) -> str:
+    """Escape LIKE wildcards so a title with %/_ doesn't match too broadly."""
+    return s.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
 
 
 def _get_session_or_404(db, session_id: str, user: Optional[str]):
@@ -459,14 +500,14 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
     async def document_related(
         request: Request, doc_id: str, k: int = Query(6, ge=1, le=20)
     ) -> Dict[str, Any]:
-        """Semantically-related documents for the See-also panel. Queries the
-        shared RAG store (kind="document") with this doc's own title+body, drops
-        self + duplicates, and returns the top matches in relevance order. The
-        RAG `filename` carries the doc title and `kb_id` the doc id (see
-        _index_document_rag), so each hit is directly openable. Best-effort: an
-        empty list when RAG is cold or the doc is too short to match anything."""
-        import re as _re
-
+        """Related documents for the See-also panel. Blends, in priority order:
+        explicit ``[[wiki-links]]`` (outgoing + backlinks — the manual override),
+        title similarity (surfaces a lesson SERIES like ``Japanese A1.2 Lesson 0X``
+        and same-topic notes), same-session siblings, then semantic recall as a
+        supplement. The link/title/session signals are plain DB queries, so the
+        panel works even when RAG is cold or a doc was never indexed — the old
+        pure-semantic version returned unrelated docs (or nothing) in that case.
+        Each hit's id is the doc id, so the row is directly openable."""
         user = get_current_user(request)
         db = SessionLocal()
         try:
@@ -475,34 +516,100 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
                 raise HTTPException(404, "Document not found")
             _verify_doc_owner(db, doc, user)
             title = doc.title or ""
-            body = _re.sub(r"<!--.*?-->", "", doc.current_content or "", flags=_re.DOTALL)
-            # Cap the query — embedders truncate anyway and a doc's opening
-            # carries most of its topical signal.
-            query = (title + "\n" + body).strip()[:2000]
+            sess = doc.session_id
+            body = re.sub(r"<!--.*?-->", "", doc.current_content or "", flags=re.DOTALL)
+
+            _arch = or_(Document.archived == False, Document.archived.is_(None))
+            cq = (
+                db.query(Document.id, Document.title, Document.session_id)
+                .filter(Document.is_active == True)
+                .filter(_arch)
+                .filter(Document.id != doc_id)
+            )
+            cq = _owner_session_filter(cq, user)
+            cands = cq.all()
+
+            # Backlinks: the caller's docs whose body links to THIS title.
+            backlinks: set = set()
+            if title.strip():
+                pat = "%[[" + _like_escape(title.strip()) + "%"
+                bq = (
+                    db.query(Document.id)
+                    .filter(Document.is_active == True)
+                    .filter(_arch)
+                    .filter(Document.id != doc_id)
+                    .filter(Document.current_content.like(pat, escape="\\"))
+                )
+                bq = _owner_session_filter(bq, user)
+                backlinks = {r[0] for r in bq.all() if r[0]}
         finally:
             db.close()
-        if not query:
-            return {"related": []}
-        from src import content_rag
 
-        hits = content_rag.semantic_search(user, query, k=k + 6, kinds=["document"])
-        out: List[Dict[str, Any]] = []
-        seen = set()
-        for h in hits:
-            kid = h.get("kb_id")
-            if not kid or kid == doc_id or kid in seen:
+        out_links = _wikilink_titles(body)        # titles THIS doc links to
+        scored: Dict[str, Dict[str, Any]] = {}
+
+        def _add(cid, ctitle, score, reason, snippet=None):
+            if not cid or cid == doc_id:
+                return
+            cur = scored.get(cid)
+            if cur is None or score > cur["score"]:
+                snippet = snippet if snippet is not None else (cur or {}).get("snippet")
+                scored[cid] = {"id": cid, "title": ctitle or "Untitled",
+                               "score": score, "reason": reason, "snippet": snippet}
+            elif snippet and not cur.get("snippet"):
+                cur["snippet"] = snippet
+
+        for cid, ctitle, csess in cands:
+            ct = ctitle or ""
+            if ct.lower() in out_links or cid in backlinks:
+                _add(cid, ct, 1000.0, "linked")
                 continue
-            seen.add(kid)
-            snippet = " ".join((h.get("text") or "").split())[:160]
-            out.append({
-                "id": kid,
-                "title": (h.get("filename") or "Untitled"),
-                "kind": h.get("kind") or "document",
-                "snippet": snippet,
-            })
-            if len(out) >= k:
-                break
-        return {"related": out}
+            sim = _title_similarity(title, ct)
+            if sim >= 0.15:
+                _add(cid, ct, 200.0 + sim * 100.0, "series" if sim >= 0.45 else "topic")
+            elif sess and csess == sess:
+                _add(cid, ct, 120.0, "same session")
+
+        # Semantic supplement — topical matches with no title/link/session signal.
+        query = (title + "\n" + body).strip()[:2000]
+        if query:
+            try:
+                from src import content_rag
+                hits = content_rag.semantic_search(user, query, k=k + 8, kinds=["document"])
+                for rank, h in enumerate(hits):
+                    kid = h.get("kb_id")
+                    if not kid or kid == doc_id:
+                        continue
+                    snip = " ".join((h.get("text") or "").split())[:160]
+                    _add(kid, h.get("filename") or "Untitled",
+                         max(10.0, 60.0 - rank * 4.0), "topic", snippet=snip)
+            except Exception:
+                logger.debug("related semantic supplement failed", exc_info=True)
+
+        ranked = sorted(scored.values(), key=lambda d: d["score"], reverse=True)[:k]
+
+        # Fill snippets for ranked entries that don't carry one (title/link/session).
+        need = [d["id"] for d in ranked if not d.get("snippet")]
+        if need:
+            db2 = SessionLocal()
+            try:
+                bodies = {
+                    r.id: (r.current_content or "")
+                    for r in db2.query(Document.id, Document.current_content)
+                                .filter(Document.id.in_(need)).all()
+                }
+            finally:
+                db2.close()
+            for d in ranked:
+                if not d.get("snippet"):
+                    txt = re.sub(r"<!--.*?-->", "", bodies.get(d["id"], ""), flags=re.DOTALL)
+                    d["snippet"] = " ".join(txt.split())[:160]
+
+        return {"related": [
+            {"id": d["id"], "title": d["title"], "kind": "document",
+             "snippet": d.get("snippet") or "", "reason": d["reason"]}
+            for d in ranked
+        ]}
 
     # ---- GET /api/documents/{session_id} ----
     @router.get("/api/documents/{session_id}")
