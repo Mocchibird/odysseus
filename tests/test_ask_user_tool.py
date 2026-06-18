@@ -97,3 +97,34 @@ def test_registered_everywhere():
     assert "ask_user" in names
     # Not admin/public-gated — any user can be asked
     assert is_public_blocked_tool("ask_user") is False
+
+
+def test_ask_user_persistence_and_no_reask_rule_present():
+    """Regression guards for the two ask_user fixes:
+
+    1. The agent loop must persist the offered OPTION LABELS into the replayed
+       assistant text — without that the model can't tell it already asked (the
+       tool_event metadata is dropped on replay) and loops, re-asking after the
+       user picks.
+    2. The tool guidance must tell the model its turn ended, the next message is
+       the user's selection, and to NEVER re-ask the same question.
+    """
+    from pathlib import Path
+
+    src = (Path(__file__).resolve().parents[1] / "src" / "agent_loop.py").read_text(encoding="utf-8")
+    # (1) options persisted into the replayed assistant text
+    assert "_auq_labels" in src
+    assert "Options: " in src
+    # (2) the don't-re-ask rule
+    assert "NEVER re-ask the same question" in src
+    assert "NEXT message IS their selected answer" in src
+
+
+def test_ask_user_option_card_layout_fix_present():
+    """Guard the fork.css fix that stops a long option description from
+    overflowing its <button> box onto the next option."""
+    from pathlib import Path
+
+    fork = (Path(__file__).resolve().parents[1] / "static" / "fork.css").read_text(encoding="utf-8")
+    assert "button.ask-user-option" in fork          # single-choice → column, grows
+    assert "label.ask-user-option .ask-user-option-desc" in fork  # multi → desc on its own line
