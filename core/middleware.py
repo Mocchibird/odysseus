@@ -67,7 +67,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response = await call_next(request)
         path = request.url.path
 
-        # Tool render endpoints are served inside iframes — allow framing by self
+        # Tool render endpoints
         is_tool_render = path.startswith("/api/tools/") and path.endswith("/render")
         # Native PDF book viewer embeds the authenticated PDF file in the
         # same-origin Books iframe. Keep all other responses frame-denied.
@@ -100,9 +100,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
                 "frame-ancestors 'none'"
             )
         elif is_tool_render:
-            # Tool iframe content: skip all framing headers — the iframe's
-            # sandbox="allow-scripts" attribute provides isolation.
-            # Don't overwrite the route's own restrictive CSP either.
+            # Skip framing headers for tools.
             pass
         elif is_book_pdf_file:
             response.headers["X-Frame-Options"] = "SAMEORIGIN"

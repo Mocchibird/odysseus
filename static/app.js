@@ -26,17 +26,17 @@ import censorModule from './js/censor.js';
 import galleryModule from './js/gallery.js?v=444';
 import tasksModule from './js/tasks.js';
 import calendarModule from './js/calendar.js';
-import notesModule from './js/notes.js?v=459';
+import notesModule from './js/notes.js?v=460';
 import booksModule from './js/books.js?v=420';
 import healthModule from './js/health.js?v=398';
 import pingsModule from './js/pings.js?v=396';
 import todayModule from './js/today.js?v=421';
-import adminModule from './js/admin.js?v=448';
+import adminModule from './js/admin.js?v=449';
 import settingsModule from './js/settings.js?v=448';
 // FORK: runtime-inject fork-only UI (e.g. the API Tokens panel) into stable
 // upstream anchors, so index.html stays aligned with upstream. Side-effect
 // import — the module self-runs on load. See static/js/fork-ui.js.
-import './js/fork-ui.js?v=454';
+import './js/fork-ui.js?v=455';
 // Eagerly bind unified minimize/restore behavior across all tool modals.
 import './js/modalManager.js';
 // Desktop window tiling — drag a modal near an edge/corner to snap.

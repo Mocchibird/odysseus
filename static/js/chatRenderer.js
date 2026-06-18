@@ -1104,7 +1104,7 @@ document.addEventListener('click', function(e) {
       if (open) open(id);
     }).catch(() => {});
   } else if (kind === 'note') {
-    import('./notes.js?v=459').then(mod => {
+    import('./notes.js?v=460').then(mod => {
       const open = mod.openNote || (mod.default && mod.default.openNote);
       if (open) open(id);
     }).catch(() => {});
