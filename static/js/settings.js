@@ -1088,6 +1088,9 @@ async function initTtsSettings() {
   var azureRow = el('set-ttsAzureRow');
   var azureKey = el('set-ttsAzureKey');
   var azureRegion = el('set-ttsAzureRegion');
+  var elevenRow = el('set-ttsElevenRow');
+  var elevenKey = el('set-ttsElevenKey');
+  var edgeNote = el('set-ttsEdgeNote');
 
   function isEndpoint() { return provSel.value.startsWith('endpoint:'); }
   function getModel() { return isEndpoint() ? modelSelect.value : modelInput.value; }
@@ -1099,6 +1102,8 @@ async function initTtsSettings() {
     voiceRow.style.display = prov === 'disabled' ? 'none' : 'flex';
     speedRow.style.display = prov === 'disabled' ? 'none' : 'flex';
     if (azureRow) azureRow.style.display = prov === 'azure' ? 'flex' : 'none';
+    if (elevenRow) elevenRow.style.display = prov === 'elevenlabs' ? 'flex' : 'none';
+    if (edgeNote) edgeNote.style.display = prov === 'edge' ? 'block' : 'none';
     if (isEndpoint()) {
       modelSelect.style.display = ''; modelInput.style.display = 'none';
       voiceSelect.style.display = ''; voiceInput.style.display = 'none';
@@ -1129,6 +1134,7 @@ async function initTtsSettings() {
     if (settings.tts_speed) { speedSelect.value = settings.tts_speed; }
     if (azureKey && settings.azure_speech_key) azureKey.value = settings.azure_speech_key;
     if (azureRegion && settings.azure_speech_region) azureRegion.value = settings.azure_speech_region;
+    if (elevenKey && settings.elevenlabs_api_key) elevenKey.value = settings.elevenlabs_api_key;
     if (ttsEnabledToggle) ttsEnabledToggle.checked = settings.tts_enabled !== false;
   } catch (e) { console.warn('Failed to load TTS settings', e); }
 
@@ -1144,7 +1150,7 @@ async function initTtsSettings() {
   async function saveTTS() {
     try {
       await fetch('/api/auth/settings', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tts_enabled: ttsEnabledToggle ? ttsEnabledToggle.checked : true, tts_provider: provSel.value, tts_model: getModel() || 'tts-1', tts_voice: getVoice() || 'alloy', tts_speed: speedSelect.value || '1', azure_speech_key: azureKey ? azureKey.value.trim() : '', azure_speech_region: azureRegion ? azureRegion.value.trim() : '' }) });
+        body: JSON.stringify({ tts_enabled: ttsEnabledToggle ? ttsEnabledToggle.checked : true, tts_provider: provSel.value, tts_model: getModel() || 'tts-1', tts_voice: getVoice() || 'alloy', tts_speed: speedSelect.value || '1', azure_speech_key: azureKey ? azureKey.value.trim() : '', azure_speech_region: azureRegion ? azureRegion.value.trim() : '', elevenlabs_api_key: elevenKey ? elevenKey.value.trim() : '' }) });
       ttsMsg.textContent = 'Saved'; ttsMsg.style.color = 'var(--fg)'; setTimeout(() => { ttsMsg.textContent = ''; }, 2000);
       if (window.aiTTSManager) window.aiTTSManager.checkAvailability();
     } catch (e) { ttsMsg.textContent = 'Failed to save'; ttsMsg.style.color = 'var(--red)'; }
@@ -1155,14 +1161,23 @@ async function initTtsSettings() {
     fetch('/api/tts/clear-cache', { method: 'POST', credentials: 'same-origin' }).catch(function(){});
   }
 
+  // Voices that came from the old OpenAI/Kokoro defaults — replace them when the
+  // user switches to a neural-voice provider so they don't ship a dead voice name.
+  var _placeholderVoices = ['af_heart', 'alloy', ''];
   provSel.addEventListener('change', function() {
     var prov = provSel.value;
-    if (prov === 'local') voiceInput.value = 'af_heart';
-    else if (isEndpoint()) { voiceSelect.value = 'alloy'; modelSelect.value = 'tts-1'; }
-    else if (prov === 'browser') { voiceInput.value = ''; voiceInput.placeholder = 'OS default voice'; }
+    if (isEndpoint()) { voiceSelect.value = 'alloy'; modelSelect.value = 'tts-1'; }
+    else if (prov === 'edge') {
+      if (_placeholderVoices.indexOf(voiceInput.value) !== -1) voiceInput.value = 'en-US-AvaNeural';
+      voiceInput.placeholder = 'e.g. en-US-AvaNeural';
+    }
     else if (prov === 'azure') {
-      if (!voiceInput.value || ['af_heart', 'alloy', ''].indexOf(voiceInput.value) !== -1) voiceInput.value = 'en-US-AriaNeural';
+      if (_placeholderVoices.indexOf(voiceInput.value) !== -1) voiceInput.value = 'en-US-AriaNeural';
       voiceInput.placeholder = 'e.g. en-US-AriaNeural';
+    }
+    else if (prov === 'elevenlabs') {
+      if (_placeholderVoices.indexOf(voiceInput.value) !== -1) voiceInput.value = '21m00Tcm4TlvDq8ikWAM';
+      voiceInput.placeholder = 'ElevenLabs voice id';
     }
     updateVisibility();
     saveTTS();
@@ -1173,6 +1188,7 @@ async function initTtsSettings() {
   voiceInput.addEventListener('change', saveTTS);
   if (azureKey) azureKey.addEventListener('change', saveAndClearCache);
   if (azureRegion) azureRegion.addEventListener('change', saveAndClearCache);
+  if (elevenKey) elevenKey.addEventListener('change', saveAndClearCache);
   speedSelect.addEventListener('change', saveAndClearCache);
   if (ttsEnabledToggle) ttsEnabledToggle.addEventListener('change', function() { syncTtsDisabled(); saveTTS(); });
 
@@ -1186,7 +1202,6 @@ async function initTtsSettings() {
     previewBtn.addEventListener('click', async function() {
       if (previewPlaying) {
         if (previewAudio) { previewAudio.pause(); previewAudio = null; }
-        window.speechSynthesis.cancel();
         resetPreview(); return;
       }
       var prov = provSel.value;
@@ -1197,41 +1212,21 @@ async function initTtsSettings() {
       var testText = 'Hello, this is a test of text to speech.';
       previewPlaying = true; previewBtn.textContent = 'Loading...';
       try {
-        if (prov === 'browser') {
-          if (!('speechSynthesis' in window)) throw new Error('Browser TTS not supported');
-          var utt = new SpeechSynthesisUtterance(testText);
-          var voiceVal = getVoice();
-          if (voiceVal) {
-            var voices = window.speechSynthesis.getVoices();
-            var target = voiceVal.toLowerCase();
-            var match = voices.find(function(v) { return v.name.toLowerCase() === target; }) ||
-                        voices.find(function(v) { return v.name.toLowerCase().includes(target); });
-            if (match) utt.voice = match;
-          }
-          utt.rate = parseFloat(speedSelect.value) || 1;
-          previewBtn.textContent = 'Stop'; previewBtn.style.borderColor = 'var(--red, #e55)';
-          await new Promise(function(resolve, reject) {
-            utt.onend = resolve;
-            utt.onerror = function(e) { reject(new Error('Browser TTS: ' + e.error)); };
-            window.speechSynthesis.speak(utt);
-          });
-        } else {
-          var res = await fetch('/api/tts/synthesize', {
-            method: 'POST', credentials: 'same-origin',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ text: testText, format: 'audio' })
-          });
-          if (!res.ok) { var err = await res.json().catch(function() { return {}; }); throw new Error(err.detail?.message || 'Synthesis failed'); }
-          var blob = await res.blob();
-          var url = URL.createObjectURL(blob);
-          previewAudio = new Audio(url);
-          previewBtn.textContent = 'Stop'; previewBtn.style.borderColor = 'var(--red, #e55)';
-          await new Promise(function(resolve, reject) {
-            previewAudio.onended = function() { URL.revokeObjectURL(url); previewAudio = null; resolve(); };
-            previewAudio.onerror = function() { URL.revokeObjectURL(url); previewAudio = null; reject(new Error('Playback failed')); };
-            previewAudio.play().catch(reject);
-          });
-        }
+        var res = await fetch('/api/tts/synthesize', {
+          method: 'POST', credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: testText, format: 'audio' })
+        });
+        if (!res.ok) { var err = await res.json().catch(function() { return {}; }); throw new Error(err.detail?.message || 'Synthesis failed'); }
+        var blob = await res.blob();
+        var url = URL.createObjectURL(blob);
+        previewAudio = new Audio(url);
+        previewBtn.textContent = 'Stop'; previewBtn.style.borderColor = 'var(--red, #e55)';
+        await new Promise(function(resolve, reject) {
+          previewAudio.onended = function() { URL.revokeObjectURL(url); previewAudio = null; resolve(); };
+          previewAudio.onerror = function() { URL.revokeObjectURL(url); previewAudio = null; reject(new Error('Playback failed')); };
+          previewAudio.play().catch(reject);
+        });
       } catch (e) {
         ttsMsg.textContent = 'Preview failed: ' + e.message; ttsMsg.style.color = 'var(--red, #e55)';
         setTimeout(function() { ttsMsg.textContent = ''; }, 3000);
@@ -1254,6 +1249,7 @@ async function initSttSettings() {
   var sttEnabledToggle = el('set-sttEnabledToggle');
   var sttConfigWrap = el('set-sttConfigWrap');
   var azureNote = el('set-sttAzureNote');
+  var elevenNote = el('set-sttElevenNote');
   // STT was removed from AI Defaults — bail if the UI isn't present.
   if (!provSel) return;
 
@@ -1262,11 +1258,12 @@ async function initSttSettings() {
 
   function updateVisibility() {
     var prov = provSel.value;
-    var showModel = prov === 'local' || prov.startsWith('endpoint:');
+    var showModel = prov.startsWith('endpoint:');
     var showLang = prov !== 'disabled';
     modelRow.style.display = showModel ? 'flex' : 'none';
     langRow.style.display = showLang ? 'flex' : 'none';
     if (azureNote) azureNote.style.display = prov === 'azure' ? 'block' : 'none';
+    if (elevenNote) elevenNote.style.display = prov === 'elevenlabs' ? 'block' : 'none';
     if (isEndpoint()) {
       modelSelect.style.display = 'none'; modelInput.style.display = '';
     } else {

@@ -1,8 +1,7 @@
-# src/tts_service.py
-"""Multi-provider TTS service — dispatches to local Kokoro, OpenAI-compatible API, or browser."""
+# services/tts/tts_service.py
+"""Multi-provider TTS service — dispatches to Microsoft Edge TTS (free), Azure
+AI Speech, ElevenLabs, or an OpenAI-compatible endpoint."""
 
-import io
-import wave
 import logging
 import hashlib
 import httpx
@@ -32,15 +31,15 @@ class TTSService:
     Reads provider config from data/settings.json on each call.
     Providers:
       "disabled"        — no TTS
-      "browser"         — client-side Web Speech API (no server synthesis)
-      "local"           — Kokoro-82M on GPU
+      "edge"            — Microsoft Edge TTS (Azure neural voices, free, no key)
+      "azure"           — Azure AI Speech (key + region)
+      "elevenlabs"      — ElevenLabs (api key + voice id)
       "endpoint:<id>"   — OpenAI-compatible /audio/speech via ModelEndpoint
     """
 
     def __init__(self, cache_dir: str = TTS_CACHE_DIR):
         self.cache_dir = Path(cache_dir)
         self.cache_dir.mkdir(parents=True, exist_ok=True)
-        self._kokoro = None  # lazy-init
 
     # ── Settings ──
 
@@ -55,6 +54,7 @@ class TTSService:
             "tts_speed": saved.get("tts_speed", "1"),
             "azure_speech_key": saved.get("azure_speech_key", ""),
             "azure_speech_region": saved.get("azure_speech_region", ""),
+            "elevenlabs_api_key": saved.get("elevenlabs_api_key", ""),
         }
 
     @property
@@ -65,13 +65,12 @@ class TTSService:
         provider = settings["tts_provider"]
         if provider == "disabled":
             return False
-        if provider == "browser":
-            return True  # handled client-side
-        if provider == "local":
-            kokoro = self._get_kokoro()
-            return kokoro is not None and kokoro.available
+        if provider == "edge":
+            return True  # free, no key; errors surface at synthesis time
         if provider == "azure":
             return bool(settings.get("azure_speech_key") and settings.get("azure_speech_region"))
+        if provider == "elevenlabs":
+            return bool(settings.get("elevenlabs_api_key"))
         if provider.startswith("endpoint:"):
             return True  # assume reachable; errors surface at synthesis time
         return False
@@ -100,12 +99,116 @@ class TTSService:
             count += 1
         logger.info(f"Cleared {count} cached TTS files")
 
-    # ── Kokoro (local) ──
+    # ── Microsoft Edge TTS (free) ──
 
-    def _get_kokoro(self):
-        if self._kokoro is None:
-            self._kokoro = _KokoroPipeline()
-        return self._kokoro
+    def _synthesize_edge(self, text: str, voice: str, speed: float) -> Optional[bytes]:
+        """Microsoft Edge TTS — free Azure neural voices, no API key. The
+        edge-tts package is async, but synthesize() runs inside the route's
+        running event loop, so we drive it on a fresh loop in a worker thread."""
+        v = (voice or "").strip()
+        if "Neural" not in v:                       # OpenAI-style names won't work
+            v = "en-US-AvaNeural"
+        rate_pct = int(round((speed - 1.0) * 100))  # 1.0->+0%, 1.5->+50%
+        rate = f"{'+' if rate_pct >= 0 else ''}{rate_pct}%"
+
+        def _run() -> Optional[bytes]:
+            import asyncio
+            try:
+                import edge_tts
+            except ImportError:
+                logger.error("Edge TTS: edge-tts not installed (pip install edge-tts)")
+                return None
+
+            async def _go():
+                communicate = edge_tts.Communicate(text, v, rate=rate)
+                buf = bytearray()
+                async for chunk in communicate.stream():
+                    if chunk.get("type") == "audio" and chunk.get("data"):
+                        buf.extend(chunk["data"])
+                return bytes(buf)
+
+            return asyncio.run(_go())
+
+        try:
+            from concurrent.futures import ThreadPoolExecutor
+            with ThreadPoolExecutor(max_workers=1) as ex:
+                data = ex.submit(_run).result(timeout=60)
+            if not data:
+                logger.error("Edge TTS: empty audio")
+                return None
+            logger.info(f"Edge TTS: {len(data)} bytes (voice={v})")
+            return data
+        except Exception as e:
+            logger.error(f"Edge TTS error: {e}")
+            return None
+
+    # ── Azure AI Speech ──
+
+    def _synthesize_azure(self, text: str, voice: str, speed: float, settings: dict) -> Optional[bytes]:
+        key = (settings.get("azure_speech_key") or "").strip()
+        region = (settings.get("azure_speech_region") or "").strip()
+        if not key or not region:
+            logger.error("Azure TTS: azure_speech_key / azure_speech_region not set")
+            return None
+        v = (voice or "").strip()
+        if "Neural" not in v:                       # OpenAI-style names won't work
+            v = "en-US-AriaNeural"
+        parts = v.split("-")
+        lang = "-".join(parts[:2]) if len(parts) >= 2 else "en-US"
+        rate_pct = int(round((speed - 1.0) * 100))           # 1.0->0%, 1.5->+50%
+        rate = f"{'+' if rate_pct >= 0 else ''}{rate_pct}%"
+        esc = (text or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        ssml = (
+            f"<speak version='1.0' xml:lang='{lang}'>"
+            f"<voice name='{v}'><prosody rate='{rate}'>{esc}</prosody></voice></speak>"
+        )
+        url = f"https://{region}.tts.speech.microsoft.com/cognitiveservices/v1"
+        headers = {
+            "Ocp-Apim-Subscription-Key": key,
+            "Content-Type": "application/ssml+xml",
+            "X-Microsoft-OutputFormat": "audio-24khz-96kbitrate-mono-mp3",
+            "User-Agent": "Odysseus",
+        }
+        try:
+            r = httpx.post(url, headers=headers, content=ssml.encode("utf-8"), timeout=60)
+            if r.status_code != 200:
+                logger.error(f"Azure TTS failed: {r.status_code} {r.text[:200]}")
+                return None
+            return r.content
+        except Exception as e:
+            logger.error(f"Azure TTS error: {e}")
+            return None
+
+    # ── ElevenLabs ──
+
+    def _synthesize_elevenlabs(self, text: str, voice: str, model: str, settings: dict) -> Optional[bytes]:
+        key = (settings.get("elevenlabs_api_key") or "").strip()
+        if not key:
+            logger.error("ElevenLabs TTS: elevenlabs_api_key not set")
+            return None
+        voice_id = (voice or "").strip() or "21m00Tcm4TlvDq8ikWAM"   # "Rachel" default
+        model_id = model if (model or "").startswith("eleven") else "eleven_multilingual_v2"
+        url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
+        headers = {
+            "xi-api-key": key,
+            "Content-Type": "application/json",
+            "Accept": "audio/mpeg",
+        }
+        payload = {
+            "text": text,
+            "model_id": model_id,
+            "voice_settings": {"stability": 0.5, "similarity_boost": 0.75},
+        }
+        try:
+            r = httpx.post(url, headers=headers, json=payload, timeout=60)
+            if r.status_code != 200:
+                logger.error(f"ElevenLabs TTS failed: {r.status_code} {r.text[:200]}")
+                return None
+            logger.info(f"ElevenLabs TTS: {len(r.content)} bytes (voice={voice_id})")
+            return r.content
+        except Exception as e:
+            logger.error(f"ElevenLabs TTS error: {e}")
+            return None
 
     # ── API endpoint ──
 
@@ -147,40 +250,6 @@ class TTSService:
 
     # ── Public interface ──
 
-    # ── Azure AI Speech ──
-    def _synthesize_azure(self, text: str, voice: str, speed: float, settings: dict) -> Optional[bytes]:
-        key = (settings.get("azure_speech_key") or "").strip()
-        region = (settings.get("azure_speech_region") or "").strip()
-        if not key or not region:
-            logger.error("Azure TTS: azure_speech_key / azure_speech_region not set")
-            return None
-        v = (voice or "").strip() or "en-US-AriaNeural"
-        parts = v.split("-")
-        lang = "-".join(parts[:2]) if len(parts) >= 2 else "en-US"
-        rate_pct = int(round((speed - 1.0) * 100))           # 1.0->0%, 1.5->+50%
-        rate = f"{'+' if rate_pct >= 0 else ''}{rate_pct}%"
-        esc = (text or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-        ssml = (
-            f"<speak version='1.0' xml:lang='{lang}'>"
-            f"<voice name='{v}'><prosody rate='{rate}'>{esc}</prosody></voice></speak>"
-        )
-        url = f"https://{region}.tts.speech.microsoft.com/cognitiveservices/v1"
-        headers = {
-            "Ocp-Apim-Subscription-Key": key,
-            "Content-Type": "application/ssml+xml",
-            "X-Microsoft-OutputFormat": "audio-24khz-96kbitrate-mono-mp3",
-            "User-Agent": "Odysseus",
-        }
-        try:
-            r = httpx.post(url, headers=headers, content=ssml.encode("utf-8"), timeout=60)
-            if r.status_code != 200:
-                logger.error(f"Azure TTS failed: {r.status_code} {r.text[:200]}")
-                return None
-            return r.content
-        except Exception as e:
-            logger.error(f"Azure TTS error: {e}")
-            return None
-
     def synthesize(self, text: str, use_cache: bool = True) -> Optional[bytes]:
         settings = self._load_settings()
         if settings.get("tts_enabled") is False:
@@ -190,7 +259,7 @@ class TTSService:
         voice = settings["tts_voice"]
         speed = _safe_speed(settings.get("tts_speed", "1"))
 
-        if provider in ("disabled", "browser"):
+        if provider == "disabled":
             return None
 
         if len(text) > 5000:
@@ -205,15 +274,12 @@ class TTSService:
 
         audio_data = None
 
-        if provider == "local":
-            kokoro = self._get_kokoro()
-            if kokoro and kokoro.available:
-                audio_data = kokoro.synthesize_raw(text, voice)
-            else:
-                logger.warning("Kokoro TTS not available")
-                return None
+        if provider == "edge":
+            audio_data = self._synthesize_edge(text, voice, speed)
         elif provider == "azure":
             audio_data = self._synthesize_azure(text, voice, speed, settings)
+        elif provider == "elevenlabs":
+            audio_data = self._synthesize_elevenlabs(text, voice, model, settings)
         elif provider.startswith("endpoint:"):
             endpoint_id = provider.split(":", 1)[1]
             audio_data = self._synthesize_api(text, endpoint_id, model, voice, speed)
@@ -257,78 +323,16 @@ class TTSService:
             "cache_size_mb": round(cache_size / (1024 * 1024), 2),
         }
 
-        if provider == "local":
-            kokoro = self._get_kokoro()
-            stats["model"] = "Kokoro-82M (GPU)" if (kokoro and kokoro.available) else "Kokoro (not loaded)"
-        elif provider == "browser":
-            stats["model"] = "Browser (Web Speech API)"
+        if provider == "edge":
+            stats["model"] = "Microsoft Edge TTS (free)"
+        elif provider == "azure":
+            stats["model"] = "Azure AI Speech"
+        elif provider == "elevenlabs":
+            stats["model"] = "ElevenLabs"
         elif provider.startswith("endpoint:"):
             stats["endpoint_id"] = provider.split(":", 1)[1]
 
         return stats
-
-
-class _KokoroPipeline:
-    """Encapsulates the Kokoro-82M local pipeline (CUDA GPU when available, else CPU)."""
-
-    def __init__(self):
-        self.pipeline = None
-        self.available = False
-        self.device = None
-        self._init()
-
-    def _init(self):
-        try:
-            import contextlib
-            import torch
-            from kokoro import KPipeline
-
-            use_cuda = torch.cuda.is_available()
-            self.device = torch.device("cuda:0" if use_cuda else "cpu")
-            if not use_cuda:
-                logger.info("Kokoro TTS: no CUDA GPU detected — running on CPU (functional, slower).")
-
-            dev_ctx = torch.cuda.device(0) if use_cuda else contextlib.nullcontext()
-            with dev_ctx:
-                self.pipeline = KPipeline(lang_code="a")
-                if hasattr(self.pipeline, "model") and self.pipeline.model is not None:
-                    self.pipeline.model = self.pipeline.model.to(self.device)
-            self.available = True
-            logger.info(f"Kokoro-82M TTS pipeline loaded on {self.device}")
-        except ImportError as e:
-            logger.warning(f"Kokoro TTS not available: {e}")
-            logger.warning("Install with: pip install kokoro soundfile")
-        except Exception as e:
-            logger.error(f"Kokoro init failed: {e}", exc_info=True)
-
-    def synthesize_raw(self, text: str, voice: str = "af_heart") -> Optional[bytes]:
-        if not self.available:
-            return None
-        try:
-            import contextlib
-            import torch
-            import numpy as np
-
-            dev_ctx = torch.cuda.device(self.device) if self.device.type == "cuda" else contextlib.nullcontext()
-            with dev_ctx:
-                chunks = []
-                for _, _, audio in self.pipeline(text, voice=voice):
-                    chunks.append(audio)
-
-            if not chunks:
-                return None
-
-            full = np.concatenate(chunks)
-            buf = io.BytesIO()
-            with wave.open(buf, "wb") as wf:
-                wf.setnchannels(1)
-                wf.setsampwidth(2)
-                wf.setframerate(24000)
-                wf.writeframes((full * 32767).astype(np.int16).tobytes())
-            return buf.getvalue()
-        except Exception as e:
-            logger.error(f"Kokoro synthesis failed: {e}", exc_info=True)
-            return None
 
 
 # Module-level singleton

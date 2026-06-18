@@ -18,7 +18,7 @@ import spinnerModule from './spinner.js';
 import themeModule from './theme.js?v=397';
 import documentModule from './document.js?v=460';
 import workspaceModule from './workspace.js';
-import settingsModule from './settings.js?v=449';
+import settingsModule from './settings.js?v=450';
 import cookbookModule from './cookbook.js';
 import { EVAL_PROMPTS } from './compare/index.js';
 import { PROVIDER_DEVICE_FLOWS, formatDeviceFlowError, runProviderDeviceFlow } from './providerDeviceFlow.js';
@@ -2080,11 +2080,11 @@ async function _cmdTts(args, ctx) {
     if (res.ok) {
       const data = await res.json();
       if (data.audio) {
-        const audio = new Audio('data:audio/wav;base64,' + data.audio);
+        const audio = new Audio('data:audio/mpeg;base64,' + data.audio);
         audio.play();
         slashReply('Playing...');
       } else { slashReply('No audio returned'); }
-    } else { slashReply('TTS failed (is Kokoro running?)'); }
+    } else { slashReply('TTS failed (check the TTS provider in Settings)'); }
   } catch(e) { slashReply('TTS service unavailable'); }
   return true;
 }

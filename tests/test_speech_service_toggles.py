@@ -4,7 +4,7 @@ from services.tts.tts_service import TTSService
 
 def test_tts_disabled_toggle_blocks_synthesis(monkeypatch, tmp_path):
     service = TTSService(cache_dir=str(tmp_path))
-    calls = {"endpoint": 0, "kokoro": 0}
+    calls = {"endpoint": 0}
 
     monkeypatch.setattr(service, "_load_settings", lambda: {
         "tts_enabled": False,
@@ -18,21 +18,16 @@ def test_tts_disabled_toggle_blocks_synthesis(monkeypatch, tmp_path):
         calls["endpoint"] += 1
         return b"audio"
 
-    def fake_kokoro():
-        calls["kokoro"] += 1
-        return None
-
     monkeypatch.setattr(service, "_synthesize_api", fake_endpoint)
-    monkeypatch.setattr(service, "_get_kokoro", fake_kokoro)
 
     assert service.available is False
     assert service.synthesize("hello") is None
-    assert calls == {"endpoint": 0, "kokoro": 0}
+    assert calls == {"endpoint": 0}
 
 
 def test_stt_disabled_toggle_blocks_transcription(monkeypatch):
     service = STTService()
-    calls = {"endpoint": 0, "whisper": 0}
+    calls = {"endpoint": 0}
 
     monkeypatch.setattr(service, "_load_settings", lambda: {
         "stt_enabled": False,
@@ -45,13 +40,8 @@ def test_stt_disabled_toggle_blocks_transcription(monkeypatch):
         calls["endpoint"] += 1
         return "transcript"
 
-    def fake_whisper():
-        calls["whisper"] += 1
-        return None
-
     monkeypatch.setattr(service, "_transcribe_api", fake_endpoint)
-    monkeypatch.setattr(service, "_get_whisper", fake_whisper)
 
     assert service.available is False
     assert service.transcribe(b"audio") is None
-    assert calls == {"endpoint": 0, "whisper": 0}
+    assert calls == {"endpoint": 0}

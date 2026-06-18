@@ -4,24 +4,12 @@
 # Note: chromadb-client + fastembed moved to requirements.txt — RAG, semantic
 # memory, and tool selection are core paths, so they ship by default now.
 
-# Local speech-to-text (microphone -> text) via faster-whisper, for the
-# "local" STT provider. Runs on CPU out of the box (CTranslate2 backend, no
-# torch needed). Install if you want to dictate/transcribe with the mic
-# without sending audio to an external endpoint.
-# Optional extra: install `torch` too if you have a CUDA GPU and want
-# GPU-accelerated transcription — it's auto-detected, CPU is used otherwise.
-faster-whisper
-
-# Local text-to-speech (Kokoro-82M) is intentionally NOT bundled here. The
-# `kokoro` pip package pulls misaki[en] -> spacy -> thinc -> blis, and blis
-# frequently FAILS to build a wheel (a huge C compile that OOMs the builder, or
-# has no prebuilt wheel for newer Python) — which breaks this whole optional
-# install. For cheap local-ish TTS use the **Azure** provider (free F0 tier, no
-# build/deps) or **Browser** TTS. To run local Kokoro anyway on a CUDA box,
-# install it into the container manually once your toolchain can compile blis:
-#   pip install kokoro soundfile   (espeak-ng is already in the image)
-# The backend's "local" TTS path (services/tts) auto-detects GPU/CPU and works
-# the moment kokoro imports successfully.
+# Microsoft Edge TTS — the free, no-API-key text-to-speech provider ("edge").
+# Uses Azure neural voices (e.g. en-US-AvaNeural) over Edge's public read-aloud
+# service. Pure-Python, lightweight (no torch/spacy/build toolchain). Install if
+# you want server-side read-aloud without an API key. Azure AI Speech and
+# ElevenLabs need no extra dep here — they're plain REST calls (httpx, core).
+edge-tts
 
 # DuckDuckGo as a search provider option.
 # Install if you want DDG in the search-provider dropdown.

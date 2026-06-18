@@ -7,8 +7,8 @@
 // history, tools, RAG, agent mode all keep working.
 //
 // Provider-agnostic: STT is whatever voiceRecorder.js is configured for
-// (browser / local faster-whisper / endpoint), TTS is window.aiTTSManager
-// (browser / local Kokoro / endpoint). No chat.js changes — completion is read
+// (Azure / ElevenLabs / endpoint), TTS is window.aiTTSManager
+// (Edge / Azure / ElevenLabs / endpoint). No chat.js changes — completion is read
 // from the send button's streaming state + the TTS manager's isPlaying flag.
 //
 // Loaded bare from index.html (no ?v, self-revalidates). Mic capture requires a

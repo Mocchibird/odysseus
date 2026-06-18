@@ -1594,11 +1594,12 @@
                 <label class="settings-label">Provider</label>
                 <select id="set-ttsProviderSelect" class="settings-select">
                   <option value="disabled">Disabled</option>
-                  <option value="browser">Browser (built-in)</option>
-                  <option value="local">Local (Kokoro-82M)</option>
-                  <option value="azure">Azure — neural voices (free tier)</option>
+                  <option value="edge">Microsoft Edge — neural voices (free, no key)</option>
+                  <option value="azure">Azure AI Speech (free tier — key + region)</option>
+                  <option value="elevenlabs">ElevenLabs (API key)</option>
                 </select>
               </div>
+              <div id="set-ttsEdgeNote" class="admin-toggle-sub" style="display:none;margin:0;">Free Microsoft Edge neural voices — no API key. Set Voice below to an Edge voice, e.g. <code>en-US-AvaNeural</code>, <code>en-GB-SoniaNeural</code>, or <code>ja-JP-NanamiNeural</code>.</div>
               <div id="set-ttsAzureRow" style="display:none;flex-direction:column;gap:0.5rem;">
                 <div style="display:flex;align-items:center;gap:0.75rem;">
                   <label class="settings-label">Azure key</label>
@@ -1609,6 +1610,13 @@
                   <input id="set-ttsAzureRegion" type="text" placeholder="e.g. eastus" autocomplete="off" style="flex:1;padding:5px;">
                 </div>
                 <div class="admin-toggle-sub" style="margin:0;">Create a free F0 Speech resource in the Azure portal (~0.5M chars/mo TTS free). Set Voice below to an Azure neural voice, e.g. <code>en-US-AriaNeural</code>. Shared with the Azure STT provider.</div>
+              </div>
+              <div id="set-ttsElevenRow" style="display:none;flex-direction:column;gap:0.5rem;">
+                <div style="display:flex;align-items:center;gap:0.75rem;">
+                  <label class="settings-label">ElevenLabs key</label>
+                  <input id="set-ttsElevenKey" type="password" placeholder="xi-api-key" autocomplete="off" style="flex:1;padding:5px;">
+                </div>
+                <div class="admin-toggle-sub" style="margin:0;">Get a key at <code>elevenlabs.io</code>. Set Voice below to an ElevenLabs voice id, e.g. <code>21m00Tcm4TlvDq8ikWAM</code> (Rachel). Shared with the ElevenLabs STT provider.</div>
               </div>
               <div id="set-ttsModelRow" style="display:flex;align-items:center;gap:0.75rem;">
                 <label class="settings-label">Model</label>
@@ -1632,7 +1640,7 @@
                   <option value="sage">Sage</option>
                   <option value="shimmer">Shimmer</option>
                 </select>
-                <input id="set-ttsVoiceInput" type="text" placeholder="af_heart" style="flex:1;padding:5px;display:none;">
+                <input id="set-ttsVoiceInput" type="text" placeholder="en-US-AvaNeural" style="flex:1;padding:5px;display:none;">
               </div>
               <div id="set-ttsSpeedRow" style="display:flex;align-items:center;gap:0.75rem;">
                 <label class="settings-label">Speed</label>
@@ -1657,20 +1665,16 @@
                 <label class="settings-label">Provider</label>
                 <select id="set-sttProviderSelect" class="settings-select">
                   <option value="disabled">Disabled</option>
-                  <option value="browser">Browser (built-in)</option>
-                  <option value="local">Local (faster-whisper)</option>
-                  <option value="azure">Azure (free tier)</option>
+                  <option value="azure">Azure AI Speech (free tier)</option>
+                  <option value="elevenlabs">ElevenLabs Scribe (API key)</option>
                 </select>
               </div>
               <div id="set-sttAzureNote" class="admin-toggle-sub" style="display:none;margin:0;">Uses the Azure Speech key + region from the Text-to-Speech panel above. Set Language to a full locale, e.g. <code>en-US</code> (defaults to en-US).</div>
+              <div id="set-sttElevenNote" class="admin-toggle-sub" style="display:none;margin:0;">Uses the ElevenLabs key from the Text-to-Speech panel above. Language is auto-detected; set it (e.g. <code>en</code>) only to force one.</div>
               <div id="set-sttModelRow" style="display:flex;align-items:center;gap:0.75rem;">
                 <label class="settings-label">Model</label>
                 <select id="set-sttModelSelect" class="settings-select">
-                  <option value="tiny">tiny (fastest)</option>
-                  <option value="base">base</option>
-                  <option value="small">small</option>
-                  <option value="medium">medium</option>
-                  <option value="large-v3">large-v3 (best)</option>
+                  <option value="whisper-1">whisper-1</option>
                 </select>
                 <input id="set-sttModelInput" type="text" placeholder="model name" style="flex:1;padding:5px;display:none;">
               </div>
@@ -2569,7 +2573,7 @@
 <script type="module" src="/static/js/spinner.js"></script>
 <script type="module" src="/static/js/tts-ai.js"></script>
 <script type="module" src="/static/js/document.js?v=460"></script>
-<script type="module" src="/static/js/gallery.js?v=445"></script>
+<script type="module" src="/static/js/gallery.js?v=446"></script>
 <script type="module" src="/static/js/chatRenderer.js"></script>
 <script type="module" src="/static/js/codeRunner.js"></script>
 <script type="module" src="/static/js/chatStream.js"></script>
@@ -2580,8 +2584,8 @@
 <script type="module" src="/static/js/compare/index.js"></script>
 <script type="module" src="/static/js/theme.js?v=397"></script>
 <script type="module" src="/static/js/censor.js"></script>
-<script type="module" src="/static/js/settings.js?v=449"></script>
-<script type="module" src="/static/js/admin.js?v=450"></script>
+<script type="module" src="/static/js/settings.js?v=450"></script>
+<script type="module" src="/static/js/admin.js?v=451"></script>
 <script type="module" src="/static/js/assistant.js"></script>
 <script type="module" src="/static/app.js?v=462"></script>  <!-- app.js must be LAST -->
 <script type="module" src="/static/js/init.js"></script>

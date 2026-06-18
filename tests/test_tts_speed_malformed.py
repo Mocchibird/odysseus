@@ -11,7 +11,7 @@ tolerates corrupt config; this consumer now does too.
 from services.tts.tts_service import TTSService
 
 _BAD_SETTINGS = {
-    "tts_enabled": True, "tts_provider": "browser",
+    "tts_enabled": True, "tts_provider": "disabled",
     "tts_model": "tts-1", "tts_voice": "alloy", "tts_speed": "fast",
 }
 
@@ -26,6 +26,6 @@ def test_get_stats_does_not_crash_on_malformed_speed(monkeypatch, tmp_path):
 def test_synthesize_does_not_crash_on_malformed_speed(monkeypatch, tmp_path):
     service = TTSService(cache_dir=str(tmp_path))
     monkeypatch.setattr(service, "_load_settings", lambda: dict(_BAD_SETTINGS))
-    # 'browser' provider returns None after the (now guarded) speed parse;
-    # the point is that the malformed speed no longer raises ValueError first.
+    # synthesize() parses tts_speed before the provider dispatch, so a malformed
+    # speed must not raise ValueError there even though the provider is disabled.
     assert service.synthesize("hello", use_cache=False) is None

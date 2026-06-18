@@ -1,11 +1,10 @@
 # services/stt/stt_service.py
-"""Multi-provider Speech-to-Text service — dispatches to local Whisper, OpenAI-compatible API, or browser."""
+"""Multi-provider Speech-to-Text service — dispatches to Azure AI Speech,
+ElevenLabs Scribe, or an OpenAI-compatible endpoint."""
 
 import io
 import logging
 import httpx
-import tempfile
-from pathlib import Path
 from typing import Optional, Dict, Any
 
 logger = logging.getLogger(__name__)
@@ -17,13 +16,13 @@ class STTService:
     Reads provider config from data/settings.json on each call.
     Providers:
       "disabled"        — no STT
-      "browser"         — client-side Web Speech API (no server transcription)
-      "local"           — faster-whisper on CPU/GPU
+      "azure"           — Azure AI Speech (key + region)
+      "elevenlabs"      — ElevenLabs Scribe (api key)
       "endpoint:<id>"   — OpenAI-compatible /audio/transcriptions via ModelEndpoint
     """
 
     def __init__(self):
-        self._whisper_model = None  # lazy-init
+        pass
 
     # ── Settings ──
 
@@ -37,6 +36,7 @@ class STTService:
             "stt_language": saved.get("stt_language", ""),
             "azure_speech_key": saved.get("azure_speech_key", ""),
             "azure_speech_region": saved.get("azure_speech_region", ""),
+            "elevenlabs_api_key": saved.get("elevenlabs_api_key", ""),
         }
 
     @property
@@ -47,76 +47,13 @@ class STTService:
         provider = settings["stt_provider"]
         if provider == "disabled":
             return False
-        if provider == "browser":
-            return True  # handled client-side
-        if provider == "local":
-            return self._get_whisper() is not None
         if provider == "azure":
             return bool(settings.get("azure_speech_key") and settings.get("azure_speech_region"))
+        if provider == "elevenlabs":
+            return bool(settings.get("elevenlabs_api_key"))
         if provider.startswith("endpoint:"):
             return True  # assume reachable
         return False
-
-    # ── Local Whisper ──
-
-    def _get_whisper(self):
-        if self._whisper_model is None:
-            try:
-                from faster_whisper import WhisperModel
-            except ImportError:
-                logger.warning("faster-whisper not installed. Install with: pip install faster-whisper")
-                return None
-            try:
-                settings = self._load_settings()
-                model_size = settings.get("stt_model", "base")
-                # faster-whisper runs on CTranslate2, not torch. torch is only
-                # used (optionally) to detect a CUDA device for acceleration —
-                # if it's missing or unusable we just run on CPU. Keeping this
-                # probe separate (and tolerant of any failure, e.g. a broken
-                # CUDA/torch install that raises OSError on import) means a
-                # torch-less or torch-broken machine still does CPU
-                # transcription instead of failing with a misleading
-                # "faster-whisper not installed" error.
-                try:
-                    import torch
-                    use_cuda = torch.cuda.is_available()
-                except Exception:
-                    use_cuda = False
-                device = "cuda" if use_cuda else "cpu"
-                compute_type = "float16" if device == "cuda" else "int8"
-                self._whisper_model = WhisperModel(model_size, device=device, compute_type=compute_type)
-                logger.info(f"faster-whisper model '{model_size}' loaded on {device}")
-            except Exception as e:
-                logger.error(f"Failed to load whisper model: {e}")
-                return None
-        return self._whisper_model
-
-    def _transcribe_local(self, audio_bytes: bytes, language: str = "") -> Optional[str]:
-        model = self._get_whisper()
-        if not model:
-            return None
-        tmp_path = None
-        try:
-            # Write to temp file (faster-whisper needs a file path or file-like)
-            with tempfile.NamedTemporaryFile(suffix=".webm", delete=False) as tmp:
-                tmp.write(audio_bytes)
-                tmp_path = tmp.name
-
-            kwargs = {}
-            if language:
-                kwargs["language"] = language
-
-            segments, info = model.transcribe(tmp_path, **kwargs)
-            text = " ".join(seg.text.strip() for seg in segments)
-
-            logger.info(f"Local STT: {len(text)} chars, lang={info.language}, prob={info.language_probability:.2f}")
-            return text
-        except Exception as e:
-            logger.error(f"Local STT transcription failed: {e}", exc_info=True)
-            return None
-        finally:
-            if tmp_path:
-                Path(tmp_path).unlink(missing_ok=True)
 
     # ── API endpoint ──
 
@@ -207,6 +144,31 @@ class STTService:
             logger.error(f"Azure STT error: {e}")
             return None
 
+    # ── ElevenLabs Scribe ──
+
+    def _transcribe_elevenlabs(self, audio_bytes: bytes, language: str, settings: dict) -> Optional[str]:
+        key = (settings.get("elevenlabs_api_key") or "").strip()
+        if not key:
+            logger.error("ElevenLabs STT: elevenlabs_api_key not set")
+            return None
+        url = "https://api.elevenlabs.io/v1/speech-to-text"
+        headers = {"xi-api-key": key}
+        files = {"file": ("audio.webm", io.BytesIO(audio_bytes), "audio/webm")}
+        data = {"model_id": "scribe_v1"}
+        if language:
+            data["language_code"] = language
+        try:
+            r = httpx.post(url, headers=headers, files=files, data=data, timeout=120)
+            if r.status_code != 200:
+                logger.error(f"ElevenLabs STT failed: {r.status_code} {r.text[:200]}")
+                return None
+            text = r.json().get("text", "")
+            logger.info(f"ElevenLabs STT: {len(text)} chars")
+            return text
+        except Exception as e:
+            logger.error(f"ElevenLabs STT error: {e}")
+            return None
+
     # ── Public interface ──
 
     def transcribe(self, audio_bytes: bytes) -> Optional[str]:
@@ -217,13 +179,13 @@ class STTService:
         model = settings["stt_model"]
         language = settings.get("stt_language", "")
 
-        if provider in ("disabled", "browser"):
+        if provider == "disabled":
             return None
 
-        if provider == "local":
-            return self._transcribe_local(audio_bytes, language)
-        elif provider == "azure":
+        if provider == "azure":
             return self._transcribe_azure(audio_bytes, language, settings)
+        elif provider == "elevenlabs":
+            return self._transcribe_elevenlabs(audio_bytes, language, settings)
         elif provider.startswith("endpoint:"):
             endpoint_id = provider.split(":", 1)[1]
             return self._transcribe_api(audio_bytes, endpoint_id, model, language)
@@ -245,11 +207,10 @@ class STTService:
             "language": settings.get("stt_language", ""),
         }
 
-        if provider == "local":
-            whisper = self._get_whisper()
-            stats["model_loaded"] = whisper is not None
-        elif provider == "browser":
-            stats["model"] = "Browser (Web Speech API)"
+        if provider == "azure":
+            stats["model"] = "Azure AI Speech"
+        elif provider == "elevenlabs":
+            stats["model"] = "ElevenLabs Scribe"
         elif provider.startswith("endpoint:"):
             stats["endpoint_id"] = provider.split(":", 1)[1]
 

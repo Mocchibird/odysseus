@@ -5,9 +5,10 @@
  *
  * STT providers:
  *   "disabled"       — record audio as file attachment (original behavior)
- *   "browser"        — use Web Speech API for real-time transcription
- *   "local"          — send recording to server /api/stt/transcribe (Whisper)
+ *   "azure"          — send recording to server /api/stt/transcribe (Azure)
+ *   "elevenlabs"     — send recording to server /api/stt/transcribe (Scribe)
  *   "endpoint:<id>"  — send recording to server /api/stt/transcribe (API)
+ * Every transcribing provider runs server-side; the browser only captures audio.
  */
 
 let mediaRecorder = null;
@@ -15,10 +16,6 @@ let audioChunks = [];
 let isRecording = false;
 let recordingStartTime = null;
 let recordingInterval = null;
-
-// Browser STT state
-let _recognition = null;
-let _browserTranscript = '';
 
 // Cached STT provider — refreshed on settings change
 let _sttProvider = 'disabled';
@@ -67,42 +64,6 @@ function _resetRecordingUI() {
   if (window._updateSendBtnIcon) {
     setTimeout(window._updateSendBtnIcon, 50);
   }
-}
-
-/**
- * Start browser speech recognition alongside recording
- */
-function startBrowserSTT() {
-  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (!SpeechRecognition) return;
-
-  _browserTranscript = '';
-  _recognition = new SpeechRecognition();
-  _recognition.continuous = true;
-  _recognition.interimResults = false;
-  _recognition.lang = '';
-
-  _recognition.onresult = (event) => {
-    for (let i = event.resultIndex; i < event.results.length; i++) {
-      if (event.results[i].isFinal) {
-        _browserTranscript += event.results[i][0].transcript + ' ';
-      }
-    }
-  };
-
-  _recognition.onerror = (e) => {
-    console.warn('Browser STT error:', e.error);
-  };
-
-  _recognition.start();
-}
-
-function stopBrowserSTT() {
-  if (_recognition) {
-    try { _recognition.stop(); } catch (e) { /* ignore */ }
-    _recognition = null;
-  }
-  return _browserTranscript.trim();
 }
 
 /**
@@ -186,16 +147,7 @@ export function startRecording(onFileCreated, showToast, showError) {
         const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
         const provider = _sttProvider;
 
-        if (provider === 'browser') {
-          const transcript = stopBrowserSTT();
-          if (transcript) {
-            insertTranscription(transcript, showToast);
-          } else {
-            if (showToast) showToast('No speech detected');
-            const audioFile = new File([audioBlob], `voice-message-${Date.now()}.webm`, { type: 'audio/webm' });
-            if (onFileCreated) onFileCreated(audioFile);
-          }
-        } else if (provider === 'local' || provider === 'azure' || provider.startsWith('endpoint:')) {
+        if (provider === 'azure' || provider === 'elevenlabs' || provider.startsWith('endpoint:')) {
           // Show "Transcribing..." feedback
           if (showToast) showToast('Transcribing...', 5000);
           try {
@@ -224,11 +176,6 @@ export function startRecording(onFileCreated, showToast, showError) {
       mediaRecorder.start();
       isRecording = true;
       recordingStartTime = new Date();
-
-      // Start browser STT if that's the provider
-      if (_sttProvider === 'browser') {
-        startBrowserSTT();
-      }
 
       if (showToast) {
         showToast('Recording...');

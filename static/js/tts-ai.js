@@ -1,13 +1,11 @@
 // static/js/tts-ai.js
-// AI Text-to-Speech Module — supports server TTS and browser Web Speech API
+// AI Text-to-Speech Module — server TTS (Edge / Azure / ElevenLabs / endpoint)
 
 class AITTSManager {
     constructor() {
         this.currentAudio = null;
         this.isPlaying = false;
         this.available = false;
-        this.useBrowserTTS = false;
-        this.browserVoice = '';
         this.playbackSpeed = 1;
         this._provider = 'disabled';
         this.autoPlay = false;
@@ -47,16 +45,7 @@ class AITTSManager {
             this.playbackSpeed = stats.speed || 1;
             this._provider = stats.provider || 'disabled';
 
-            if (stats.provider === 'browser') {
-                this.useBrowserTTS = true;
-                this.browserVoice = stats.voice || '';
-                this.available = 'speechSynthesis' in window;
-                if (!this.available) {
-                    console.warn('TTS: browser mode selected but speechSynthesis not supported');
-                }
-            } else if (this.available) {
-                this.useBrowserTTS = false;
-            } else {
+            if (!this.available) {
                 console.warn('TTS: not available');
             }
         } catch (error) {
@@ -114,11 +103,6 @@ class AITTSManager {
             throw new Error('No text to synthesize');
         }
 
-        // Browser TTS doesn't use synthesize — handled directly in play()
-        if (this.useBrowserTTS) {
-            return '__browser_tts__';
-        }
-
         const cacheKey = this.getCacheKey(plainText);
 
         // Check cache first
@@ -161,26 +145,12 @@ class AITTSManager {
         }
     }
 
-    _findBrowserVoice() {
-        if (!this.browserVoice) return null;
-        const voices = window.speechSynthesis.getVoices();
-        const target = this.browserVoice.toLowerCase();
-        // Try exact match first, then partial
-        return voices.find(v => v.name.toLowerCase() === target) ||
-               voices.find(v => v.name.toLowerCase().includes(target)) ||
-               null;
-    }
-
     async play(text) {
         // Stop current audio if playing
         this.stop();
 
         const plainText = this.extractPlainText(text);
         if (!plainText) return;
-
-        if (this.useBrowserTTS) {
-            return this._playBrowser(plainText);
-        }
 
         try {
             const audioUrl = await this.synthesize(text);
@@ -195,27 +165,6 @@ class AITTSManager {
             console.error('Failed to play audio:', error);
             throw error;
         }
-    }
-
-    _playBrowser(plainText) {
-        return new Promise((resolve, reject) => {
-            const utterance = new SpeechSynthesisUtterance(plainText);
-            const voice = this._findBrowserVoice();
-            if (voice) utterance.voice = voice;
-            utterance.rate = this.playbackSpeed;
-
-            utterance.onend = () => {
-                this.isPlaying = false;
-                resolve();
-            };
-            utterance.onerror = (e) => {
-                this.isPlaying = false;
-                reject(new Error('Browser TTS error: ' + e.error));
-            };
-
-            window.speechSynthesis.speak(utterance);
-            this.isPlaying = true;
-        });
     }
 
     stop() {
@@ -234,10 +183,6 @@ class AITTSManager {
         this._queue = [];
         this._processing = false;
 
-        if (this.useBrowserTTS) {
-            window.speechSynthesis.cancel();
-            this.isPlaying = false;
-        }
         if (this.currentAudio) {
             this.currentAudio.pause();
             this.currentAudio.currentTime = 0;
@@ -299,41 +244,38 @@ class AITTSManager {
             button.classList.add('playing');
             button.title = 'Stop';
 
-            if (this.useBrowserTTS) {
-                const plainText = this.extractPlainText(text);
-                await this._playBrowser(plainText);
-            } else {
-                if (this.currentAudio) {
-                    this.currentAudio.pause();
-                    this.currentAudio = null;
-                }
-
-                await new Promise((resolve, reject) => {
-                    const audio = new Audio(audioUrl);
-                    if (this._provider === 'local' && this.playbackSpeed !== 1) {
-                        audio.playbackRate = this.playbackSpeed;
-                    }
-                    this.currentAudio = audio;
-                    audio.onended = () => {
-                        this.isPlaying = false;
-                        if (this.currentAudio === audio) this.currentAudio = null;
-                        resolve();
-                    };
-                    audio.onerror = (e) => {
-                        this.isPlaying = false;
-                        if (this.currentAudio === audio) this.currentAudio = null;
-                        reject(new Error('Audio playback error'));
-                    };
-                    audio.onpause = () => {
-                        if (this.currentAudio !== audio) {
-                            resolve();
-                        }
-                    };
-                    audio.play().then(() => {
-                        this.isPlaying = true;
-                    }).catch(reject);
-                });
+            if (this.currentAudio) {
+                this.currentAudio.pause();
+                this.currentAudio = null;
             }
+
+            await new Promise((resolve, reject) => {
+                const audio = new Audio(audioUrl);
+                // Edge/Azure/endpoint bake speed into the audio server-side;
+                // ElevenLabs ignores it, so honor the speed via playback rate.
+                if (this._provider === 'elevenlabs' && this.playbackSpeed !== 1) {
+                    audio.playbackRate = this.playbackSpeed;
+                }
+                this.currentAudio = audio;
+                audio.onended = () => {
+                    this.isPlaying = false;
+                    if (this.currentAudio === audio) this.currentAudio = null;
+                    resolve();
+                };
+                audio.onerror = (e) => {
+                    this.isPlaying = false;
+                    if (this.currentAudio === audio) this.currentAudio = null;
+                    reject(new Error('Audio playback error'));
+                };
+                audio.onpause = () => {
+                    if (this.currentAudio !== audio) {
+                        resolve();
+                    }
+                };
+                audio.play().then(() => {
+                    this.isPlaying = true;
+                }).catch(reject);
+            });
         } finally {
             if (resetFn) resetFn();
         }

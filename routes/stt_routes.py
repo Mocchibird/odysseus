@@ -1,5 +1,5 @@
 # routes/stt_routes.py
-"""STT API routes — multi-provider (local Whisper, API endpoint, browser)."""
+"""STT API routes — multi-provider (Azure, ElevenLabs Scribe, API endpoint)."""
 
 from fastapi import APIRouter, HTTPException, UploadFile, File
 import logging
@@ -29,7 +29,7 @@ def setup_stt_routes(stt_service):
             if not stt_service.available:
                 raise HTTPException(
                     status_code=503,
-                    detail={"message": "STT service not available or set to browser mode"}
+                    detail={"message": "STT service not available — enable a provider in Settings"}
                 )
 
             audio_bytes = await read_upload_limited(file, STT_MAX_AUDIO_BYTES, "Audio file")

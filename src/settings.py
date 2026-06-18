@@ -60,6 +60,9 @@ DEFAULT_SETTINGS = {
     # TTS/STT providers. Free tier (F0): ~5 audio hrs/mo STT + 0.5M chars/mo TTS.
     "azure_speech_key": "",
     "azure_speech_region": "",
+    # ElevenLabs (one key serves both TTS + STT-Scribe). Used by the
+    # "elevenlabs" TTS/STT providers. The TTS voice is the ElevenLabs voice id.
+    "elevenlabs_api_key": "",
     "search_provider": "searxng",
     # Default fallback chain — when the primary provider fails or
     # rate-limits, we try DuckDuckGo next. Free, no API key required, so
