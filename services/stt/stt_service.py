@@ -35,6 +35,8 @@ class STTService:
             "stt_provider": saved.get("stt_provider", "disabled"),
             "stt_model": saved.get("stt_model", "base"),
             "stt_language": saved.get("stt_language", ""),
+            "azure_speech_key": saved.get("azure_speech_key", ""),
+            "azure_speech_region": saved.get("azure_speech_region", ""),
         }
 
     @property
@@ -49,6 +51,8 @@ class STTService:
             return True  # handled client-side
         if provider == "local":
             return self._get_whisper() is not None
+        if provider == "azure":
+            return bool(settings.get("azure_speech_key") and settings.get("azure_speech_region"))
         if provider.startswith("endpoint:"):
             return True  # assume reachable
         return False
@@ -151,6 +155,58 @@ class STTService:
             logger.error(f"API STT transcription failed: {e}")
             return None
 
+    # ── Azure AI Speech ──
+
+    def _to_wav16k(self, audio_bytes: bytes) -> Optional[bytes]:
+        """Transcode the browser's webm/opus to 16kHz mono PCM WAV via ffmpeg —
+        Azure's short-audio REST endpoint wants PCM, not webm."""
+        import subprocess
+        try:
+            p = subprocess.run(
+                ["ffmpeg", "-hide_banner", "-loglevel", "error", "-i", "pipe:0",
+                 "-ar", "16000", "-ac", "1", "-f", "wav", "pipe:1"],
+                input=audio_bytes, capture_output=True, timeout=30,
+            )
+            if p.returncode == 0 and p.stdout:
+                return p.stdout
+            logger.error(f"Azure STT: ffmpeg transcode failed: {p.stderr[:200]!r}")
+        except Exception as e:
+            logger.error(f"Azure STT: ffmpeg transcode error: {e}")
+        return None
+
+    def _transcribe_azure(self, audio_bytes: bytes, language: str, settings: dict) -> Optional[str]:
+        key = (settings.get("azure_speech_key") or "").strip()
+        region = (settings.get("azure_speech_region") or "").strip()
+        if not key or not region:
+            logger.error("Azure STT: azure_speech_key / azure_speech_region not set")
+            return None
+        wav = self._to_wav16k(audio_bytes)
+        if not wav:
+            return None
+        lang = (language or "").strip() or "en-US"   # Azure needs a BCP-47 locale
+        url = (f"https://{region}.stt.speech.microsoft.com/speech/recognition/"
+               f"conversation/cognitiveservices/v1?language={lang}")
+        headers = {
+            "Ocp-Apim-Subscription-Key": key,
+            "Content-Type": "audio/wav; codecs=audio/pcm; samplerate=16000",
+            "Accept": "application/json",
+        }
+        try:
+            r = httpx.post(url, headers=headers, content=wav, timeout=60)
+            if r.status_code != 200:
+                logger.error(f"Azure STT failed: {r.status_code} {r.text[:200]}")
+                return None
+            data = r.json()
+            if data.get("RecognitionStatus") == "Success":
+                text = data.get("DisplayText", "")
+                logger.info(f"Azure STT: {len(text)} chars")
+                return text
+            logger.info(f"Azure STT: no speech ({data.get('RecognitionStatus')})")
+            return ""
+        except Exception as e:
+            logger.error(f"Azure STT error: {e}")
+            return None
+
     # ── Public interface ──
 
     def transcribe(self, audio_bytes: bytes) -> Optional[str]:
@@ -166,6 +222,8 @@ class STTService:
 
         if provider == "local":
             return self._transcribe_local(audio_bytes, language)
+        elif provider == "azure":
+            return self._transcribe_azure(audio_bytes, language, settings)
         elif provider.startswith("endpoint:"):
             endpoint_id = provider.split(":", 1)[1]
             return self._transcribe_api(audio_bytes, endpoint_id, model, language)

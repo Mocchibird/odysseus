@@ -53,6 +53,8 @@ class TTSService:
             "tts_model": saved.get("tts_model", "tts-1"),
             "tts_voice": saved.get("tts_voice", "alloy"),
             "tts_speed": saved.get("tts_speed", "1"),
+            "azure_speech_key": saved.get("azure_speech_key", ""),
+            "azure_speech_region": saved.get("azure_speech_region", ""),
         }
 
     @property
@@ -68,6 +70,8 @@ class TTSService:
         if provider == "local":
             kokoro = self._get_kokoro()
             return kokoro is not None and kokoro.available
+        if provider == "azure":
+            return bool(settings.get("azure_speech_key") and settings.get("azure_speech_region"))
         if provider.startswith("endpoint:"):
             return True  # assume reachable; errors surface at synthesis time
         return False
@@ -143,6 +147,40 @@ class TTSService:
 
     # ── Public interface ──
 
+    # ── Azure AI Speech ──
+    def _synthesize_azure(self, text: str, voice: str, speed: float, settings: dict) -> Optional[bytes]:
+        key = (settings.get("azure_speech_key") or "").strip()
+        region = (settings.get("azure_speech_region") or "").strip()
+        if not key or not region:
+            logger.error("Azure TTS: azure_speech_key / azure_speech_region not set")
+            return None
+        v = (voice or "").strip() or "en-US-AriaNeural"
+        parts = v.split("-")
+        lang = "-".join(parts[:2]) if len(parts) >= 2 else "en-US"
+        rate_pct = int(round((speed - 1.0) * 100))           # 1.0->0%, 1.5->+50%
+        rate = f"{'+' if rate_pct >= 0 else ''}{rate_pct}%"
+        esc = (text or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        ssml = (
+            f"<speak version='1.0' xml:lang='{lang}'>"
+            f"<voice name='{v}'><prosody rate='{rate}'>{esc}</prosody></voice></speak>"
+        )
+        url = f"https://{region}.tts.speech.microsoft.com/cognitiveservices/v1"
+        headers = {
+            "Ocp-Apim-Subscription-Key": key,
+            "Content-Type": "application/ssml+xml",
+            "X-Microsoft-OutputFormat": "audio-24khz-96kbitrate-mono-mp3",
+            "User-Agent": "Odysseus",
+        }
+        try:
+            r = httpx.post(url, headers=headers, content=ssml.encode("utf-8"), timeout=60)
+            if r.status_code != 200:
+                logger.error(f"Azure TTS failed: {r.status_code} {r.text[:200]}")
+                return None
+            return r.content
+        except Exception as e:
+            logger.error(f"Azure TTS error: {e}")
+            return None
+
     def synthesize(self, text: str, use_cache: bool = True) -> Optional[bytes]:
         settings = self._load_settings()
         if settings.get("tts_enabled") is False:
@@ -174,6 +212,8 @@ class TTSService:
             else:
                 logger.warning("Kokoro TTS not available")
                 return None
+        elif provider == "azure":
+            audio_data = self._synthesize_azure(text, voice, speed, settings)
         elif provider.startswith("endpoint:"):
             endpoint_id = provider.split(":", 1)[1]
             audio_data = self._synthesize_api(text, endpoint_id, model, voice, speed)

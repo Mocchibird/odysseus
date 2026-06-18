@@ -195,7 +195,7 @@ export function startRecording(onFileCreated, showToast, showError) {
             const audioFile = new File([audioBlob], `voice-message-${Date.now()}.webm`, { type: 'audio/webm' });
             if (onFileCreated) onFileCreated(audioFile);
           }
-        } else if (provider === 'local' || provider.startsWith('endpoint:')) {
+        } else if (provider === 'local' || provider === 'azure' || provider.startsWith('endpoint:')) {
           // Show "Transcribing..." feedback
           if (showToast) showToast('Transcribing...', 5000);
           try {

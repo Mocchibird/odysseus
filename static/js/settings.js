@@ -1085,6 +1085,9 @@ async function initTtsSettings() {
   var ttsMsg = el('set-ttsSettingsMsg');
   var ttsEnabledToggle = el('set-ttsEnabledToggle');
   var ttsConfigWrap = provSel ? provSel.closest('div[style*="flex-direction"]') : null;
+  var azureRow = el('set-ttsAzureRow');
+  var azureKey = el('set-ttsAzureKey');
+  var azureRegion = el('set-ttsAzureRegion');
 
   function isEndpoint() { return provSel.value.startsWith('endpoint:'); }
   function getModel() { return isEndpoint() ? modelSelect.value : modelInput.value; }
@@ -1095,6 +1098,7 @@ async function initTtsSettings() {
     modelRow.style.display = prov.startsWith('endpoint:') ? 'flex' : 'none';
     voiceRow.style.display = prov === 'disabled' ? 'none' : 'flex';
     speedRow.style.display = prov === 'disabled' ? 'none' : 'flex';
+    if (azureRow) azureRow.style.display = prov === 'azure' ? 'flex' : 'none';
     if (isEndpoint()) {
       modelSelect.style.display = ''; modelInput.style.display = 'none';
       voiceSelect.style.display = ''; voiceInput.style.display = 'none';
@@ -1123,6 +1127,8 @@ async function initTtsSettings() {
     if (settings.tts_model) { modelSelect.value = settings.tts_model; modelInput.value = settings.tts_model; }
     if (settings.tts_voice) { voiceSelect.value = settings.tts_voice; voiceInput.value = settings.tts_voice; }
     if (settings.tts_speed) { speedSelect.value = settings.tts_speed; }
+    if (azureKey && settings.azure_speech_key) azureKey.value = settings.azure_speech_key;
+    if (azureRegion && settings.azure_speech_region) azureRegion.value = settings.azure_speech_region;
     if (ttsEnabledToggle) ttsEnabledToggle.checked = settings.tts_enabled !== false;
   } catch (e) { console.warn('Failed to load TTS settings', e); }
 
@@ -1138,7 +1144,7 @@ async function initTtsSettings() {
   async function saveTTS() {
     try {
       await fetch('/api/auth/settings', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tts_enabled: ttsEnabledToggle ? ttsEnabledToggle.checked : true, tts_provider: provSel.value, tts_model: getModel() || 'tts-1', tts_voice: getVoice() || 'alloy', tts_speed: speedSelect.value || '1' }) });
+        body: JSON.stringify({ tts_enabled: ttsEnabledToggle ? ttsEnabledToggle.checked : true, tts_provider: provSel.value, tts_model: getModel() || 'tts-1', tts_voice: getVoice() || 'alloy', tts_speed: speedSelect.value || '1', azure_speech_key: azureKey ? azureKey.value.trim() : '', azure_speech_region: azureRegion ? azureRegion.value.trim() : '' }) });
       ttsMsg.textContent = 'Saved'; ttsMsg.style.color = 'var(--fg)'; setTimeout(() => { ttsMsg.textContent = ''; }, 2000);
       if (window.aiTTSManager) window.aiTTSManager.checkAvailability();
     } catch (e) { ttsMsg.textContent = 'Failed to save'; ttsMsg.style.color = 'var(--red)'; }
@@ -1154,6 +1160,10 @@ async function initTtsSettings() {
     if (prov === 'local') voiceInput.value = 'af_heart';
     else if (isEndpoint()) { voiceSelect.value = 'alloy'; modelSelect.value = 'tts-1'; }
     else if (prov === 'browser') { voiceInput.value = ''; voiceInput.placeholder = 'OS default voice'; }
+    else if (prov === 'azure') {
+      if (!voiceInput.value || ['af_heart', 'alloy', ''].indexOf(voiceInput.value) !== -1) voiceInput.value = 'en-US-AriaNeural';
+      voiceInput.placeholder = 'e.g. en-US-AriaNeural';
+    }
     updateVisibility();
     saveTTS();
   });
@@ -1161,6 +1171,8 @@ async function initTtsSettings() {
   modelInput.addEventListener('change', saveTTS);
   voiceSelect.addEventListener('change', saveAndClearCache);
   voiceInput.addEventListener('change', saveTTS);
+  if (azureKey) azureKey.addEventListener('change', saveAndClearCache);
+  if (azureRegion) azureRegion.addEventListener('change', saveAndClearCache);
   speedSelect.addEventListener('change', saveAndClearCache);
   if (ttsEnabledToggle) ttsEnabledToggle.addEventListener('change', function() { syncTtsDisabled(); saveTTS(); });
 
@@ -1241,6 +1253,7 @@ async function initSttSettings() {
   var sttMsg = el('set-sttSettingsMsg');
   var sttEnabledToggle = el('set-sttEnabledToggle');
   var sttConfigWrap = el('set-sttConfigWrap');
+  var azureNote = el('set-sttAzureNote');
   // STT was removed from AI Defaults — bail if the UI isn't present.
   if (!provSel) return;
 
@@ -1253,6 +1266,7 @@ async function initSttSettings() {
     var showLang = prov !== 'disabled';
     modelRow.style.display = showModel ? 'flex' : 'none';
     langRow.style.display = showLang ? 'flex' : 'none';
+    if (azureNote) azureNote.style.display = prov === 'azure' ? 'block' : 'none';
     if (isEndpoint()) {
       modelSelect.style.display = 'none'; modelInput.style.display = '';
     } else {

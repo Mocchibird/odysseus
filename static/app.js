@@ -23,7 +23,7 @@ import sessionModule from './js/sessions.js';
 import memoryModule from './js/memory.js';
 import voiceRecorderModule from './js/voiceRecorder.js';
 import censorModule from './js/censor.js';
-import galleryModule from './js/gallery.js?v=444';
+import galleryModule from './js/gallery.js?v=445';
 import tasksModule from './js/tasks.js';
 import calendarModule from './js/calendar.js';
 import notesModule from './js/notes.js?v=460';
@@ -31,8 +31,8 @@ import booksModule from './js/books.js?v=420';
 import healthModule from './js/health.js?v=398';
 import pingsModule from './js/pings.js?v=396';
 import todayModule from './js/today.js?v=422';
-import adminModule from './js/admin.js?v=449';
-import settingsModule from './js/settings.js?v=448';
+import adminModule from './js/admin.js?v=450';
+import settingsModule from './js/settings.js?v=449';
 // FORK: runtime-inject fork-only UI (e.g. the API Tokens panel) into stable
 // upstream anchors, so index.html stays aligned with upstream. Side-effect
 // import — the module self-runs on load. See static/js/fork-ui.js.

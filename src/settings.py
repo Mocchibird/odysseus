@@ -56,6 +56,10 @@ DEFAULT_SETTINGS = {
     "stt_provider": "disabled",
     "stt_model": "base",
     "stt_language": "",
+    # Azure AI Speech (one resource serves both TTS + STT). Used by the "azure"
+    # TTS/STT providers. Free tier (F0): ~5 audio hrs/mo STT + 0.5M chars/mo TTS.
+    "azure_speech_key": "",
+    "azure_speech_region": "",
     "search_provider": "searxng",
     # Default fallback chain — when the primary provider fails or
     # rate-limits, we try DuckDuckGo next. Free, no API key required, so
