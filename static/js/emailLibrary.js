@@ -667,6 +667,23 @@ function _acct() {
   return state._libAccountId ? `&account_id=${encodeURIComponent(state._libAccountId)}` : '';
 }
 
+// Bounded email-read fetch. A busy/re-syncing IMAP server (e.g. proton-bridge
+// during a mass mailbox cleanup) can make a body fetch hang; abort after a
+// deadline and return a SYNTHETIC {error} response so each caller's existing
+// `data.error` path shows a message and clears its spinner — instead of leaving
+// an endless loading circle. The /api/email/read route also deadlines
+// server-side; this is the client-side backstop for an HTTP-layer stall.
+function _emailReadFetch(url) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 45000);
+  return fetch(url, { signal: ctrl.signal, credentials: 'same-origin' })
+    .catch(() => ({
+      ok: false,
+      json: async () => ({ error: 'Email took too long to load — the mail server may be busy syncing. Try again in a moment.' }),
+    }))
+    .finally(() => clearTimeout(timer));
+}
+
 function _emailInlineCidKey(value) {
   let raw = String(value || '').trim();
   if (!raw) return '';
@@ -3300,7 +3317,7 @@ async function _toggleCardPreview(card, em) {
   _markEmailReaderActive(reader);
 
   try {
-    const res = await fetch(`${API_BASE}/api/email/read/${em.uid}?folder=${encodeURIComponent(folderAtStart)}${_acct()}`);
+    const res = await _emailReadFetch(`${API_BASE}/api/email/read/${em.uid}?folder=${encodeURIComponent(folderAtStart)}${_acct()}`);
     const data = await res.json();
     if (
       accountAtStart !== (state._libAccountId || '') ||
@@ -5035,7 +5052,7 @@ async function _openEmailAsTab(em, folder) {
   const loading = modal.querySelector('.email-reader-tab-loading');
   if (loading) loading.appendChild(sp.element);
   try {
-    const res = await fetch(`${API_BASE}/api/email/read/${em.uid}?folder=${encodeURIComponent(useFolder)}${_acct()}`);
+    const res = await _emailReadFetch(`${API_BASE}/api/email/read/${em.uid}?folder=${encodeURIComponent(useFolder)}${_acct()}`);
     const data = await res.json();
     if (data.error) {
       reader.innerHTML = `<div style="padding:20px;color:var(--red,#e55)">Error: ${_esc(data.error)}</div>`;
@@ -5182,7 +5199,7 @@ async function _openEmailWindow(em, folder) {
   try {
     const sp = spinnerModule.createWhirlpool(24);
     loading.appendChild(sp.element);
-    const res = await fetch(`${API_BASE}/api/email/read/${em.uid}?folder=${encodeURIComponent(useFolder)}${_acct()}`);
+    const res = await _emailReadFetch(`${API_BASE}/api/email/read/${em.uid}?folder=${encodeURIComponent(useFolder)}${_acct()}`);
     const data = await res.json();
     if (data.error) {
       bodyEl.innerHTML = `<div style="color:var(--red,#e55);padding:16px;">${_esc(data.error)}</div>`;
@@ -5298,7 +5315,7 @@ async function _swapReaderToUid(reader, uid, folder) {
   body.appendChild(wrap);
   const useFolder = folder || state._libFolder;
   try {
-    const res = await fetch(`${API_BASE}/api/email/read/${uid}?folder=${encodeURIComponent(useFolder)}${_acct()}`);
+    const res = await _emailReadFetch(`${API_BASE}/api/email/read/${uid}?folder=${encodeURIComponent(useFolder)}${_acct()}`);
     const data = await res.json();
     if (data.error) {
       body.innerHTML = `<div style="padding:20px;color:var(--red,#e55)">${_esc(data.error)}</div>`;

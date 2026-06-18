@@ -1494,7 +1494,18 @@ def setup_email_routes():
                 except RuntimeError:
                     pass
             return cached
-        result = await _asyncio.to_thread(_read_email_sync, uid, folder, account_id, owner, mark_seen)
+        # Hard deadline so a busy/re-syncing IMAP server (e.g. proton-bridge
+        # churning during a mass mailbox cleanup) can't hang the read forever —
+        # the socket timeout only fires on an IDLE socket, so a slow drip never
+        # trips it. Bound the whole read a touch above the socket timeout and
+        # surface a clear, retryable error instead of an endless spinner.
+        try:
+            result = await _asyncio.wait_for(
+                _asyncio.to_thread(_read_email_sync, uid, folder, account_id, owner, mark_seen),
+                timeout=_IMAP_TIMEOUT_SECONDS + 5,
+            )
+        except (_asyncio.TimeoutError, TimeoutError):
+            return {"error": "Email took too long to load — the mail server may be busy syncing. Try again in a moment."}
         if result and not result.get("error"):
             _read_cache_put(ck, result)
         return result
