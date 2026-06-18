@@ -130,8 +130,14 @@ async function transcribeOnServer(audioBlob) {
 /**
  * Insert transcribed text into the chat input
  */
+// Conversation mode (or any caller) can intercept the transcript instead of
+// inserting it into the composer — set via setTranscriptHook(fn) / clear with null.
+let _transcriptHook = null;
+export function setTranscriptHook(fn) { _transcriptHook = typeof fn === 'function' ? fn : null; }
+
 function insertTranscription(text, showToast) {
   if (!text) return;
+  if (_transcriptHook) { try { _transcriptHook(text); } catch (e) { console.warn('transcript hook failed', e); } return; }
   const input = document.getElementById('message');
   if (!input) return;
 
@@ -276,6 +282,7 @@ const voiceRecorderModule = {
   getIsRecording,
   init,
   refreshSttProvider,
+  setTranscriptHook,
   get _sttProvider() { return _sttProvider; },
   set _sttProvider(v) { _sttProvider = v; },
 };

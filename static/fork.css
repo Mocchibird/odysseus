@@ -2053,3 +2053,109 @@ label.ask-user-option .ask-user-option-desc { flex-basis: 100%; }
   font-size: inherit !important;
   line-height: inherit !important;
 }
+
+/* ── Voice conversation mode (push-to-talk overlay) — fork addon ──
+   conversationMode.js injects the launch button + this overlay; it drives the
+   real #chat-form underneath. Colours/spacing reuse the core vars. */
+.conv-mode-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: none;
+  color: color-mix(in srgb, var(--fg) 70%, transparent);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: border-color 0.15s, color 0.15s;
+}
+.conv-mode-btn:hover { border-color: var(--accent, var(--red)); color: var(--accent, var(--red)); }
+
+.conv-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in srgb, var(--bg) 92%, transparent);
+  -webkit-backdrop-filter: blur(18px);
+  backdrop-filter: blur(18px);
+}
+.conv-overlay.hidden { display: none; }
+.conv-close {
+  position: absolute;
+  top: 18px;
+  right: 18px;
+  width: 38px;
+  height: 38px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: none;
+  color: color-mix(in srgb, var(--fg) 70%, transparent);
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s;
+}
+.conv-close:hover { border-color: var(--fg); color: var(--fg); }
+.conv-body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 22px;
+  padding: 24px;
+  text-align: center;
+}
+.conv-orb {
+  position: relative;
+  width: 148px;
+  height: 148px;
+  border-radius: 50%;
+  border: 2px solid color-mix(in srgb, var(--accent, var(--red)) 55%, var(--border));
+  background: color-mix(in srgb, var(--accent, var(--red)) 8%, transparent);
+  color: var(--accent, var(--red));
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: transform 0.12s, background 0.2s, border-color 0.2s;
+}
+.conv-orb:hover { transform: scale(1.03); }
+.conv-orb:active { transform: scale(0.97); }
+.conv-orb-ring {
+  position: absolute;
+  inset: -2px;
+  border-radius: 50%;
+  border: 2px solid var(--accent, var(--red));
+  opacity: 0;
+  pointer-events: none;
+}
+.conv-overlay[data-state="listening"] .conv-orb {
+  background: color-mix(in srgb, var(--accent, var(--red)) 20%, transparent);
+  border-color: var(--accent, var(--red));
+}
+.conv-overlay[data-state="listening"] .conv-orb-ring { animation: conv-pulse 1.4s ease-out infinite; }
+.conv-overlay[data-state="processing"] .conv-orb { animation: conv-breathe 1.8s ease-in-out infinite; }
+@keyframes conv-pulse {
+  0%   { opacity: 0.55; transform: scale(1); }
+  100% { opacity: 0; transform: scale(1.35); }
+}
+@keyframes conv-breathe {
+  0%, 100% { transform: scale(1); opacity: 0.85; }
+  50%      { transform: scale(1.05); opacity: 1; }
+}
+.conv-status { font-size: 15px; font-weight: 600; color: var(--fg); letter-spacing: 0.01em; }
+.conv-transcript {
+  font-size: 13px;
+  max-width: 520px;
+  color: color-mix(in srgb, var(--fg) 65%, transparent);
+  line-height: 1.5;
+  min-height: 1.2em;
+}
+@media (hover: none) and (pointer: coarse) {
+  .conv-orb { width: 132px; height: 132px; }
+}
