@@ -25,10 +25,10 @@ const _TOKENS_CARD_INNER = `
   <h2><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px;opacity:0.6"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>API Tokens</h2>
   <div class="admin-toggle-sub" style="margin-bottom:8px">Bearer tokens for external integrations (scripts, Siri Shortcuts, Codex, headless agent runs). Token value shown ONCE on create — copy it then.</div>
   <div id="adm-tokenList" style="margin-bottom:8px;"></div>
-  <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:flex-start;">
-    <input type="text" id="adm-tokenName" placeholder="Token name (e.g. agent-test)" class="settings-select" style="flex:1;min-width:160px;">
-    <input type="text" id="adm-tokenScopes" placeholder="scopes (comma-separated, blank = chat)" class="settings-select" style="flex:2;min-width:220px;" title="Allowed: chat, cookbook:read, cookbook:launch, documents:read|write, todos:read|write, email:read|draft|send, calendar:read|write, memory:read|write">
-    <button class="admin-btn-add" id="adm-tokenAddBtn">Create token</button>
+  <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
+    <input type="text" id="adm-tokenName" placeholder="Token name (e.g. agent-test)" class="settings-select" style="flex:1;min-width:160px;height:32px;box-sizing:border-box;">
+    <input type="text" id="adm-tokenScopes" placeholder="scopes (comma-separated, blank = chat)" class="settings-select" style="flex:2;min-width:220px;height:32px;box-sizing:border-box;" title="Allowed: chat, cookbook:read, cookbook:launch, documents:read|write, todos:read|write, email:read|draft|send, calendar:read|write, memory:read|write">
+    <button class="admin-btn-add" id="adm-tokenAddBtn" style="height:32px;box-sizing:border-box;">Create token</button>
   </div>
   <div id="adm-tokenMsg" style="font-size:11px;margin-top:6px;"></div>
   <div id="adm-tokenReveal" style="display:none;margin-top:8px;padding:8px 10px;background:color-mix(in srgb, var(--accent, var(--red)) 12%, transparent);border:1px solid color-mix(in srgb, var(--accent, var(--red)) 35%, transparent);border-radius:6px;">

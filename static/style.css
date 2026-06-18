@@ -15554,6 +15554,7 @@ body.left-dock-active.doc-view .doc-editor-pane.doc-left ~ .chat-container {
 #doclib-panel-chats .memory-sort-select,
 #doclib-panel-archive .memory-sort-select,
 #doclib-panel-research .memory-sort-select,
+#doclib-panel-files .memory-sort-select,
 [data-doclib-panel="documents"] .memory-sort-select {
   height: 24px;
   font-size: 11px;
@@ -15562,6 +15563,7 @@ body.left-dock-active.doc-view .doc-editor-pane.doc-left ~ .chat-container {
 #doclib-panel-chats .memory-toolbar-btn,
 #doclib-panel-archive .memory-toolbar-btn,
 #doclib-panel-research .memory-toolbar-btn,
+#doclib-panel-files .memory-toolbar-btn,
 [data-doclib-panel="documents"] .memory-toolbar-btn {
   height: 24px;
   font-size: 11px;
@@ -15588,6 +15590,7 @@ body.left-dock-active.doc-view .doc-editor-pane.doc-left ~ .chat-container {
 #doclib-panel-archive .memory-search-input,
 #doclib-panel-research .memory-search-input,
 [data-doclib-panel="documents"] .memory-search-input,
+#doclib-panel-files .memory-search-input,
 #memory-modal .memory-search-input,
 #tasks-modal .memory-search-input {
   height: 30px;
@@ -32809,7 +32812,6 @@ body.notes-mobile-mode.notes-drag-mode .note-card-pin.active {
 }
 .notes-select-trigger {
   position: relative;
-  top: 3px;
   flex-shrink: 0;
   background: var(--bg);
   color: var(--fg);

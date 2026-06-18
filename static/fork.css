@@ -1706,17 +1706,6 @@ body.gallery-selecting .gallery-card-menu-btn,
   margin-left: 4px;
   white-space: nowrap;
 }
-.today-refresh-btn {
-  background: transparent;
-  border: none;
-  color: color-mix(in srgb, var(--fg) 65%, transparent);
-  font-size: 16px;
-  cursor: pointer;
-  padding: 2px 8px;
-  border-radius: 6px;
-  line-height: 1;
-}
-.today-refresh-btn:hover { color: var(--fg); background: color-mix(in srgb, var(--fg) 8%, transparent); }
 .today-empty { padding: 28px 8px; text-align: center; opacity: 0.6; font-size: 13px; }
 .today-allclear {
   text-align: center;
@@ -1740,19 +1729,6 @@ body.gallery-selecting .gallery-card-menu-btn,
   align-items: center;
   justify-content: center;
 }
-.today-cf-btn {
-  margin-left: auto;
-  background: transparent;
-  border: 1px solid color-mix(in srgb, var(--red) 40%, var(--border));
-  color: color-mix(in srgb, var(--red) 92%, var(--fg));
-  border-radius: 7px;
-  padding: 2px 10px;
-  font-size: 11px;
-  font-weight: 700;
-  cursor: pointer;
-}
-.today-cf-btn:hover { background: color-mix(in srgb, var(--red) 12%, transparent); }
-.today-cf-btn:disabled { opacity: 0.5; cursor: default; }
 .today-list { display: flex; flex-direction: column; gap: 4px; }
 .today-item {
   display: flex;

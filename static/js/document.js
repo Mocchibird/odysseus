@@ -13,7 +13,7 @@ import markdownModule from './markdown.js';
 import codeRunnerModule from './codeRunner.js';
 import { langIcon } from './langIcons.js';
 import spinnerModule from './spinner.js';
-import { openLibrary, closeLibrary, isLibraryOpen, initLibrary } from './documentLibrary.js?v=459';
+import { openLibrary, closeLibrary, isLibraryOpen, initLibrary } from './documentLibrary.js?v=460';
 import signatureModule from './signature.js';
 import * as Modals from './modalManager.js';
 
@@ -4002,7 +4002,7 @@ import * as Modals from './modalManager.js';
             <button type="button" class="md-view-opt" data-renderview="run" title="Run / Preview"><svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" stroke="none"><polygon points="5 3 19 12 5 21 5 3"/></svg></button>
           </span>
           <button id="doc-email-ai-reply-btn" class="doc-action-icon-btn md-toolbar-email-only" type="button" title="Draft a reply with AI (Fast / Full + optional context)" style="display:none;align-items:center;gap:4px;"><svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" style="color:var(--accent, var(--red));flex-shrink:0;position:relative;top:-1px;"><path d="M12 0L14.59 8.41L23 12L14.59 15.59L12 24L9.41 15.59L1 12L9.41 8.41Z"/></svg><span style="font-size:11px;">Reply</span></button>
-          <button id="doc-fontsize-btn" class="doc-action-icon-btn" title="Font size" style="position:relative;width:28px;height:26px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="opacity:0.7;"><path d="M4 7V4h16v3"/><path d="M12 4v16"/><path d="M8 20h8"/></svg><span class="doc-fontsize-levels"><i data-sz="s">S</i><i data-sz="m">M</i><i data-sz="l">L</i></span></button>
+          <button id="doc-fontsize-btn" class="doc-action-icon-btn" title="Font size" style="position:relative;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="opacity:0.7;"><path d="M4 7V4h16v3"/><path d="M12 4v16"/><path d="M8 20h8"/></svg><span class="doc-fontsize-levels"><i data-sz="s">S</i><i data-sz="m">M</i><i data-sz="l">L</i></span></button>
           <button id="doc-diff-toggle-btn" class="doc-action-icon-btn" title="Compare changes" style="opacity:0.7;display:none;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v18"/><path d="M5 12H2l5-5 5 5H9"/><path d="M19 12h3l-5 5-5-5h3"/></svg></button>
           <span class="md-toolbar-sep"></span>
           <button type="button" data-md="bold" title="Bold (Ctrl+B)"><b>B</b></button>

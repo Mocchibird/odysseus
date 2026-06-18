@@ -1741,7 +1741,7 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
                   <option value="largest">Largest</option>
                 </select>
                 <button class="memory-toolbar-btn" id="doclib-files-add-btn" title="Upload files"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-1px;margin-right:3px;"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>Add files</button>
-                <button class="gallery-select-btn" id="doclib-files-select-btn" title="Select for bulk actions"><span style="position:relative;top:1px;">Select</span></button>
+                <button class="memory-toolbar-btn" id="doclib-files-select-btn" title="Select for bulk actions"><span>Select</span></button>
               </div>
               <input type="text" id="doclib-files-search" placeholder="Search files…" class="memory-search-input" />
             </div>
