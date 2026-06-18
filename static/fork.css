@@ -2148,7 +2148,7 @@ label.ask-user-option .ask-user-option-desc { flex-basis: 100%; }
   0%, 100% { transform: scale(1); opacity: 0.85; }
   50%      { transform: scale(1.05); opacity: 1; }
 }
-.conv-status { font-size: 15px; font-weight: 600; color: var(--fg); letter-spacing: 0.01em; }
+.conv-status { font-size: 13px; font-weight: 600; color: var(--fg); letter-spacing: 0.01em; }
 .conv-transcript {
   font-size: 13px;
   max-width: 520px;
