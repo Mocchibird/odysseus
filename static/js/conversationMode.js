@@ -24,10 +24,12 @@ let _poll = null;
 let _prevAutoPlay = false;
 let _sentThisTurn = false;
 let _turnStartedAt = 0;
+let _spokeThisTurn = false;   // did the assistant's reply actually play this turn?
+let _lastBusyAt = 0;          // last time TTS was synthesizing/playing
 
 const _STATUS = {
   idle: 'Tap to speak',
-  listening: 'Listening… tap to send',
+  listening: 'Listening… pause to send',
   transcribing: 'Transcribing…',
   thinking: 'Thinking…',
   speaking: 'Speaking… tap to skip',
@@ -41,6 +43,10 @@ function _sttEnabled() {
 function _sendBtn() { return document.querySelector('.send-btn'); }
 function _isStreaming() { const b = _sendBtn(); return !!(b && b.dataset && b.dataset.mode === 'streaming'); }
 function _isSpeaking() { const t = _tts(); return !!(t && t.isPlaying); }
+// TTS is "busy" while playing OR still synthesizing/queued — isPlaying briefly
+// reads false between sentences and before the first audio starts, so checking
+// _processing too prevents auto-restarting the mic over the reply.
+function _ttsBusy() { const t = _tts(); return !!(t && (t.isPlaying || t._processing)); }
 
 // ── launch button (injected into the composer's right-side controls) ──
 function _injectButton() {
@@ -96,15 +102,40 @@ function _showTranscript(text) {
   if (el) el.textContent = text ? '“' + text + '”' : '';
 }
 
+// Begin a hands-free listening turn: record with voice-activity detection so it
+// auto-sends once the user pauses (no second tap needed). Returns false if it
+// couldn't start (no secure context / STT disabled).
+function _beginListening() {
+  if (!_open) return false;
+  if (!window.isSecureContext) { _status('Microphone needs HTTPS'); return false; }
+  if (!_sttEnabled()) { _setState('idle', 'Enable Speech-to-Text in Settings → AI Defaults'); return false; }
+  _spokeThisTurn = false;
+  _showTranscript('');
+  startRecording(
+    null,
+    function () {},
+    function (msg) { _setState('idle', String(msg || 'Error')); },
+    { vad: true, onAutoStop: _onAutoStop }
+  );
+  _setState('listening', _STATUS.listening);
+  return true;
+}
+
+// VAD detected the user finished speaking — flip to processing; voiceRecorder
+// stops the recording itself and the transcript hook submits the turn.
+function _onAutoStop() {
+  if (!_open || _state !== 'listening') return;
+  _sentThisTurn = false;
+  _turnStartedAt = Date.now();
+  _setState('processing', _STATUS.transcribing);
+}
+
 function _onOrbTap() {
   if (!_open) return;
   if (_state === 'idle') {
-    if (!window.isSecureContext) { _status('Microphone needs HTTPS'); return; }
-    if (!_sttEnabled()) { _status('Enable Speech-to-Text in Settings → AI Defaults'); return; }
-    _showTranscript('');
-    startRecording(null, function () {}, function (msg) { _setState('idle', String(msg || 'Error')); });
-    _setState('listening', _STATUS.listening);
+    _beginListening();
   } else if (_state === 'listening') {
+    // manual override: tap to send without waiting for the pause
     stopRecording();
     _sentThisTurn = false;
     _turnStartedAt = Date.now();
@@ -137,19 +168,29 @@ function _onTranscript(text) {
 // poll: drive the processing sub-status + return to idle when the turn ends
 function _tick() {
   if (!_open || _state !== 'processing') return;
-  const streaming = _isStreaming();
-  const speaking = _isSpeaking();
-  if (streaming) { _status(_STATUS.thinking); return; }
-  if (speaking) { _status(_STATUS.speaking); return; }
+  if (_isStreaming()) { _status(_STATUS.thinking); return; }
+  if (_ttsBusy()) {                       // reply is synthesizing or playing
+    _spokeThisTurn = true;
+    _lastBusyAt = Date.now();
+    _status(_STATUS.speaking);
+    return;
+  }
   const waited = Date.now() - _turnStartedAt;
   if (!_sentThisTurn) {
     // still transcribing (server STT) — bail out if it never produces text
     if (waited > 9000) _setState('idle', 'No speech detected');
     return;
   }
-  // sent, not streaming, not speaking: grace period for autoplay TTS to start,
-  // then the turn is done.
-  if (waited > 2500) _setState('idle', _STATUS.idle);
+  if (_spokeThisTurn) {
+    // The reply finished speaking — wait a short beat (so the mic doesn't catch
+    // the audio tail), then hands-free: listen for the next utterance. VAD needs
+    // speech onset, so it just waits quietly if the user says nothing.
+    if (Date.now() - _lastBusyAt > 500) { _setState('idle', _STATUS.idle); _beginListening(); }
+    return;
+  }
+  // Sent, streamed, but TTS never played (provider off / empty reply): end the
+  // turn after a grace window WITHOUT auto-restarting (no audio cue to react to).
+  if (waited > 4000) _setState('idle', _STATUS.idle);
 }
 
 export function open() {

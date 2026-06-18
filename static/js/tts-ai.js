@@ -55,15 +55,25 @@ class AITTSManager {
     }
 
     extractPlainText(content) {
-        // Strip <think>/<thinking> blocks (model reasoning)
-        let cleaned = content.replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '');
+        // Strip model reasoning so TTS never reads the thinking aloud. Three cases:
+        //  - a CLOSED <think>/<thinking> block, including attributes — chat.js embeds
+        //    a time on completion, e.g. <think time="1.2">…</think> (the old
+        //    attribute-less regex missed those, so finished replies leaked reasoning);
+        //  - an UNCLOSED <think> still streaming (no </think> yet) — drop from the
+        //    opener to the end so in-progress reasoning isn't spoken during auto-play
+        //    (conversation mode) before the answer arrives;
+        //  - a rendered .thinking-section fold (reloaded / already-HTML input) — removed
+        //    from the parsed DOM below so its collapsed text isn't picked up.
+        let cleaned = (content || '')
+            .replace(/<think(?:ing)?\b[^>]*>[\s\S]*?<\/think(?:ing)?>/gi, '')
+            .replace(/<think(?:ing)?\b[^>]*>[\s\S]*$/i, '');
 
         // Create a temporary div to parse HTML/markdown
         const temp = document.createElement('div');
         temp.innerHTML = cleaned;
 
-        // Remove code blocks
-        temp.querySelectorAll('pre, code').forEach(el => el.remove());
+        // Remove rendered thinking folds + code blocks
+        temp.querySelectorAll('.thinking-section, pre, code').forEach(el => el.remove());
 
         // Get text content
         let text = temp.textContent || temp.innerText || '';
