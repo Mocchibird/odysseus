@@ -287,4 +287,8 @@ const voiceRecorderModule = {
   set _sttProvider(v) { _sttProvider = v; },
 };
 
+// Expose globally so settings.js can push the STT provider live when the user
+// changes it (otherwise the composer mic button only updates after a reload).
+if (typeof window !== 'undefined') window.voiceRecorderModule = voiceRecorderModule;
+
 export default voiceRecorderModule;
