@@ -12,6 +12,16 @@
 # GPU-accelerated transcription — it's auto-detected, CPU is used otherwise.
 faster-whisper
 
+# Local text-to-speech (Kokoro-82M) for the "local" TTS provider — high-quality
+# neural voices that run entirely on your server (nothing leaves the box). Uses
+# a CUDA GPU when one is present (auto-detected; great on e.g. a GTX 1080 Ti),
+# CPU fallback otherwise (works, just slower). Pulls torch (large download); to
+# use the GPU the container must run with the NVIDIA runtime (compose:
+# `deploy.resources.reservations.devices` or `--gpus all`). espeak-ng (OS pkg,
+# added in the Dockerfile) backs the phonemizer for out-of-dictionary words.
+kokoro
+soundfile
+
 # DuckDuckGo as a search provider option.
 # Install if you want DDG in the search-provider dropdown.
 # Alternatives: SearXNG, Brave, Tavily, Serper, Google PSE.

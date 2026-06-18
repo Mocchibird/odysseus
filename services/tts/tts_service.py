@@ -229,7 +229,7 @@ class TTSService:
 
 
 class _KokoroPipeline:
-    """Encapsulates the Kokoro-82M local GPU pipeline."""
+    """Encapsulates the Kokoro-82M local pipeline (CUDA GPU when available, else CPU)."""
 
     def __init__(self):
         self.pipeline = None
@@ -239,20 +239,22 @@ class _KokoroPipeline:
 
     def _init(self):
         try:
+            import contextlib
             import torch
             from kokoro import KPipeline
 
-            if not torch.cuda.is_available():
-                logger.warning("CUDA not available for Kokoro TTS")
-                return
+            use_cuda = torch.cuda.is_available()
+            self.device = torch.device("cuda:0" if use_cuda else "cpu")
+            if not use_cuda:
+                logger.info("Kokoro TTS: no CUDA GPU detected — running on CPU (functional, slower).")
 
-            self.device = torch.device("cuda:0")
-            with torch.cuda.device(0):
+            dev_ctx = torch.cuda.device(0) if use_cuda else contextlib.nullcontext()
+            with dev_ctx:
                 self.pipeline = KPipeline(lang_code="a")
-                if hasattr(self.pipeline, "model"):
+                if hasattr(self.pipeline, "model") and self.pipeline.model is not None:
                     self.pipeline.model = self.pipeline.model.to(self.device)
             self.available = True
-            logger.info("Kokoro-82M TTS pipeline loaded")
+            logger.info(f"Kokoro-82M TTS pipeline loaded on {self.device}")
         except ImportError as e:
             logger.warning(f"Kokoro TTS not available: {e}")
             logger.warning("Install with: pip install kokoro soundfile")
@@ -263,10 +265,12 @@ class _KokoroPipeline:
         if not self.available:
             return None
         try:
+            import contextlib
             import torch
             import numpy as np
 
-            with torch.cuda.device(self.device):
+            dev_ctx = torch.cuda.device(self.device) if self.device.type == "cuda" else contextlib.nullcontext()
+            with dev_ctx:
                 chunks = []
                 for _, _, audio in self.pipeline(text, voice=voice):
                     chunks.append(audio)

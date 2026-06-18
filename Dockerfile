@@ -13,7 +13,8 @@ ENV DEBIAN_FRONTEND=noninteractive \
 # launch inside Docker.
 # nodejs/npm provide npx for the optional built-in Browser MCP server.
 # sqlite3/tzdata cover timezone-aware notes/calendar; ffmpeg/libopus/libsndfile
-# cover optional audio work.
+# cover optional audio work; espeak-ng backs the optional local Kokoro TTS
+# phonemizer (only exercised when requirements-optional `kokoro` is installed).
 # gosu lets the entrypoint drop privileges cleanly so signals still reach
 # uvicorn directly (no extra shell layer like `su`/`sudo` would add).
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -24,6 +25,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     libopus0 \
     libsndfile1 \
+    espeak-ng \
     nodejs \
     npm \
     sqlite3 \
