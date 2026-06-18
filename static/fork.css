@@ -2063,3 +2063,17 @@ label.ask-user-option {
   height: auto;
 }
 label.ask-user-option .ask-user-option-desc { flex-basis: 100%; }
+
+/* HTML-email invoices (e.g. Hetzner) put numbers in cells with inline
+   `letter-spacing` + a smaller `font-size`. The sanitizer strips font-family
+   but keeps those, and the single-email reader path (.email-reader-body.html-body)
+   has no descendant typography reset like the thread bubble path does
+   (style.css `.email-bubble-body *:not(code)…`), so digit runs render
+   tracked-out and re-sized. Neutralize spacing + size here (font-family is
+   already stripped, so it's left alone). */
+.email-reader-body.html-body *:not(code):not(pre):not(kbd):not(samp) {
+  letter-spacing: normal !important;
+  word-spacing: normal !important;
+  font-size: inherit !important;
+  line-height: inherit !important;
+}
