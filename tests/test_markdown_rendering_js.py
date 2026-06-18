@@ -276,3 +276,42 @@ def test_plain_blockquote_still_works(node_available):
     assert "<blockquote>" in html
     assert "md-callout" not in html
     assert "<p>just a quote</p>" in html
+
+
+def test_table_with_links_in_cells_still_renders(node_available):
+    # Regression: a markdown link in ANY cell used to kill the whole table —
+    # the link's <a> became an ___ALLOWED_HTML_ placeholder and the table guard
+    # bailed on it. With a |---| separator present, inline links are allowed.
+    html = _run_markdown_case(
+        "Date | Milestone |\n"
+        "|------|-----------|\n"
+        "| 2026-03-28 | Benchmarks ([PR#698](https://github.com/tile-ai/tilelang-ascend/pull/698))|\n"
+        "| 2025-09-29 | Open source release |"
+    )
+    assert "<table" in html
+    assert html.count("<tr>") == 3                 # header + 2 data rows (separator skipped)
+    assert "<th" in html and "<td" in html
+    assert "<a " in html                            # the link survived as a real anchor
+    assert "tilelang-ascend/pull/698" in html
+    assert "| 2026-03-28" not in html               # NOT left as raw markdown text
+
+
+def test_fenced_code_with_info_string_after_language(node_available):
+    # Regression: "```python title=foo.py" failed the old `(\w+)?\n` fence regex,
+    # so the block fell through and rendered as raw markdown (the `# comment`
+    # line became an <h1>). The first info-string token is the language.
+    html = _run_markdown_case(
+        "```python title=kernel_to_dump.py\n"
+        "# Define kernel\n"
+        "kernel = matmul(K, N, M)\n"
+        "```\n\n"
+        "Then run:\n\n"
+        "```bash\n"
+        "python kernel_to_dump.py >> out.cpp\n"
+        "```"
+    )
+    assert 'class="language-python"' in html         # block recognised + highlighted
+    assert 'class="language-bash"' in html
+    assert "<h1" not in html                          # the `# Define kernel` is code, not a heading
+    assert "title=kernel_to_dump.py" not in html      # info-string metadata not leaked as text
+    assert "Then run:" in html

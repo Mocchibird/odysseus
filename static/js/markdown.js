@@ -557,7 +557,12 @@ export function mdToHtml(src, opts) {
   // ___ALLOWED_HTML_0___) can leak into quoted HTML/JS samples, because the
   // placeholder gets captured as literal code content and never restored inside
   // the final <pre><code> block.
-  s = s.replace(/```(\w+)?\n([\s\S]*?)```/g, (_, lang, code) => {
+  s = s.replace(/```([^\n]*)\n([\s\S]*?)```/g, (_, info, code) => {
+    // The first token of the info string is the language; any remainder
+    // (e.g. "```python title=foo.py") is metadata we don't render. The old
+    // `(\w+)?\n` form failed to match when anything followed the language, so
+    // the whole block fell through and rendered as raw markdown.
+    const lang = String(info || '').trim().split(/\s+/)[0] || '';
     const cleaned = code
       .replace(/\r\n/g, '\n')
       .replace(/[ \t]+$/gm, '')
@@ -852,10 +857,18 @@ export function mdToHtml(src, opts) {
 
   // Handle pipe tables
   s = s.replace(/(?:^|\n)([^\n]*\|[^\n]*\|[^\n]*)(?:\n([^\n]*\|[^\n]*\|[^\n]*))*/g, (table) => {
-    if (table.includes('___CODE_BLOCK_') || table.includes('___ALLOWED_HTML_')) return table;
-
     const rows = table.trim().split('\n');
     if (rows.length < 2) return table;
+
+    // A genuine markdown table has a `|---|---|` rule on its 2nd line. When it
+    // does, inline placeholders in cells (links, images, wiki-links — all
+    // stashed as ___ALLOWED_HTML_) are legitimate content, so DON'T bail on
+    // them; a single link in a cell used to kill the whole table. A fenced
+    // code block must never be tablified. Without a separator the block is
+    // likely code / raw HTML that merely contains pipes — keep bailing then.
+    const hasSeparator = /^[\s|:\-]+$/.test(rows[1]) && rows[1].includes('-');
+    if (table.includes('___CODE_BLOCK_')) return table;
+    if (!hasSeparator && table.includes('___ALLOWED_HTML_')) return table;
 
     let html = '<table style="border-collapse: collapse; width: 100%; margin: 10px 0;">';
 
