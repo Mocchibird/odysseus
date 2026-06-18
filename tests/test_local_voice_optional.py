@@ -13,11 +13,16 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_local_voice_deps_in_requirements_optional():
+def test_local_stt_bundled_but_kokoro_not():
+    # Only ACTIVE (non-comment) requirement lines count.
     req = (ROOT / "requirements-optional.txt").read_text(encoding="utf-8")
-    assert "faster-whisper" in req          # local STT (already shipped)
-    assert "kokoro" in req                   # local TTS (added)
-    assert "soundfile" in req
+    active = [l.strip() for l in req.splitlines() if l.strip() and not l.strip().startswith("#")]
+    assert "faster-whisper" in active        # local STT — CPU-safe, builds everywhere
+    # local TTS (kokoro) is intentionally NOT an active dep: its misaki->spacy->
+    # thinc->blis chain often fails to build a wheel and breaks the optional
+    # install. Use Azure/browser TTS, or install kokoro manually (file comment).
+    assert "kokoro" not in active
+    assert "soundfile" not in active
 
 
 def test_dockerfile_installs_optional_and_phonemizer():

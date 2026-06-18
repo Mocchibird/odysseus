@@ -12,15 +12,16 @@
 # GPU-accelerated transcription — it's auto-detected, CPU is used otherwise.
 faster-whisper
 
-# Local text-to-speech (Kokoro-82M) for the "local" TTS provider — high-quality
-# neural voices that run entirely on your server (nothing leaves the box). Uses
-# a CUDA GPU when one is present (auto-detected; great on e.g. a GTX 1080 Ti),
-# CPU fallback otherwise (works, just slower). Pulls torch (large download); to
-# use the GPU the container must run with the NVIDIA runtime (compose:
-# `deploy.resources.reservations.devices` or `--gpus all`). espeak-ng (OS pkg,
-# added in the Dockerfile) backs the phonemizer for out-of-dictionary words.
-kokoro
-soundfile
+# Local text-to-speech (Kokoro-82M) is intentionally NOT bundled here. The
+# `kokoro` pip package pulls misaki[en] -> spacy -> thinc -> blis, and blis
+# frequently FAILS to build a wheel (a huge C compile that OOMs the builder, or
+# has no prebuilt wheel for newer Python) — which breaks this whole optional
+# install. For cheap local-ish TTS use the **Azure** provider (free F0 tier, no
+# build/deps) or **Browser** TTS. To run local Kokoro anyway on a CUDA box,
+# install it into the container manually once your toolchain can compile blis:
+#   pip install kokoro soundfile   (espeak-ng is already in the image)
+# The backend's "local" TTS path (services/tts) auto-detects GPU/CPU and works
+# the moment kokoro imports successfully.
 
 # DuckDuckGo as a search provider option.
 # Install if you want DDG in the search-provider dropdown.
