@@ -165,8 +165,30 @@ function _injectSettingsRows() {
   }
 }
 
+// ── Hide admin-global settings from non-admins ───────────────────────────────
+// Some settings cards are admin-GLOBAL — a normal user can't change them (the
+// backend rejects their POST and scrubs the secrets), so showing them blank
+// fields they can't edit is just confusing. Mark those cards .admin-only so the
+// existing syncAdminVisibility() hides them for non-admins (admins still see
+// everything). Keyed off STABLE child ids so it survives upstream line moves.
+// PER-USER cards (Default Chat / Utility / Vision / Research / Image — all in
+// src/settings.py _PER_USER_KEYS) are deliberately LEFT visible.
+function _markAdminOnlySettings() {
+  // AI-Defaults cards that are admin-global: voice config + email safety.
+  ['set-ttsProviderSelect', 'set-sttProviderSelect', 'set-agentEmailConfirm',
+   // The whole Search tab: web-search provider keys + deep-research limits.
+   'set-searchProvider', 'set-researchMaxTokens'].forEach(function(id) {
+    var node = document.getElementById(id);
+    var card = node && node.closest('.admin-card');
+    if (card) card.classList.add('admin-only');
+  });
+  // Hide the Search tab's nav button too (both its cards are admin-only).
+  var searchTab = document.querySelector('[data-settings-tab="search"]');
+  if (searchTab) searchTab.classList.add('admin-only');
+}
+
 // Registry of injectors — add fork panels here as they're moved out of index.html.
-const _INJECTORS = [_injectApiTokensPanel, _injectEndpointTypeSelect, _injectRailTools, _injectSettingsRows];
+const _INJECTORS = [_injectApiTokensPanel, _injectEndpointTypeSelect, _injectRailTools, _injectSettingsRows, _markAdminOnlySettings];
 
 export function injectForkUI() {
   for (const inject of _INJECTORS) {

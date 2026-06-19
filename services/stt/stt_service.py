@@ -208,8 +208,11 @@ class STTService:
         r = httpx.get(base_url + "/models", headers=headers, timeout=15)
         if r.status_code != 200:
             return []
-        data = r.json()
-        items = data.get("data") if isinstance(data, dict) else data
+        try:
+            data = r.json()
+        except Exception:
+            return []   # 200 but non-JSON body → no models
+        items = (data.get("data") or data.get("models")) if isinstance(data, dict) else data
         out = []
         for it in (items or []):
             if isinstance(it, str):

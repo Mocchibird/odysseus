@@ -378,8 +378,12 @@ class TTSService:
         r = httpx.get(url, headers={"Ocp-Apim-Subscription-Key": key}, timeout=30)
         if r.status_code != 200:
             return []
+        try:
+            rows = r.json() or []
+        except Exception:
+            return []   # 200 but non-JSON body → no voices
         out = []
-        for v in (r.json() or []):
+        for v in rows:
             sn = v.get("ShortName")
             if not sn:
                 continue
@@ -395,8 +399,12 @@ class TTSService:
         r = httpx.get("https://api.elevenlabs.io/v1/voices", headers={"xi-api-key": key}, timeout=30)
         if r.status_code != 200:
             return []
+        try:
+            payload = r.json() or {}
+        except Exception:
+            return []
         out = []
-        for v in (r.json() or {}).get("voices", []):
+        for v in payload.get("voices", []):
             vid = v.get("voice_id")
             if not vid:
                 continue
@@ -420,7 +428,10 @@ class TTSService:
         r = httpx.get(base_url + "/audio/voices", headers=headers, timeout=15)
         if r.status_code != 200:
             return []
-        data = r.json()
+        try:
+            data = r.json()
+        except Exception:
+            return []
         # Accept {"voices":[...]}, {"data":[...]}, or a bare list; items may be
         # strings or {id/name/voice_id} dicts.
         items = data.get("voices") or data.get("data") if isinstance(data, dict) else data

@@ -903,7 +903,7 @@ def setup_note_routes(task_scheduler=None):
         Returns {synthesis, email_sent}.
         """
         # Gate against anonymous callers — LLM synthesis can burn tokens.
-        user = require_user(request)
+        require_user(request)
         body = await request.json()
         note_id = str(body.get("note_id") or "").strip()
         if not note_id:

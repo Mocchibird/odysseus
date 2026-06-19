@@ -95,6 +95,21 @@ def test_endpoint_tts_uses_free_text_model_voice():
     assert "af_heart" in SETTINGS_JS   # Kokoro prefill
 
 
+def test_admin_global_settings_hidden_from_non_admins():
+    fu = (ROOT / "static" / "js" / "fork-ui.js").read_text(encoding="utf-8")
+    assert "_markAdminOnlySettings" in fu
+    # Admin-global cards gated (voice config + email safety + whole Search tab).
+    for anchor in ("set-ttsProviderSelect", "set-sttProviderSelect",
+                   "set-agentEmailConfirm", "set-searchProvider", "set-researchMaxTokens"):
+        assert anchor in fu, anchor
+    assert 'data-settings-tab="search"' in fu
+    # Per-user upstream cards (Vision / Image — in _PER_USER_KEYS) must NOT be
+    # referenced by fork-ui, so they're never hidden from normal users. (Persona
+    # is also per-user but fork-ui *injects* its row, so it's legitimately present.)
+    for peruser in ("set-visionEnabledToggle", "set-imgEnabledToggle"):
+        assert peruser not in fu, peruser
+
+
 def test_voice_listing_endpoints_and_datalists():
     tts_routes = (ROOT / "routes" / "tts_routes.py").read_text(encoding="utf-8")
     stt_routes = (ROOT / "routes" / "stt_routes.py").read_text(encoding="utf-8")
