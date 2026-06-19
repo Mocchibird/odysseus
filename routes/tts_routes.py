@@ -27,6 +27,16 @@ def setup_tts_routes(tts_service):
             logger.error(f"Failed to get TTS stats: {e}")
             raise HTTPException(status_code=500, detail=str(e))
 
+    @router.get("/voices")
+    async def list_tts_voices():
+        """Available voices for the configured provider (settings dropdown).
+        Returns {voices: []} when the provider can't enumerate — UI keeps free-text."""
+        try:
+            return {"voices": tts_service.list_voices()}
+        except Exception as e:
+            logger.warning(f"Failed to list TTS voices: {e}")
+            return {"voices": []}
+
     @router.post("/synthesize")
     async def synthesize_speech(request: TTSRequest):
         """Synthesize speech from text"""

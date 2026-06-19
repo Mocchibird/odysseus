@@ -1171,6 +1171,28 @@ async function initTtsSettings() {
     fetch('/api/tts/clear-cache', { method: 'POST', credentials: 'same-origin' }).catch(function(){});
   }
 
+  // Populate the Voice field's <datalist> from the configured provider (Edge /
+  // Azure / ElevenLabs voices, or a Kokoro endpoint's /audio/voices). It's a
+  // suggestion list — the field stays free-text, and an empty/failed fetch just
+  // leaves a plain text input. Reads server-saved settings, so call AFTER save.
+  var voiceList = el('set-ttsVoiceOptions');
+  async function loadTtsVoiceOptions() {
+    if (!voiceList) return;
+    try {
+      var res = await fetch('/api/tts/voices', { credentials: 'same-origin' });
+      var data = await res.json();
+      var voices = (data && data.voices) || [];
+      voiceList.innerHTML = '';
+      voices.forEach(function(v) {
+        if (!v || !v.value) return;
+        var o = document.createElement('option');
+        o.value = v.value;
+        if (v.label && v.label !== v.value) o.label = v.label;
+        voiceList.appendChild(o);
+      });
+    } catch (e) { /* keep free-text; ignore */ }
+  }
+
   // Voices that came from the old OpenAI/Kokoro defaults — replace them when the
   // user switches to a neural-voice provider so they don't ship a dead voice name.
   var _placeholderVoices = ['af_heart', 'alloy', ''];
@@ -1200,18 +1222,22 @@ async function initTtsSettings() {
       voiceInput.placeholder = 'ElevenLabs voice id';
     }
     updateVisibility();
-    saveTTS();
+    saveTTS().then(loadTtsVoiceOptions);   // provider changed → refresh the voice list
   });
+  // Provider/keys changed → the available voices change too, so refresh the list.
+  function _saveKeyAndReloadVoices() { return saveAndClearCache().then(loadTtsVoiceOptions); }
   modelSelect.addEventListener('change', saveAndClearCache);
   modelInput.addEventListener('change', saveTTS);
   if (elevenModel) elevenModel.addEventListener('change', saveAndClearCache);
   voiceSelect.addEventListener('change', saveAndClearCache);
   voiceInput.addEventListener('change', saveTTS);
-  if (azureKey) azureKey.addEventListener('change', saveAndClearCache);
-  if (azureRegion) azureRegion.addEventListener('change', saveAndClearCache);
-  if (elevenKey) elevenKey.addEventListener('change', saveAndClearCache);
+  if (azureKey) azureKey.addEventListener('change', _saveKeyAndReloadVoices);
+  if (azureRegion) azureRegion.addEventListener('change', _saveKeyAndReloadVoices);
+  if (elevenKey) elevenKey.addEventListener('change', _saveKeyAndReloadVoices);
   speedSelect.addEventListener('change', saveAndClearCache);
   if (ttsEnabledToggle) ttsEnabledToggle.addEventListener('change', function() { syncTtsDisabled(); saveTTS(); });
+
+  loadTtsVoiceOptions();   // populate the voice dropdown for the saved provider
 
   // Preview / test button
   var previewBtn = el('set-ttsPreviewBtn');
@@ -1350,11 +1376,34 @@ async function initSttSettings() {
     } catch (e) { sttMsg.textContent = 'Failed to save'; sttMsg.style.color = 'var(--red)'; }
   }
 
-  provSel.addEventListener('change', function() { updateVisibility(); saveSTT(); });
+  // Populate the Model field's <datalist> from the configured STT endpoint
+  // (e.g. a faster-whisper server's /v1/models). Suggestions only — the field
+  // stays free-text; empty/failed fetch leaves a plain input. Call after save.
+  var modelList = el('set-sttModelOptions');
+  async function loadSttModelOptions() {
+    if (!modelList) return;
+    try {
+      var res = await fetch('/api/stt/models', { credentials: 'same-origin' });
+      var data = await res.json();
+      var models = (data && data.models) || [];
+      modelList.innerHTML = '';
+      models.forEach(function(m) {
+        if (!m || !m.value) return;
+        var o = document.createElement('option');
+        o.value = m.value;
+        if (m.label && m.label !== m.value) o.label = m.label;
+        modelList.appendChild(o);
+      });
+    } catch (e) { /* keep free-text; ignore */ }
+  }
+
+  provSel.addEventListener('change', function() { updateVisibility(); saveSTT().then(loadSttModelOptions); });
   modelSelect.addEventListener('change', saveSTT);
   modelInput.addEventListener('change', saveSTT);
   langInput.addEventListener('change', saveSTT);
   if (sttEnabledToggle) sttEnabledToggle.addEventListener('change', function() { syncSttDisabled(); saveSTT(); });
+
+  loadSttModelOptions();   // populate the model dropdown for the saved endpoint
 }
 
 /* ═══════════════════════════════════════════

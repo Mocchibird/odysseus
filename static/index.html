@@ -1648,7 +1648,8 @@
                   <option value="sage">Sage</option>
                   <option value="shimmer">Shimmer</option>
                 </select>
-                <input id="set-ttsVoiceInput" type="text" placeholder="en-US-AvaNeural" style="flex:1;padding:5px;display:none;">
+                <input id="set-ttsVoiceInput" type="text" placeholder="en-US-AvaNeural" list="set-ttsVoiceOptions" style="flex:1;padding:5px;display:none;">
+                <datalist id="set-ttsVoiceOptions"></datalist>
               </div>
               <div id="set-ttsSpeedRow" style="display:flex;align-items:center;gap:0.75rem;">
                 <label class="settings-label">Speed</label>
@@ -1684,7 +1685,8 @@
                 <select id="set-sttModelSelect" class="settings-select">
                   <option value="whisper-1">whisper-1</option>
                 </select>
-                <input id="set-sttModelInput" type="text" placeholder="optional — leave blank (the whisper server's model is used)" style="flex:1;padding:5px;display:none;">
+                <input id="set-sttModelInput" type="text" placeholder="optional — leave blank (the whisper server's model is used)" list="set-sttModelOptions" style="flex:1;padding:5px;display:none;">
+                <datalist id="set-sttModelOptions"></datalist>
               </div>
               <div id="set-sttLangRow" style="display:flex;align-items:center;gap:0.75rem;">
                 <label class="settings-label">Language</label>
@@ -2583,7 +2585,7 @@
 <script type="module" src="/static/js/spinner.js"></script>
 <script type="module" src="/static/js/tts-ai.js"></script>
 <script type="module" src="/static/js/document.js?v=460"></script>
-<script type="module" src="/static/js/gallery.js?v=450"></script>
+<script type="module" src="/static/js/gallery.js?v=451"></script>
 <script type="module" src="/static/js/chatRenderer.js"></script>
 <script type="module" src="/static/js/codeRunner.js"></script>
 <script type="module" src="/static/js/chatStream.js"></script>
@@ -2594,8 +2596,8 @@
 <script type="module" src="/static/js/compare/index.js"></script>
 <script type="module" src="/static/js/theme.js?v=397"></script>
 <script type="module" src="/static/js/censor.js"></script>
-<script type="module" src="/static/js/settings.js?v=454"></script>
-<script type="module" src="/static/js/admin.js?v=455"></script>
+<script type="module" src="/static/js/settings.js?v=455"></script>
+<script type="module" src="/static/js/admin.js?v=456"></script>
 <script type="module" src="/static/js/assistant.js"></script>
 <script type="module" src="/static/app.js?v=463"></script>  <!-- app.js must be LAST -->
 <script type="module" src="/static/js/init.js"></script>

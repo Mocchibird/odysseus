@@ -22,6 +22,16 @@ def setup_stt_routes(stt_service):
             logger.error(f"Failed to get STT stats: {e}")
             raise HTTPException(status_code=500, detail=str(e))
 
+    @router.get("/models")
+    async def list_stt_models():
+        """Available models for the configured STT endpoint (settings dropdown).
+        Returns {models: []} when the provider can't enumerate — UI keeps free-text."""
+        try:
+            return {"models": stt_service.list_models()}
+        except Exception as e:
+            logger.warning(f"Failed to list STT models: {e}")
+            return {"models": []}
+
     @router.post("/transcribe")
     async def transcribe_audio(file: UploadFile = File(...)):
         """Transcribe uploaded audio file to text"""

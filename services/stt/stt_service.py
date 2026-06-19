@@ -178,6 +178,48 @@ class STTService:
             logger.error(f"ElevenLabs STT error: {e}")
             return None
 
+    # ── Model listing (for the settings dropdown) ──
+
+    def list_models(self) -> list:
+        """Best-effort list of models for the configured STT endpoint, as
+        [{"value","label"}]. Only OpenAI-compatible endpoints (e.g. a self-hosted
+        faster-whisper server) enumerate via /models; others return []. Never raises."""
+        settings = self._load_settings()
+        provider = settings.get("stt_provider") or "disabled"
+        try:
+            if provider.startswith("endpoint:"):
+                return self._list_models_endpoint(provider.split(":", 1)[1])
+        except Exception as e:
+            logger.warning(f"list_models failed for provider {provider}: {e}")
+        return []
+
+    def _list_models_endpoint(self, endpoint_id: str) -> list:
+        from src.database import SessionLocal, ModelEndpoint
+        db = SessionLocal()
+        try:
+            ep = db.query(ModelEndpoint).filter(ModelEndpoint.id == endpoint_id).first()
+            if not ep:
+                return []
+            base_url = ep.base_url.rstrip("/")
+            api_key = ep.api_key
+        finally:
+            db.close()
+        headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+        r = httpx.get(base_url + "/models", headers=headers, timeout=15)
+        if r.status_code != 200:
+            return []
+        data = r.json()
+        items = data.get("data") if isinstance(data, dict) else data
+        out = []
+        for it in (items or []):
+            if isinstance(it, str):
+                out.append({"value": it, "label": it})
+            elif isinstance(it, dict):
+                val = it.get("id") or it.get("model") or it.get("name")
+                if val:
+                    out.append({"value": val, "label": val})
+        return out
+
     # ── Public interface ──
 
     def transcribe(self, audio_bytes: bytes) -> Optional[str]:

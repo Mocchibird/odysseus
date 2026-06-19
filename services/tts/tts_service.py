@@ -327,6 +327,113 @@ class TTSService:
             logger.error(f"API TTS synthesis failed: {e}")
             return None
 
+    # ── Voice listing (for the settings dropdown) ──
+
+    def list_voices(self) -> list:
+        """Best-effort list of available voices for the configured provider, as
+        [{"value","label"}]. Returns [] when the provider can't enumerate (the UI
+        then keeps its free-text field). Never raises."""
+        settings = self._load_settings()
+        provider = settings.get("tts_provider") or "disabled"
+        try:
+            if provider == "edge":
+                return self._list_voices_edge()
+            if provider == "azure":
+                return self._list_voices_azure(settings)
+            if provider == "elevenlabs":
+                return self._list_voices_elevenlabs(settings)
+            if provider.startswith("endpoint:"):
+                return self._list_voices_endpoint(provider.split(":", 1)[1])
+        except Exception as e:
+            logger.warning(f"list_voices failed for provider {provider}: {e}")
+        return []
+
+    def _list_voices_edge(self) -> list:
+        def _run():
+            import asyncio
+            try:
+                import edge_tts
+            except ImportError:
+                return []
+            return asyncio.run(edge_tts.list_voices())
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=1) as ex:
+            voices = ex.submit(_run).result(timeout=30) or []
+        out = []
+        for v in voices:
+            sn = v.get("ShortName")
+            if not sn:
+                continue
+            gender = v.get("Gender", "")
+            out.append({"value": sn, "label": f"{sn}" + (f" ({gender})" if gender else "")})
+        out.sort(key=lambda x: x["value"])
+        return out
+
+    def _list_voices_azure(self, settings: dict) -> list:
+        key = (settings.get("azure_speech_key") or "").strip()
+        region = (settings.get("azure_speech_region") or "").strip()
+        if not key or not region:
+            return []
+        url = f"https://{region}.tts.speech.microsoft.com/cognitiveservices/voices/list"
+        r = httpx.get(url, headers={"Ocp-Apim-Subscription-Key": key}, timeout=30)
+        if r.status_code != 200:
+            return []
+        out = []
+        for v in (r.json() or []):
+            sn = v.get("ShortName")
+            if not sn:
+                continue
+            local = v.get("LocalName") or v.get("DisplayName") or ""
+            out.append({"value": sn, "label": f"{sn}" + (f" — {local}" if local else "")})
+        out.sort(key=lambda x: x["value"])
+        return out
+
+    def _list_voices_elevenlabs(self, settings: dict) -> list:
+        key = (settings.get("elevenlabs_api_key") or "").strip()
+        if not key:
+            return []
+        r = httpx.get("https://api.elevenlabs.io/v1/voices", headers={"xi-api-key": key}, timeout=30)
+        if r.status_code != 200:
+            return []
+        out = []
+        for v in (r.json() or {}).get("voices", []):
+            vid = v.get("voice_id")
+            if not vid:
+                continue
+            name = v.get("name") or vid
+            out.append({"value": vid, "label": f"{name} ({vid[:8]}…)"})
+        return out
+
+    def _list_voices_endpoint(self, endpoint_id: str) -> list:
+        from src.database import SessionLocal, ModelEndpoint
+        db = SessionLocal()
+        try:
+            ep = db.query(ModelEndpoint).filter(ModelEndpoint.id == endpoint_id).first()
+            if not ep:
+                return []
+            base_url = ep.base_url.rstrip("/")
+            api_key = ep.api_key
+        finally:
+            db.close()
+        headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+        # Kokoro-FastAPI (and similar) expose the voice catalogue here.
+        r = httpx.get(base_url + "/audio/voices", headers=headers, timeout=15)
+        if r.status_code != 200:
+            return []
+        data = r.json()
+        # Accept {"voices":[...]}, {"data":[...]}, or a bare list; items may be
+        # strings or {id/name/voice_id} dicts.
+        items = data.get("voices") or data.get("data") if isinstance(data, dict) else data
+        out = []
+        for it in (items or []):
+            if isinstance(it, str):
+                out.append({"value": it, "label": it})
+            elif isinstance(it, dict):
+                val = it.get("id") or it.get("voice_id") or it.get("name")
+                if val:
+                    out.append({"value": val, "label": it.get("name") or val})
+        return out
+
     # ── Public interface ──
 
     def synthesize(self, text: str, use_cache: bool = True) -> Optional[bytes]:

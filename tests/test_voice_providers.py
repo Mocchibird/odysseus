@@ -95,6 +95,22 @@ def test_endpoint_tts_uses_free_text_model_voice():
     assert "af_heart" in SETTINGS_JS   # Kokoro prefill
 
 
+def test_voice_listing_endpoints_and_datalists():
+    tts_routes = (ROOT / "routes" / "tts_routes.py").read_text(encoding="utf-8")
+    stt_routes = (ROOT / "routes" / "stt_routes.py").read_text(encoding="utf-8")
+    # Backend list endpoints + service methods that feed the dropdowns.
+    assert '@router.get("/voices")' in tts_routes
+    assert '@router.get("/models")' in stt_routes
+    assert "def list_voices" in TTS_SRC
+    assert "def list_models" in STT_SRC
+    # <datalist> suggestions on the voice + STT model fields (free-text preserved).
+    assert 'list="set-ttsVoiceOptions"' in HTML and '<datalist id="set-ttsVoiceOptions">' in HTML
+    assert 'list="set-sttModelOptions"' in HTML and '<datalist id="set-sttModelOptions">' in HTML
+    # Frontend fetches the lists.
+    assert "/api/tts/voices" in SETTINGS_JS
+    assert "/api/stt/models" in SETTINGS_JS
+
+
 def test_voice_endpoints_excluded_from_chat_models():
     # /api/models feeds the chat + agent picker and the allow-list — a Whisper/
     # Kokoro endpoint's model ids must NOT leak into those (image stays).
