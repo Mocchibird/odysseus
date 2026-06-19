@@ -68,15 +68,17 @@ class AITTSManager {
             .replace(/<think(?:ing)?\b[^>]*>[\s\S]*?<\/think(?:ing)?>/gi, '')
             .replace(/<think(?:ing)?\b[^>]*>[\s\S]*$/i, '');
 
-        // Create a temporary div to parse HTML/markdown
-        const temp = document.createElement('div');
-        temp.innerHTML = cleaned;
+        // Parse to plain text with DOMParser (text/html is INERT — no scripts run,
+        // no <img>/resource loads), instead of assigning innerHTML on an element,
+        // so a reply containing active HTML (e.g. <img onerror>) can't fire. We
+        // only want the text out.
+        const doc = new DOMParser().parseFromString(cleaned, 'text/html');
 
         // Remove rendered thinking folds + code blocks
-        temp.querySelectorAll('.thinking-section, pre, code').forEach(el => el.remove());
+        doc.querySelectorAll('.thinking-section, pre, code').forEach(el => el.remove());
 
         // Get text content
-        let text = temp.textContent || temp.innerText || '';
+        let text = (doc.body && doc.body.textContent) || '';
 
         // Clean up markdown syntax
         text = text
