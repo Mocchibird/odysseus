@@ -1095,11 +1095,10 @@ async function initTtsSettings() {
 
   function isEndpoint() { return provSel.value.startsWith('endpoint:'); }
   function getModel() {
-    if (isEndpoint()) return modelSelect.value;
     if (provSel.value === 'elevenlabs' && elevenModel) return elevenModel.value;
-    return modelInput.value;
+    return modelInput.value;   // free-text for endpoints (Kokoro/Piper/OpenAI) too
   }
-  function getVoice() { return isEndpoint() ? voiceSelect.value : voiceInput.value; }
+  function getVoice() { return voiceInput.value; }   // free-text for every provider
 
   function updateVisibility() {
     var prov = provSel.value;
@@ -1109,20 +1108,24 @@ async function initTtsSettings() {
     if (azureRow) azureRow.style.display = prov === 'azure' ? 'flex' : 'none';
     if (elevenRow) elevenRow.style.display = prov === 'elevenlabs' ? 'flex' : 'none';
     if (edgeNote) edgeNote.style.display = prov === 'edge' ? 'block' : 'none';
-    if (isEndpoint()) {
-      modelSelect.style.display = ''; modelInput.style.display = 'none';
-      voiceSelect.style.display = ''; voiceInput.style.display = 'none';
-    } else {
-      modelSelect.style.display = 'none'; modelInput.style.display = '';
-      voiceSelect.style.display = 'none'; voiceInput.style.display = prov === 'disabled' ? 'none' : '';
-    }
+    // Free-text model + voice for ALL providers. A local endpoint (Kokoro/Piper)
+    // uses its OWN model/voice names — the old fixed OpenAI dropdowns sent
+    // "tts-1"/"alloy" to Kokoro and synthesis failed. modelRow shows for endpoints.
+    modelSelect.style.display = 'none'; modelInput.style.display = '';
+    voiceSelect.style.display = 'none'; voiceInput.style.display = prov === 'disabled' ? 'none' : '';
   }
 
   try {
     var epRes = await fetch('/api/model-endpoints', { credentials: 'same-origin' });
     var endpoints = await epRes.json();
+    var _seenTts = {};
     endpoints.forEach(function(ep) {
       if (!ep.is_enabled) return;
+      // Collapse endpoints that are the same server added more than once so the
+      // dropdown doesn't list duplicates (delete the extra rows in Added Models).
+      var k = (ep.base_url || '') + '|' + (ep.name || '');
+      if (_seenTts[k]) return;
+      _seenTts[k] = 1;
       // Show every enabled endpoint — a local TTS server (Kokoro/Piper) names its
       // model "kokoro"/etc., which wouldn't match a "tts"/"audio" keyword filter,
       // so it'd never appear. The STT select shows all endpoints too; match that.
@@ -1172,7 +1175,17 @@ async function initTtsSettings() {
   var _placeholderVoices = ['af_heart', 'alloy', ''];
   provSel.addEventListener('change', function() {
     var prov = provSel.value;
-    if (isEndpoint()) { voiceSelect.value = 'alloy'; modelSelect.value = 'tts-1'; }
+    if (isEndpoint()) {
+      // Free-text model + voice; the server defines the names. Prefill sensible
+      // Kokoro values when the endpoint is clearly a Kokoro server so Preview works.
+      modelInput.placeholder = 'model (e.g. kokoro, tts-1)';
+      voiceInput.placeholder = 'voice (e.g. af_heart, alloy)';
+      var label = (provSel.options[provSel.selectedIndex] || {}).textContent || '';
+      if (/kokoro/i.test(label)) {
+        if (_placeholderVoices.indexOf(voiceInput.value) !== -1) voiceInput.value = 'af_heart';
+        if (['tts-1', 'tts-1-hd', 'gpt-4o-mini-tts', ''].indexOf(modelInput.value || '') !== -1) modelInput.value = 'kokoro';
+      }
+    }
     else if (prov === 'edge') {
       if (_placeholderVoices.indexOf(voiceInput.value) !== -1) voiceInput.value = 'en-US-AvaNeural';
       voiceInput.placeholder = 'e.g. en-US-AvaNeural';
@@ -1295,8 +1308,13 @@ async function initSttSettings() {
   try {
     var epRes = await fetch('/api/model-endpoints', { credentials: 'same-origin' });
     var endpoints = await epRes.json();
+    var _seenStt = {};
     endpoints.forEach(function(ep) {
       if (!ep.is_enabled) return;
+      // Collapse the same server added more than once (delete extras in Added Models).
+      var k = (ep.base_url || '') + '|' + (ep.name || '');
+      if (_seenStt[k]) return;
+      _seenStt[k] = 1;
       var opt = document.createElement('option'); opt.value = 'endpoint:' + ep.id; opt.textContent = ep.name + ' (API)'; provSel.appendChild(opt);
     });
   } catch (e) { console.warn('Failed to load endpoints for STT', e); }
