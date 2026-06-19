@@ -6,7 +6,7 @@
 import spinnerModule from './spinner.js';
 import { styledConfirm, showToast, emptyStateIcon } from './ui.js';
 import { folderDisplayName, sortedFolders } from './emailInbox.js';
-import settingsModule from './settings.js?v=451';
+import settingsModule from './settings.js?v=452';
 import * as Modals from './modalManager.js';
 import { makeWindowDraggable } from './windowDrag.js';
 import {

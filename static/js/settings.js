@@ -1118,14 +1118,14 @@ async function initTtsSettings() {
     }
   }
 
-  var ttsKeywords = ['tts', 'audio'];
   try {
     var epRes = await fetch('/api/model-endpoints', { credentials: 'same-origin' });
     var endpoints = await epRes.json();
     endpoints.forEach(function(ep) {
       if (!ep.is_enabled) return;
-      var hasTTS = (ep.models || []).some(m => ttsKeywords.some(kw => m.toLowerCase().includes(kw)));
-      if (!hasTTS) return;
+      // Show every enabled endpoint — a local TTS server (Kokoro/Piper) names its
+      // model "kokoro"/etc., which wouldn't match a "tts"/"audio" keyword filter,
+      // so it'd never appear. The STT select shows all endpoints too; match that.
       var opt = document.createElement('option'); opt.value = 'endpoint:' + ep.id; opt.textContent = ep.name + ' (API)'; provSel.appendChild(opt);
     });
   } catch (e) { console.warn('Failed to load endpoints for TTS', e); }

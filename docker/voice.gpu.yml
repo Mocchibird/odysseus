@@ -1,0 +1,70 @@
+# Local voice (GPU) overlay — runs a Kokoro TTS server and a faster-whisper STT
+# server next to Odysseus, both exposing OpenAI-compatible APIs. Nothing leaves
+# your machine: Odysseus talks to them over the Docker network and reads aloud /
+# transcribes entirely on your GPU.
+#
+# Enable by adding this file to COMPOSE_FILE in .env (after the NVIDIA overlay):
+#   COMPOSE_FILE=docker-compose.yml:docker/gpu.nvidia.yml:docker/voice.gpu.yml
+#
+# Requires the NVIDIA Container Toolkit on the host (same as docker/gpu.nvidia.yml):
+#   sudo nvidia-ctk runtime configure --runtime=docker && sudo systemctl restart docker
+#   docker info | grep -i nvidia        # verify
+# A GTX 1080 Ti (Pascal, 11GB) is plenty — Kokoro-82M and Whisper small/base are tiny.
+#
+# After `docker compose up -d`, wire them in the UI ONCE:
+#   Settings -> Add Models -> add two endpoints:
+#     TTS: name "Kokoro",  base URL  http://kokoro:8880/v1     (no API key)
+#     STT: name "Whisper", base URL  http://whisper:8000/v1    (no API key)
+#   Then Settings -> AI Defaults:
+#     Text to Speech -> Provider = Kokoro (API);  Voice = af_heart (or another Kokoro voice)
+#     Speech to Text -> Provider = Whisper (API)
+#
+# These images are third-party and pull on first boot. If a tag has moved,
+# check the projects' READMEs and pin a working tag here:
+#   Kokoro-FastAPI:        https://github.com/remsky/Kokoro-FastAPI
+#   faster-whisper-server: https://github.com/fedirz/faster-whisper-server
+services:
+  kokoro:
+    # Kokoro-82M TTS, OpenAI-compatible /v1/audio/speech (POST {model,input,voice}).
+    image: ${KOKORO_IMAGE:-ghcr.io/remsky/kokoro-fastapi-gpu:latest}
+    ports:
+      # Loopback host bind for debugging only — Odysseus reaches it as kokoro:8880.
+      - "${KOKORO_BIND:-127.0.0.1}:8880:8880"
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    restart: unless-stopped
+
+  whisper:
+    # faster-whisper STT, OpenAI-compatible /v1/audio/transcriptions.
+    # Downloads the model on first use; the HF cache is persisted below.
+    image: ${WHISPER_IMAGE:-fedirz/faster-whisper-server:latest-cuda}
+    ports:
+      # Loopback host bind for debugging only — Odysseus reaches it as whisper:8000.
+      - "${WHISPER_BIND:-127.0.0.1}:8085:8000"
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+      # Model + device. "small" is a good speed/quality balance on a 1080 Ti;
+      # use "Systran/faster-whisper-medium" for better accuracy, "...-base" for speed.
+      - WHISPER__MODEL=${WHISPER_MODEL:-Systran/faster-whisper-small}
+      - WHISPER__INFERENCE_DEVICE=cuda
+      - WHISPER__COMPUTE_TYPE=${WHISPER_COMPUTE_TYPE:-float16}
+    volumes:
+      # Persist the downloaded model so a container recreate doesn't refetch it.
+      - ${APP_DATA_DIR:-./data}/whisper-cache:/root/.cache/huggingface:z
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    restart: unless-stopped
