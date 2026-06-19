@@ -1090,10 +1090,15 @@ async function initTtsSettings() {
   var azureRegion = el('set-ttsAzureRegion');
   var elevenRow = el('set-ttsElevenRow');
   var elevenKey = el('set-ttsElevenKey');
+  var elevenModel = el('set-ttsElevenModel');
   var edgeNote = el('set-ttsEdgeNote');
 
   function isEndpoint() { return provSel.value.startsWith('endpoint:'); }
-  function getModel() { return isEndpoint() ? modelSelect.value : modelInput.value; }
+  function getModel() {
+    if (isEndpoint()) return modelSelect.value;
+    if (provSel.value === 'elevenlabs' && elevenModel) return elevenModel.value;
+    return modelInput.value;
+  }
   function getVoice() { return isEndpoint() ? voiceSelect.value : voiceInput.value; }
 
   function updateVisibility() {
@@ -1130,6 +1135,7 @@ async function initTtsSettings() {
     var settings = await settingsRes.json();
     if (settings.tts_provider) provSel.value = settings.tts_provider;
     if (settings.tts_model) { modelSelect.value = settings.tts_model; modelInput.value = settings.tts_model; }
+    if (elevenModel && (settings.tts_model || '').indexOf('eleven') === 0) elevenModel.value = settings.tts_model;
     if (settings.tts_voice) { voiceSelect.value = settings.tts_voice; voiceInput.value = settings.tts_voice; }
     if (settings.tts_speed) { speedSelect.value = settings.tts_speed; }
     if (azureKey && settings.azure_speech_key) azureKey.value = settings.azure_speech_key;
@@ -1184,6 +1190,7 @@ async function initTtsSettings() {
   });
   modelSelect.addEventListener('change', saveAndClearCache);
   modelInput.addEventListener('change', saveTTS);
+  if (elevenModel) elevenModel.addEventListener('change', saveAndClearCache);
   voiceSelect.addEventListener('change', saveAndClearCache);
   voiceInput.addEventListener('change', saveTTS);
   if (azureKey) azureKey.addEventListener('change', saveAndClearCache);

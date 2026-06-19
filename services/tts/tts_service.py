@@ -25,6 +25,65 @@ def _safe_speed(value, default: float = 1.0) -> float:
     return speed if speed > 0 else default
 
 
+# Default Edge/Azure neural voice per language, used when the text's dominant
+# script differs from the configured voice's language (auto language switch).
+_LANG_DEFAULT_VOICE = {
+    "ko": "ko-KR-SunHiNeural",
+    "ja": "ja-JP-NanamiNeural",
+    "zh": "zh-CN-XiaoxiaoNeural",
+    "ru": "ru-RU-SvetlanaNeural",
+    "ar": "ar-SA-ZariyahNeural",
+    "hi": "hi-IN-SwaraNeural",
+    "th": "th-TH-PremwadeeNeural",
+    "he": "he-IL-HilaNeural",
+    "el": "el-GR-AthinaNeural",
+}
+
+
+def _dominant_lang(text: str):
+    """Best-effort language of `text` from its dominant Unicode script, for
+    auto-switching the TTS voice. Returns a short code (ko/ja/zh/ru/…) only when
+    a NON-Latin script clearly dominates; returns None for Latin/unknown text so
+    the configured voice (English, German, etc.) is left untouched. Latin-script
+    languages can't be told apart by script alone, so we don't try."""
+    counts = {}
+    latin = 0
+    for ch in text:
+        o = ord(ch)
+        if ("a" <= ch <= "z") or ("A" <= ch <= "Z"):
+            latin += 1
+        elif 0x3040 <= o <= 0x30FF:                                   # hiragana/katakana
+            counts["ja"] = counts.get("ja", 0) + 1
+        elif 0xAC00 <= o <= 0xD7A3 or 0x1100 <= o <= 0x11FF or 0x3130 <= o <= 0x318F:
+            counts["ko"] = counts.get("ko", 0) + 1
+        elif 0x4E00 <= o <= 0x9FFF or 0x3400 <= o <= 0x4DBF:          # CJK ideographs
+            counts["han"] = counts.get("han", 0) + 1
+        elif 0x0400 <= o <= 0x04FF:
+            counts["ru"] = counts.get("ru", 0) + 1
+        elif 0x0600 <= o <= 0x06FF:
+            counts["ar"] = counts.get("ar", 0) + 1
+        elif 0x0E00 <= o <= 0x0E7F:
+            counts["th"] = counts.get("th", 0) + 1
+        elif 0x0900 <= o <= 0x097F:
+            counts["hi"] = counts.get("hi", 0) + 1
+        elif 0x0590 <= o <= 0x05FF:
+            counts["he"] = counts.get("he", 0) + 1
+        elif 0x0370 <= o <= 0x03FF:
+            counts["el"] = counts.get("el", 0) + 1
+    # Kanji belongs to Japanese when kana is present, otherwise treat as Chinese.
+    han = counts.pop("han", 0)
+    if counts.get("ja"):
+        counts["ja"] += han
+    elif han:
+        counts["zh"] = han
+    if not counts:
+        return None
+    top = max(counts, key=counts.get)
+    # Require the non-Latin script to actually dominate (so an English sentence
+    # with one foreign word keeps the configured voice).
+    return top if counts[top] >= latin else None
+
+
 class TTSService:
     """Multi-provider TTS service.
 
@@ -99,6 +158,22 @@ class TTSService:
             count += 1
         logger.info(f"Cleared {count} cached TTS files")
 
+    # ── Auto language → voice (Edge/Azure neural voices) ──
+
+    def _resolve_voice_for_text(self, text: str, voice: str) -> str:
+        """Pick a neural voice that matches the text's language. If the text is
+        dominantly a non-Latin script (Korean, Japanese, …) that differs from the
+        configured voice's language, swap to a sensible default voice for that
+        language so a multilingual reply reads correctly without manual switching.
+        Latin/unknown text keeps the configured voice untouched."""
+        lang = _dominant_lang(text or "")
+        if not lang:
+            return voice
+        cur = (voice or "").split("-")[0].lower()
+        if cur == lang:
+            return voice  # configured voice already speaks this language
+        return _LANG_DEFAULT_VOICE.get(lang, voice)
+
     # ── Microsoft Edge TTS (free) ──
 
     def _synthesize_edge(self, text: str, voice: str, speed: float) -> Optional[bytes]:
@@ -108,6 +183,7 @@ class TTSService:
         v = (voice or "").strip()
         if "Neural" not in v:                       # OpenAI-style names won't work
             v = "en-US-AvaNeural"
+        v = self._resolve_voice_for_text(text, v)   # auto-switch voice by language
         rate_pct = int(round((speed - 1.0) * 100))  # 1.0->+0%, 1.5->+50%
         rate = f"{'+' if rate_pct >= 0 else ''}{rate_pct}%"
 
@@ -153,6 +229,7 @@ class TTSService:
         v = (voice or "").strip()
         if "Neural" not in v:                       # OpenAI-style names won't work
             v = "en-US-AriaNeural"
+        v = self._resolve_voice_for_text(text, v)   # auto-switch voice by language
         parts = v.split("-")
         lang = "-".join(parts[:2]) if len(parts) >= 2 else "en-US"
         rate_pct = int(round((speed - 1.0) * 100))           # 1.0->0%, 1.5->+50%
@@ -187,7 +264,9 @@ class TTSService:
             logger.error("ElevenLabs TTS: elevenlabs_api_key not set")
             return None
         voice_id = (voice or "").strip() or "21m00Tcm4TlvDq8ikWAM"   # "Rachel" default
-        model_id = model if (model or "").startswith("eleven") else "eleven_multilingual_v2"
+        # Flash v2.5 by default — ~half the credits of multilingual_v2, low latency,
+        # and still multilingual (auto-detects the language of the text, one voice).
+        model_id = model if (model or "").startswith("eleven") else "eleven_flash_v2_5"
         url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
         headers = {
             "xi-api-key": key,

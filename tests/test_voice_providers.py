@@ -91,3 +91,32 @@ def test_frontend_drops_browser_voice_paths():
     # The read-aloud manager no longer has a Web Speech path.
     assert "speechSynthesis" not in TTS_JS
     assert "useBrowserTTS" not in TTS_JS
+
+
+def test_elevenlabs_defaults_to_flash():
+    # Flash v2.5 is the cheapest ElevenLabs model; it's the default unless the
+    # user picks another in the UI (tts_model starting with "eleven").
+    assert "eleven_flash_v2_5" in TTS_SRC
+    assert "eleven_multilingual_v2" not in TTS_SRC.split("# Flash v2.5")[0]  # not the default branch
+    # UI lets the user choose the model.
+    assert "set-ttsElevenModel" in HTML and "set-ttsElevenModel" in SETTINGS_JS
+
+
+def test_tts_auto_language_voice_switch():
+    import importlib
+    mod = importlib.import_module("services.tts.tts_service")
+    dom = mod._dominant_lang
+    # Non-Latin scripts are detected; Latin/empty stays None (keep configured voice).
+    assert dom("こんにちは、元気ですか") == "ja"
+    assert dom("안녕하세요 반갑습니다") == "ko"
+    assert dom("Hello, how are you?") is None
+    assert dom("") is None
+    # A mostly-English sentence with one foreign word keeps the configured voice.
+    assert dom("The word 猫 means cat") is None
+
+    svc = mod.TTSService(cache_dir="/tmp/_ttscv_lang")
+    # en voice + Japanese text → a Japanese voice; English text → unchanged.
+    assert svc._resolve_voice_for_text("こんにちは", "en-US-AvaNeural") == "ja-JP-NanamiNeural"
+    assert svc._resolve_voice_for_text("Hello there", "en-US-AvaNeural") == "en-US-AvaNeural"
+    # Configured voice already in the right language → left as-is.
+    assert svc._resolve_voice_for_text("안녕", "ko-KR-InJoonNeural") == "ko-KR-InJoonNeural"
