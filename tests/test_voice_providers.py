@@ -95,6 +95,17 @@ def test_endpoint_tts_uses_free_text_model_voice():
     assert "af_heart" in SETTINGS_JS   # Kokoro prefill
 
 
+def test_voice_endpoints_excluded_from_chat_models():
+    # /api/models feeds the chat + agent picker and the allow-list — a Whisper/
+    # Kokoro endpoint's model ids must NOT leak into those (image stays).
+    src = (ROOT / "routes" / "model_routes.py").read_text(encoding="utf-8")
+    assert 'if ep_model_type in ("stt", "tts")' in src
+    # The API add-form type selector (injected by fork-ui.js) offers TTS + STT too.
+    fu = (ROOT / "static" / "js" / "fork-ui.js").read_text(encoding="utf-8")
+    assert '<option value="tts">TTS</option>' in fu
+    assert '<option value="stt">STT</option>' in fu
+
+
 def test_settings_have_elevenlabs_key():
     src = (ROOT / "src" / "settings.py").read_text(encoding="utf-8")
     assert '"elevenlabs_api_key"' in src

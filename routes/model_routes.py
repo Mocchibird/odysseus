@@ -1202,6 +1202,13 @@ def setup_model_routes(model_discovery):
             provider = _safe_detect_provider(base)
             # Merge cached + pinned models, then filter out hidden ones
             ep_model_type = getattr(ep, "model_type", None) or "llm"
+            # /api/models feeds the chat + agent model pickers and the chat
+            # allow-list. A voice endpoint (stt/tts) exposes whisper/kokoro model
+            # ids that aren't chat models, so keep those out of these lists. Image
+            # is intentionally NOT excluded — the image-settings picker also
+            # sources from here.
+            if ep_model_type in ("stt", "tts"):
+                continue
             model_ids = _visible_models(
                 _cached_model_ids(ep),
                 ep.hidden_models,

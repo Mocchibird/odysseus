@@ -52,9 +52,11 @@ function _injectApiTokensPanel() {
 }
 
 // ── Endpoint "Type" selector (admin → Add Models form) ───────────────────────
-// Fork-only: lets you mark an added endpoint as an Image-generation endpoint
-// (model_type=image) rather than a chat LLM. admin.js reads #adm-epType when
-// building the add-endpoint request (guarded — absent = defaults to llm).
+// Fork-only: lets you mark an added endpoint as Image-generation / TTS / STT
+// (model_type) rather than a chat LLM. admin.js reads #adm-epType when building
+// the add-endpoint request (guarded — absent = defaults to llm). TTS/STT
+// endpoints are kept out of the chat model picker server-side (model_type filter
+// in _fetch_models) and surface in the AI-Defaults voice provider selects.
 // Upstream's redesigned Add-Models form never had it, so we inject it next to
 // the Add button in the upstream-stable #adm-epApiKey-row.
 function _injectEndpointTypeSelect() {
@@ -65,7 +67,7 @@ function _injectEndpointTypeSelect() {
   const label = document.createElement('label');
   label.dataset.forkUi = 'ep-type';
   label.style.cssText = 'display:inline-flex;align-items:center;gap:4px;font-size:11px;opacity:0.7;flex-shrink:0;';
-  label.innerHTML = 'Type:<select id="adm-epType" style="height:32px;padding:4px 6px;flex-shrink:0;box-sizing:border-box;"><option value="llm" selected>LLM</option><option value="image">Image</option></select>';
+  label.innerHTML = 'Type:<select id="adm-epType" style="height:32px;padding:4px 6px;flex-shrink:0;box-sizing:border-box;"><option value="llm" selected>LLM</option><option value="image">Image</option><option value="tts">TTS</option><option value="stt">STT</option></select>';
   if (addBtn) row.insertBefore(label, addBtn);                  // sits before "Add"
   else row.appendChild(label);
 }
