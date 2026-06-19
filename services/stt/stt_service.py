@@ -76,8 +76,17 @@ class STTService:
         if api_key:
             headers["Authorization"] = f"Bearer {api_key}"
 
-        files = {"file": ("audio.webm", io.BytesIO(audio_bytes), "audio/webm")}
-        data = {"model": model or "whisper-1"}
+        # Whisper-style servers decode a clean 16kHz mono PCM WAV far more
+        # reliably than the browser's webm/opus — raw opus often arrives as
+        # near-silence, so Whisper "detects" a bogus low-confidence language
+        # (e.g. nn) and returns gibberish. Transcode when ffmpeg is available;
+        # fall back to the original bytes if it isn't (graceful degradation).
+        wav = self._to_wav16k(audio_bytes)
+        if wav:
+            files = {"file": ("audio.wav", io.BytesIO(wav), "audio/wav")}
+        else:
+            files = {"file": ("audio.webm", io.BytesIO(audio_bytes), "audio/webm")}
+        data = {"model": model or "whisper-1", "response_format": "json"}
         if language:
             data["language"] = language
 

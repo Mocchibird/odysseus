@@ -64,6 +64,14 @@ def test_stt_service_providers():
     assert 'provider == "local"' not in STT_SRC
 
 
+def test_endpoint_stt_transcodes_to_wav():
+    # A served Whisper endpoint gets a clean 16kHz mono PCM WAV, not raw webm/opus
+    # (raw opus → silence → bogus "nn" language detection / gibberish).
+    assert 'files = {"file": ("audio.wav"' in STT_SRC
+    # _transcribe_api reuses the ffmpeg transcode helper before posting.
+    assert "_to_wav16k(audio_bytes)" in STT_SRC
+
+
 def test_settings_have_elevenlabs_key():
     src = (ROOT / "src" / "settings.py").read_text(encoding="utf-8")
     assert '"elevenlabs_api_key"' in src
