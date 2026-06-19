@@ -88,6 +88,18 @@ def test_add_models_offers_stt_tts_types():
     assert '"tts"' in db.split("model_type = Column")[1].split("\n")[0]
 
 
+def test_tts_strips_emoji_and_furigana_readings():
+    # TTS shouldn't vocalize emoji, nor read a kanji's kana reading twice when the
+    # reply writes 自己紹介（じこしょうかい）-style furigana. Both handled in
+    # extractPlainText (spoken text only — display is unaffected).
+    assert "Extended_Pictographic" in TTS_JS              # emoji strip
+    assert "Script=Hiragana" in TTS_JS and "Script=Katakana" in TTS_JS  # kana-reading strip
+    assert "Script=Han" in TTS_JS                          # only after a kanji
+    # English-gloss parens must NOT be blanket-stripped — the furigana rule only
+    # matches all-kana contents, so this stays a targeted change.
+    assert "(.+?)\\]\\(.+?\\)" in TTS_JS  # markdown-link strip still present (unchanged)
+
+
 def test_endpoint_tts_uses_free_text_model_voice():
     # Endpoint TTS keeps a free-text MODEL (Kokoro needs "kokoro", not the OpenAI
     # tts-1 preset that made synthesis fail); the VOICE is the themed select with a

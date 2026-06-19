@@ -87,6 +87,18 @@ class AITTSManager {
             .replace(/\*(.+?)\*/g, '$1') // Remove italic
             .replace(/\[(.+?)\]\(.+?\)/g, '$1') // Remove links
             .replace(/`(.+?)`/g, '$1') // Remove inline code
+            // Drop kana-reading parentheses (furigana): a kanji immediately
+            // followed by （…） whose contents are ALL kana is just the reading,
+            // so TTS would say the word twice (e.g. 自己紹介（じこしょうかい）).
+            // Keep the preceding kanji; only the parenthetical is removed.
+            // Parens with non-kana (e.g. an English gloss "(What's your name?)")
+            // are left intact.
+            .replace(/([\p{Script=Han}々〆〇ヶ])\s*[（(][\p{Script=Hiragana}\p{Script=Katakana}ー・\s]+[）)]/gu, '$1')
+            // Strip emoji / pictographs so TTS doesn't vocalize them
+            // ("slightly smiling face", etc.) — includes ZWJ sequences,
+            // variation selectors, skin-tone modifiers, regional indicators, keycaps.
+            .replace(/[\p{Extended_Pictographic}\p{Emoji_Modifier}\p{Regional_Indicator}\u{FE0F}\u{200D}\u{20E3}]/gu, '')
+            .replace(/[ \t]{2,}/g, ' ') // collapse spaces left by the removals above
             .replace(/\n{3,}/g, '\n\n') // Normalize line breaks
             .trim();
 
