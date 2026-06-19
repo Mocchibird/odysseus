@@ -1118,17 +1118,18 @@ async function initTtsSettings() {
   try {
     var epRes = await fetch('/api/model-endpoints', { credentials: 'same-origin' });
     var endpoints = await epRes.json();
+    var _enabledTts = (endpoints || []).filter(function(ep) { return ep.is_enabled; });
+    // If any endpoint is tagged model_type 'tts', list only those (clean); else
+    // list all enabled endpoints so untagged Kokoro/Piper servers still appear.
+    var _anyTts = _enabledTts.some(function(ep) { return ep.model_type === 'tts'; });
     var _seenTts = {};
-    endpoints.forEach(function(ep) {
-      if (!ep.is_enabled) return;
-      // Collapse endpoints that are the same server added more than once so the
-      // dropdown doesn't list duplicates (delete the extra rows in Added Models).
+    _enabledTts.forEach(function(ep) {
+      if (_anyTts && ep.model_type !== 'tts') return;
+      // Collapse the same server added more than once so the dropdown doesn't
+      // list duplicates (delete the extra rows in Added Models).
       var k = (ep.base_url || '') + '|' + (ep.name || '');
       if (_seenTts[k]) return;
       _seenTts[k] = 1;
-      // Show every enabled endpoint — a local TTS server (Kokoro/Piper) names its
-      // model "kokoro"/etc., which wouldn't match a "tts"/"audio" keyword filter,
-      // so it'd never appear. The STT select shows all endpoints too; match that.
       var opt = document.createElement('option'); opt.value = 'endpoint:' + ep.id; opt.textContent = ep.name + ' (API)'; provSel.appendChild(opt);
     });
   } catch (e) { console.warn('Failed to load endpoints for TTS', e); }
@@ -1308,9 +1309,13 @@ async function initSttSettings() {
   try {
     var epRes = await fetch('/api/model-endpoints', { credentials: 'same-origin' });
     var endpoints = await epRes.json();
+    var _enabledStt = (endpoints || []).filter(function(ep) { return ep.is_enabled; });
+    // Prefer endpoints tagged model_type 'stt'; if none are tagged, show all so an
+    // untagged Whisper server still appears.
+    var _anyStt = _enabledStt.some(function(ep) { return ep.model_type === 'stt'; });
     var _seenStt = {};
-    endpoints.forEach(function(ep) {
-      if (!ep.is_enabled) return;
+    _enabledStt.forEach(function(ep) {
+      if (_anyStt && ep.model_type !== 'stt') return;
       // Collapse the same server added more than once (delete extras in Added Models).
       var k = (ep.base_url || '') + '|' + (ep.name || '');
       if (_seenStt[k]) return;

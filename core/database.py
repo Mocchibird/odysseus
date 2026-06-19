@@ -477,7 +477,7 @@ class ModelEndpoint(TimestampMixin, Base):
     hidden_models = Column(Text, nullable=True)    # JSON list of model IDs that failed probing
     cached_models = Column(Text, nullable=True)    # JSON list of last-known model IDs (avoids probe on list)
     pinned_models = Column(Text, nullable=True)    # JSON list of admin-pinned model IDs (manual, may not appear in /v1/models)
-    model_type = Column(String, nullable=True, default="llm")  # "llm" or "image"
+    model_type = Column(String, nullable=True, default="llm")  # "llm" | "image" | "tts" | "stt"
     # auto = classify by URL; local = self-hosted server; api/proxy = external
     # OpenAI-compatible API even when reachable through a private/tailnet IP.
     endpoint_kind = Column(String, nullable=True, default="auto")

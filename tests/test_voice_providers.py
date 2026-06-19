@@ -72,6 +72,29 @@ def test_endpoint_stt_transcodes_to_wav():
     assert "_to_wav16k(audio_bytes)" in STT_SRC
 
 
+def test_add_models_offers_stt_tts_types():
+    ADMIN_JS = (ROOT / "static" / "js" / "admin.js").read_text(encoding="utf-8")
+    # The "Add a local model server" type selector offers STT + TTS, not just LLM/Image.
+    sel = HTML.split('id="adm-epLocalType"')[1].split("</select>")[0]
+    assert '<option value="tts"' in sel
+    assert '<option value="stt"' in sel
+    # Added-Models list renders a badge for tts/stt endpoints.
+    assert "ep.model_type === 'tts'" in ADMIN_JS and "ep.model_type === 'stt'" in ADMIN_JS
+    # The voice dropdowns prefer type-matched endpoints (with a show-all fallback).
+    assert "model_type === 'tts'" in SETTINGS_JS
+    assert "model_type === 'stt'" in SETTINGS_JS
+    # Backend column doc lists the new types.
+    db = (ROOT / "core" / "database.py").read_text(encoding="utf-8")
+    assert '"tts"' in db.split("model_type = Column")[1].split("\n")[0]
+
+
+def test_endpoint_tts_uses_free_text_model_voice():
+    # Endpoint TTS must use free-text model/voice (Kokoro needs "kokoro"/"af_heart",
+    # not the OpenAI tts-1/alloy presets that made synthesis fail).
+    assert "function getVoice() { return voiceInput.value; }" in SETTINGS_JS
+    assert "af_heart" in SETTINGS_JS   # Kokoro prefill
+
+
 def test_settings_have_elevenlabs_key():
     src = (ROOT / "src" / "settings.py").read_text(encoding="utf-8")
     assert '"elevenlabs_api_key"' in src
