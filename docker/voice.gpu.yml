@@ -64,9 +64,11 @@ services:
       # use "Systran/faster-whisper-medium" for better accuracy, "...-base" for speed.
       - WHISPER__MODEL=${WHISPER_MODEL:-Systran/faster-whisper-small}
       - WHISPER__INFERENCE_DEVICE=cuda
-      # int8 on Pascal (1080 Ti): its FP16 is 1:64 and slow, but DP4A int8 is fast.
-      # On a newer (Turing+) card you can switch to float16 for a bit more accuracy.
-      - WHISPER__COMPUTE_TYPE=${WHISPER_COMPUTE_TYPE:-int8_float16}
+      # Pascal (1080 Ti, compute 6.1): CTranslate2 needs compute capability >= 7.0
+      # (Volta+) for any FP16 path, so int8_float16 / float16 are REJECTED here —
+      # use int8_float32 (int8 matmuls via DP4A + float32 elsewhere). On a Turing+
+      # card you can switch to int8_float16 or float16. ("auto"/"float32" also work.)
+      - WHISPER__COMPUTE_TYPE=${WHISPER_COMPUTE_TYPE:-int8_float32}
     volumes:
       # Persist the downloaded model so a container recreate doesn't refetch it.
       - ${APP_DATA_DIR:-./data}/whisper-cache:/root/.cache/huggingface:z
