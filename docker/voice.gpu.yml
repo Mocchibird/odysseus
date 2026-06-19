@@ -9,7 +9,14 @@
 # Requires the NVIDIA Container Toolkit on the host (same as docker/gpu.nvidia.yml):
 #   sudo nvidia-ctk runtime configure --runtime=docker && sudo systemctl restart docker
 #   docker info | grep -i nvidia        # verify
-# A GTX 1080 Ti (Pascal, 11GB) is plenty — Kokoro-82M and Whisper small/base are tiny.
+#
+# HARDWARE NOTES (tested target: GTX 1080 Ti, driver 570.x / CUDA 12.8):
+#  - A CUDA 12.8 driver runs ANY cuda 12.x image, so the image tags below are fine.
+#  - The 1080 Ti is Pascal (compute 6.1). Pascal's FP16 is very slow (1:64), so
+#    Whisper runs in int8 here (Pascal has fast int8/DP4A) — NOT float16.
+#  - Kokoro-82M is tiny; on Pascal it's simplest+safest to run it on CPU (no
+#    PyTorch/Pascal-kernel risk, still sub-second). Flip KOKORO_IMAGE to the
+#    -gpu tag + add a GPU reservation if you specifically want it on the card.
 #
 # After `docker compose up -d`, wire them in the UI ONCE:
 #   Settings -> Add Models -> add two endpoints:
@@ -26,20 +33,21 @@
 services:
   kokoro:
     # Kokoro-82M TTS, OpenAI-compatible /v1/audio/speech (POST {model,input,voice}).
-    image: ${KOKORO_IMAGE:-ghcr.io/remsky/kokoro-fastapi-gpu:latest}
+    # CPU image by default: the model is tiny (sub-second on CPU) and this avoids
+    # the PyTorch-on-Pascal kernel/FP16 quirks entirely. To run it on the GPU
+    # instead, set KOKORO_IMAGE=ghcr.io/remsky/kokoro-fastapi-gpu:latest and
+    # uncomment the `deploy:` GPU reservation below.
+    image: ${KOKORO_IMAGE:-ghcr.io/remsky/kokoro-fastapi-cpu:latest}
     ports:
       # Loopback host bind for debugging only — Odysseus reaches it as kokoro:8880.
       - "${KOKORO_BIND:-127.0.0.1}:8880:8880"
-    environment:
-      - NVIDIA_VISIBLE_DEVICES=all
-      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
+    # deploy:                       # uncomment with the -gpu image to use the card
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
     restart: unless-stopped
 
   whisper:
@@ -56,7 +64,9 @@ services:
       # use "Systran/faster-whisper-medium" for better accuracy, "...-base" for speed.
       - WHISPER__MODEL=${WHISPER_MODEL:-Systran/faster-whisper-small}
       - WHISPER__INFERENCE_DEVICE=cuda
-      - WHISPER__COMPUTE_TYPE=${WHISPER_COMPUTE_TYPE:-float16}
+      # int8 on Pascal (1080 Ti): its FP16 is 1:64 and slow, but DP4A int8 is fast.
+      # On a newer (Turing+) card you can switch to float16 for a bit more accuracy.
+      - WHISPER__COMPUTE_TYPE=${WHISPER_COMPUTE_TYPE:-int8_float16}
     volumes:
       # Persist the downloaded model so a container recreate doesn't refetch it.
       - ${APP_DATA_DIR:-./data}/whisper-cache:/root/.cache/huggingface:z
