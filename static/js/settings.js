@@ -1078,6 +1078,7 @@ async function initTtsSettings() {
   var modelInput = el('set-ttsModelInput');
   var voiceSelect = el('set-ttsVoiceSelect');
   var voiceInput = el('set-ttsVoiceInput');
+  var _savedTtsVoice = '';   // the user's saved voice, used to seed the dropdown
   var modelRow = el('set-ttsModelRow');
   var voiceRow = el('set-ttsVoiceRow');
   var speedSelect = el('set-ttsSpeedSelect');
@@ -1098,7 +1099,12 @@ async function initTtsSettings() {
     if (provSel.value === 'elevenlabs' && elevenModel) return elevenModel.value;
     return modelInput.value;   // free-text for endpoints (Kokoro/Piper/OpenAI) too
   }
-  function getVoice() { return voiceInput.value; }   // free-text for every provider
+  // Voice uses a themed <select> populated from the provider's voices (consistent
+  // with the app's other dropdowns); it falls back to the free-text input only
+  // when the provider can't enumerate. loadTtsVoiceOptions() owns which is shown.
+  function getVoice() {
+    return voiceSelect.style.display !== 'none' ? voiceSelect.value : voiceInput.value;
+  }
 
   function updateVisibility() {
     var prov = provSel.value;
@@ -1108,11 +1114,11 @@ async function initTtsSettings() {
     if (azureRow) azureRow.style.display = prov === 'azure' ? 'flex' : 'none';
     if (elevenRow) elevenRow.style.display = prov === 'elevenlabs' ? 'flex' : 'none';
     if (edgeNote) edgeNote.style.display = prov === 'edge' ? 'block' : 'none';
-    // Free-text model + voice for ALL providers. A local endpoint (Kokoro/Piper)
-    // uses its OWN model/voice names — the old fixed OpenAI dropdowns sent
-    // "tts-1"/"alloy" to Kokoro and synthesis failed. modelRow shows for endpoints.
+    // Model stays free-text (a local endpoint uses its own name, e.g. "kokoro").
     modelSelect.style.display = 'none'; modelInput.style.display = '';
-    voiceSelect.style.display = 'none'; voiceInput.style.display = prov === 'disabled' ? 'none' : '';
+    // Voice select-vs-input visibility is owned by loadTtsVoiceOptions(); here we
+    // only hide both when TTS is disabled.
+    if (prov === 'disabled') { voiceSelect.style.display = 'none'; voiceInput.style.display = 'none'; }
   }
 
   try {
@@ -1140,7 +1146,7 @@ async function initTtsSettings() {
     if (settings.tts_provider) provSel.value = settings.tts_provider;
     if (settings.tts_model) { modelSelect.value = settings.tts_model; modelInput.value = settings.tts_model; }
     if (elevenModel && (settings.tts_model || '').indexOf('eleven') === 0) elevenModel.value = settings.tts_model;
-    if (settings.tts_voice) { voiceSelect.value = settings.tts_voice; voiceInput.value = settings.tts_voice; }
+    if (settings.tts_voice) { voiceSelect.value = settings.tts_voice; voiceInput.value = settings.tts_voice; _savedTtsVoice = settings.tts_voice; }
     if (settings.tts_speed) { speedSelect.value = settings.tts_speed; }
     if (azureKey && settings.azure_speech_key) azureKey.value = settings.azure_speech_key;
     if (azureRegion && settings.azure_speech_region) azureRegion.value = settings.azure_speech_region;
@@ -1171,61 +1177,70 @@ async function initTtsSettings() {
     fetch('/api/tts/clear-cache', { method: 'POST', credentials: 'same-origin' }).catch(function(){});
   }
 
-  // Populate the Voice field's <datalist> from the configured provider (Edge /
-  // Azure / ElevenLabs voices, or a Kokoro endpoint's /audio/voices). It's a
-  // suggestion list — the field stays free-text, and an empty/failed fetch just
-  // leaves a plain text input. Reads server-saved settings, so call AFTER save.
-  var voiceList = el('set-ttsVoiceOptions');
-  async function loadTtsVoiceOptions() {
-    if (!voiceList) return;
+  // Populate the Voice <select> from the configured provider (Edge / Azure /
+  // ElevenLabs voices, or a Kokoro endpoint's /audio/voices) — a themed dropdown
+  // like the rest of the app. If the provider can't enumerate (no key / not
+  // installed / unreachable), fall back to the free-text input. `want` is the
+  // voice to select (defaults to the current value). Reads server-saved settings,
+  // so call AFTER save.
+  async function loadTtsVoiceOptions(want) {
+    if (want == null) want = getVoice();
+    var voices = [];
     try {
       var res = await fetch('/api/tts/voices', { credentials: 'same-origin' });
       var data = await res.json();
-      var voices = (data && data.voices) || [];
-      voiceList.innerHTML = '';
+      voices = (data && data.voices) || [];
+    } catch (e) { voices = []; }
+    if (provSel.value === 'disabled') return;   // updateVisibility hid both
+    if (voices.length) {
+      voiceSelect.innerHTML = '';
+      var found = false;
       voices.forEach(function(v) {
         if (!v || !v.value) return;
         var o = document.createElement('option');
-        o.value = v.value;
-        if (v.label && v.label !== v.value) o.label = v.label;
-        voiceList.appendChild(o);
+        o.value = v.value; o.textContent = v.label || v.value;
+        voiceSelect.appendChild(o);
+        if (v.value === want) found = true;
       });
-    } catch (e) { /* keep free-text; ignore */ }
+      if (want && !found) {   // keep a saved/custom voice selectable
+        var o = document.createElement('option');
+        o.value = want; o.textContent = want;
+        voiceSelect.insertBefore(o, voiceSelect.firstChild);
+      }
+      voiceSelect.value = want || (voiceSelect.options[0] && voiceSelect.options[0].value) || '';
+      voiceSelect.style.display = ''; voiceInput.style.display = 'none';
+    } else {
+      voiceInput.value = want || '';
+      voiceInput.style.display = ''; voiceSelect.style.display = 'none';
+    }
   }
 
-  // Voices that came from the old OpenAI/Kokoro defaults — replace them when the
-  // user switches to a neural-voice provider so they don't ship a dead voice name.
-  var _placeholderVoices = ['af_heart', 'alloy', ''];
+  // Each provider has its own voice namespace (an Edge voice name isn't a valid
+  // ElevenLabs voice id), so a provider change resets to that provider's default.
+  function _defaultVoiceFor(prov, label) {
+    if (prov === 'edge') return 'en-US-AvaNeural';
+    if (prov === 'azure') return 'en-US-AriaNeural';
+    if (prov === 'elevenlabs') return '21m00Tcm4TlvDq8ikWAM';
+    if (prov.startsWith('endpoint:') && /kokoro/i.test(label || '')) return 'af_heart';
+    return '';   // unknown endpoint → let the fetched list pick the first voice
+  }
   provSel.addEventListener('change', function() {
     var prov = provSel.value;
+    var label = (provSel.options[provSel.selectedIndex] || {}).textContent || '';
     if (isEndpoint()) {
-      // Free-text model + voice; the server defines the names. Prefill sensible
-      // Kokoro values when the endpoint is clearly a Kokoro server so Preview works.
       modelInput.placeholder = 'model (e.g. kokoro, tts-1)';
-      voiceInput.placeholder = 'voice (e.g. af_heart, alloy)';
-      var label = (provSel.options[provSel.selectedIndex] || {}).textContent || '';
-      if (/kokoro/i.test(label)) {
-        if (_placeholderVoices.indexOf(voiceInput.value) !== -1) voiceInput.value = 'af_heart';
-        if (['tts-1', 'tts-1-hd', 'gpt-4o-mini-tts', ''].indexOf(modelInput.value || '') !== -1) modelInput.value = 'kokoro';
+      if (/kokoro/i.test(label) && ['tts-1', 'tts-1-hd', 'gpt-4o-mini-tts', ''].indexOf(modelInput.value || '') !== -1) {
+        modelInput.value = 'kokoro';
       }
     }
-    else if (prov === 'edge') {
-      if (_placeholderVoices.indexOf(voiceInput.value) !== -1) voiceInput.value = 'en-US-AvaNeural';
-      voiceInput.placeholder = 'e.g. en-US-AvaNeural';
-    }
-    else if (prov === 'azure') {
-      if (_placeholderVoices.indexOf(voiceInput.value) !== -1) voiceInput.value = 'en-US-AriaNeural';
-      voiceInput.placeholder = 'e.g. en-US-AriaNeural';
-    }
-    else if (prov === 'elevenlabs') {
-      if (_placeholderVoices.indexOf(voiceInput.value) !== -1) voiceInput.value = '21m00Tcm4TlvDq8ikWAM';
-      voiceInput.placeholder = 'ElevenLabs voice id';
-    }
+    var want = _defaultVoiceFor(prov, label);   // reset to the new provider's default
     updateVisibility();
-    saveTTS().then(loadTtsVoiceOptions);   // provider changed → refresh the voice list
+    // Persist the new provider first (the voice list is fetched for the SAVED
+    // provider), then repopulate the dropdown and persist the resolved voice.
+    saveTTS().then(function() { return loadTtsVoiceOptions(want); }).then(saveTTS);
   });
   // Provider/keys changed → the available voices change too, so refresh the list.
-  function _saveKeyAndReloadVoices() { return saveAndClearCache().then(loadTtsVoiceOptions); }
+  function _saveKeyAndReloadVoices() { return saveAndClearCache().then(function() { return loadTtsVoiceOptions(); }); }
   modelSelect.addEventListener('change', saveAndClearCache);
   modelInput.addEventListener('change', saveTTS);
   if (elevenModel) elevenModel.addEventListener('change', saveAndClearCache);
@@ -1237,7 +1252,7 @@ async function initTtsSettings() {
   speedSelect.addEventListener('change', saveAndClearCache);
   if (ttsEnabledToggle) ttsEnabledToggle.addEventListener('change', function() { syncTtsDisabled(); saveTTS(); });
 
-  loadTtsVoiceOptions();   // populate the voice dropdown for the saved provider
+  loadTtsVoiceOptions(_savedTtsVoice);   // populate the voice dropdown for the saved provider
 
   // Preview / test button
   var previewBtn = el('set-ttsPreviewBtn');
@@ -1289,6 +1304,7 @@ async function initSttSettings() {
   var provSel = el('set-sttProviderSelect');
   var modelSelect = el('set-sttModelSelect');
   var modelInput = el('set-sttModelInput');
+  var _savedSttModel = '';   // saved STT model, used to seed the dropdown
   var modelRow = el('set-sttModelRow');
   var langRow = el('set-sttLangRow');
   var langInput = el('set-sttLangInput');
@@ -1301,21 +1317,21 @@ async function initSttSettings() {
   if (!provSel) return;
 
   function isEndpoint() { return provSel.value.startsWith('endpoint:'); }
-  function getModel() { return isEndpoint() ? modelInput.value : modelSelect.value; }
+  // Model uses a themed <select> of the endpoint's models; loadSttModelOptions()
+  // owns select-vs-input (input is the fallback when the server can't enumerate).
+  function getModel() {
+    return modelSelect.style.display !== 'none' ? modelSelect.value : modelInput.value;
+  }
 
   function updateVisibility() {
     var prov = provSel.value;
-    var showModel = prov.startsWith('endpoint:');
+    var showModel = prov.startsWith('endpoint:');   // model only matters for endpoints
     var showLang = prov !== 'disabled';
     modelRow.style.display = showModel ? 'flex' : 'none';
     langRow.style.display = showLang ? 'flex' : 'none';
     if (azureNote) azureNote.style.display = prov === 'azure' ? 'block' : 'none';
     if (elevenNote) elevenNote.style.display = prov === 'elevenlabs' ? 'block' : 'none';
-    if (isEndpoint()) {
-      modelSelect.style.display = 'none'; modelInput.style.display = '';
-    } else {
-      modelSelect.style.display = ''; modelInput.style.display = 'none';
-    }
+    if (!showModel) { modelSelect.style.display = 'none'; modelInput.style.display = 'none'; }
   }
 
   function syncSttDisabled() {
@@ -1355,7 +1371,7 @@ async function initSttSettings() {
     var settingsRes = await fetch('/api/auth/settings', { credentials: 'same-origin' });
     var settings = await settingsRes.json();
     if (settings.stt_provider) provSel.value = settings.stt_provider;
-    if (settings.stt_model) { modelSelect.value = settings.stt_model; modelInput.value = settings.stt_model; }
+    if (settings.stt_model) { modelSelect.value = settings.stt_model; modelInput.value = settings.stt_model; _savedSttModel = settings.stt_model; }
     if (settings.stt_language) langInput.value = settings.stt_language;
     if (sttEnabledToggle) sttEnabledToggle.checked = settings.stt_enabled !== false;
   } catch (e) { console.warn('Failed to load STT settings', e); }
@@ -1376,34 +1392,53 @@ async function initSttSettings() {
     } catch (e) { sttMsg.textContent = 'Failed to save'; sttMsg.style.color = 'var(--red)'; }
   }
 
-  // Populate the Model field's <datalist> from the configured STT endpoint
-  // (e.g. a faster-whisper server's /v1/models). Suggestions only — the field
-  // stays free-text; empty/failed fetch leaves a plain input. Call after save.
-  var modelList = el('set-sttModelOptions');
-  async function loadSttModelOptions() {
-    if (!modelList) return;
+  // Populate the Model <select> from the configured STT endpoint (e.g. a
+  // faster-whisper server's /v1/models) — a themed dropdown like the rest of the
+  // app, with "(server default)" leaving the choice to the server. Falls back to
+  // a free-text input if the server can't enumerate. `want` is the model to
+  // select. Only runs for endpoint providers (the model row is hidden otherwise).
+  async function loadSttModelOptions(want) {
+    if (!isEndpoint()) return;
+    if (want == null) want = getModel();
+    var models = [];
     try {
       var res = await fetch('/api/stt/models', { credentials: 'same-origin' });
       var data = await res.json();
-      var models = (data && data.models) || [];
-      modelList.innerHTML = '';
+      models = (data && data.models) || [];
+    } catch (e) { models = []; }
+    if (models.length) {
+      modelSelect.innerHTML = '';
+      var def = document.createElement('option');
+      def.value = ''; def.textContent = '(server default)';
+      modelSelect.appendChild(def);
+      var found = false;
       models.forEach(function(m) {
         if (!m || !m.value) return;
         var o = document.createElement('option');
-        o.value = m.value;
-        if (m.label && m.label !== m.value) o.label = m.label;
-        modelList.appendChild(o);
+        o.value = m.value; o.textContent = m.label || m.value;
+        modelSelect.appendChild(o);
+        if (m.value === want) found = true;
       });
-    } catch (e) { /* keep free-text; ignore */ }
+      if (want && !found) {
+        var o = document.createElement('option');
+        o.value = want; o.textContent = want;
+        modelSelect.appendChild(o);
+      }
+      modelSelect.value = want || '';
+      modelSelect.style.display = ''; modelInput.style.display = 'none';
+    } else {
+      modelInput.value = want || '';
+      modelInput.style.display = ''; modelSelect.style.display = 'none';
+    }
   }
 
-  provSel.addEventListener('change', function() { updateVisibility(); saveSTT().then(loadSttModelOptions); });
+  provSel.addEventListener('change', function() { updateVisibility(); saveSTT().then(function() { return loadSttModelOptions(); }).then(saveSTT); });
   modelSelect.addEventListener('change', saveSTT);
   modelInput.addEventListener('change', saveSTT);
   langInput.addEventListener('change', saveSTT);
   if (sttEnabledToggle) sttEnabledToggle.addEventListener('change', function() { syncSttDisabled(); saveSTT(); });
 
-  loadSttModelOptions();   // populate the model dropdown for the saved endpoint
+  loadSttModelOptions(_savedSttModel);   // populate the model dropdown for the saved endpoint
 }
 
 /* ═══════════════════════════════════════════

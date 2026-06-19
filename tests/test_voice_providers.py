@@ -89,10 +89,12 @@ def test_add_models_offers_stt_tts_types():
 
 
 def test_endpoint_tts_uses_free_text_model_voice():
-    # Endpoint TTS must use free-text model/voice (Kokoro needs "kokoro"/"af_heart",
-    # not the OpenAI tts-1/alloy presets that made synthesis fail).
-    assert "function getVoice() { return voiceInput.value; }" in SETTINGS_JS
-    assert "af_heart" in SETTINGS_JS   # Kokoro prefill
+    # Endpoint TTS keeps a free-text MODEL (Kokoro needs "kokoro", not the OpenAI
+    # tts-1 preset that made synthesis fail); the VOICE is the themed select with a
+    # sensible Kokoro default prefill (af_heart).
+    assert "return modelInput.value;" in SETTINGS_JS   # free-text model for endpoints
+    assert "af_heart" in SETTINGS_JS                    # Kokoro voice default
+    assert "modelInput.value = 'kokoro'" in SETTINGS_JS  # Kokoro model prefill
 
 
 def test_admin_global_settings_hidden_from_non_admins():
@@ -110,7 +112,7 @@ def test_admin_global_settings_hidden_from_non_admins():
         assert peruser not in fu, peruser
 
 
-def test_voice_listing_endpoints_and_datalists():
+def test_voice_model_dropdowns_use_themed_select():
     tts_routes = (ROOT / "routes" / "tts_routes.py").read_text(encoding="utf-8")
     stt_routes = (ROOT / "routes" / "stt_routes.py").read_text(encoding="utf-8")
     # Backend list endpoints + service methods that feed the dropdowns.
@@ -118,12 +120,14 @@ def test_voice_listing_endpoints_and_datalists():
     assert '@router.get("/models")' in stt_routes
     assert "def list_voices" in TTS_SRC
     assert "def list_models" in STT_SRC
-    # <datalist> suggestions on the voice + STT model fields (free-text preserved).
-    assert 'list="set-ttsVoiceOptions"' in HTML and '<datalist id="set-ttsVoiceOptions">' in HTML
-    assert 'list="set-sttModelOptions"' in HTML and '<datalist id="set-sttModelOptions">' in HTML
-    # Frontend fetches the lists.
-    assert "/api/tts/voices" in SETTINGS_JS
-    assert "/api/stt/models" in SETTINGS_JS
+    # Themed <select> dropdowns (consistent with the rest of the app), populated
+    # dynamically — NOT a native <datalist> (which renders inconsistent browser
+    # chrome). The text input is only the fallback when a provider can't enumerate.
+    assert "set-ttsVoiceOptions" not in HTML and "set-sttModelOptions" not in HTML  # datalists gone
+    assert 'id="set-ttsVoiceSelect"' in HTML and 'id="set-sttModelSelect"' in HTML
+    assert "/api/tts/voices" in SETTINGS_JS and "/api/stt/models" in SETTINGS_JS
+    # The select is the active control; the input is the empty-list fallback.
+    assert "voiceSelect.style.display !== 'none' ? voiceSelect.value : voiceInput.value" in SETTINGS_JS
 
 
 def test_voice_endpoints_excluded_from_chat_models():
