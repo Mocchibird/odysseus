@@ -4879,7 +4879,10 @@ import * as Modals from './modalManager.js';
           const _q = document.getElementById('doc-find-input')?.value || '';
           if (_q) renderFindRects(_findMatches.map(s => [s, s + _q.length]), _findIdx);
         }
+        _splitScrollFromEditor();  // Split view: keep the preview scroll in step
       });
+      // Split view: scrolling the rendered preview scrolls the source too.
+      document.getElementById('doc-md-preview')?.addEventListener('scroll', () => _splitScrollFromPreview());
       // Tab key inserts a real tab; Escape clears selection
       ta.addEventListener('keydown', (e) => {
         // `[[` autocomplete steals nav/select keys while its dropdown is open.
@@ -8886,6 +8889,26 @@ import * as Modals from './modalManager.js';
         _renderDocPreviewHtml(preview, textarea.value || '', { related: false });
       }
     }, 150);
+  }
+
+  /** Proportional scroll-sync between the Split panes (editor <-> preview).
+   *  A lock breaks the scroll-event feedback loop; only runs while Split is on. */
+  let _splitScrollLock = false;
+  function _splitScrollPair(src, dst) {
+    const pane = document.getElementById('doc-editor-pane');
+    if (!src || !dst || _splitScrollLock || !pane?.classList.contains('doc-split')) return;
+    const srcMax = src.scrollHeight - src.clientHeight;
+    const dstMax = dst.scrollHeight - dst.clientHeight;
+    if (srcMax <= 0 || dstMax <= 0) return;
+    _splitScrollLock = true;
+    dst.scrollTop = (src.scrollTop / srcMax) * dstMax;
+    requestAnimationFrame(() => { _splitScrollLock = false; });
+  }
+  function _splitScrollFromEditor() {
+    _splitScrollPair(document.getElementById('doc-editor-textarea'), document.getElementById('doc-md-preview'));
+  }
+  function _splitScrollFromPreview() {
+    _splitScrollPair(document.getElementById('doc-md-preview'), document.getElementById('doc-editor-textarea'));
   }
 
   function toggleMarkdownPreview() {

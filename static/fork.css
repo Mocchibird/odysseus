@@ -1930,22 +1930,22 @@ body.gallery-selecting .gallery-card-menu-btn,
   flex: 1;
   min-height: 0;
 }
-.doc-editor-pane.doc-split #doc-md-preview {
-  flex: 1 1 50%;
-  min-width: 0;
-  order: 0;             /* preview on the LEFT */
-}
 .doc-editor-pane.doc-split #doc-editor-wrap {
   flex: 1 1 50%;
   min-width: 0;
   max-width: none;      /* override the single-view 820px reading cap */
-  order: 1;             /* source on the RIGHT */
+  order: 0;             /* source/editor on the LEFT */
+}
+.doc-editor-pane.doc-split #doc-md-preview {
+  flex: 1 1 50%;
+  min-width: 0;
+  order: 1;             /* rendered preview on the RIGHT */
   border-left: 1px solid var(--border);
 }
 /* Narrow screens: stack the panes instead of cramming two columns. */
 @media (max-width: 700px) {
   .doc-editor-pane.doc-split .doc-split-area { flex-direction: column; }
-  .doc-editor-pane.doc-split #doc-editor-wrap {
+  .doc-editor-pane.doc-split #doc-md-preview {
     border-left: none;
     border-top: 1px solid var(--border);
   }
