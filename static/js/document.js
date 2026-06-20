@@ -2170,8 +2170,10 @@ import * as Modals from './modalManager.js';
     if (lang === 'markdown') {
       show = false;
       if (mdToggle) {
-        mdToggle.querySelector('[data-mdview="edit"]')?.classList.toggle('active', !_mdActive);
-        mdToggle.querySelector('[data-mdview="preview"]')?.classList.toggle('active', _mdActive);
+        const _split = !!document.getElementById('doc-editor-pane')?.classList.contains('doc-split');
+        mdToggle.querySelector('[data-mdview="edit"]')?.classList.toggle('active', !_mdActive && !_split);
+        mdToggle.querySelector('[data-mdview="preview"]')?.classList.toggle('active', _mdActive && !_split);
+        mdToggle.querySelector('[data-mdview="split"]')?.classList.toggle('active', _split);
       }
     } else if (lang === 'csv') {
       show = true;
@@ -3996,6 +3998,7 @@ import * as Modals from './modalManager.js';
           <span class="md-view-toggle" id="doc-md-view-toggle" style="display:none" role="group" aria-label="Edit or preview">
             <button type="button" class="md-view-opt" data-mdview="edit" title="Edit source (⌘/Ctrl+E or Ctrl+Alt+M to toggle)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button>
             <button type="button" class="md-view-opt" data-mdview="preview" title="Preview (⌘/Ctrl+E or Ctrl+Alt+M to toggle)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button>
+            <button type="button" class="md-view-opt" data-mdview="split" title="Split — source + live preview side by side"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="12" y1="3" x2="12" y2="21"/></svg></button>
           </span>
           <span class="md-view-toggle" id="doc-render-view-toggle" style="display:none" role="group" aria-label="Code or run">
             <button type="button" class="md-view-opt" data-renderview="code" title="Edit code"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg></button>
@@ -4038,6 +4041,7 @@ import * as Modals from './modalManager.js';
         <button id="doc-find-next" class="doc-find-nav" title="Next">&darr;</button>
         <button id="doc-find-close" class="doc-find-close" title="Close">&times;</button>
       </div>
+      <div id="doc-split-area" class="doc-split-area">
       <div id="doc-editor-wrap" class="doc-editor-wrap">
         <div id="doc-line-numbers" class="doc-line-numbers">1</div>
         <pre id="doc-editor-highlight" class="doc-editor-highlight"><code id="doc-editor-code"></code></pre>
@@ -4062,6 +4066,7 @@ import * as Modals from './modalManager.js';
         </div>
       </div>
       <div id="doc-md-preview" class="doc-md-preview" style="display:none"></div>
+      </div><!-- /doc-split-area -->
       <div id="doc-csv-preview" class="doc-csv-preview" style="display:none"></div>
       <iframe id="doc-html-preview" class="doc-html-preview" sandbox="allow-scripts allow-modals" style="display:none"></iframe>
       <div id="doc-pdf-view" style="display:none;width:100%;flex:1;min-height:0;overflow:auto;background:#525659;padding:20px 0;position:relative;">
@@ -4679,14 +4684,17 @@ import * as Modals from './modalManager.js';
       _syncHeaderActions();
     });
 
-    // Markdown Edit/Preview two-icon switch — click a side to go to that view.
+    // Markdown Edit / Preview / Split switch — click a side to go to that view.
     document.getElementById('doc-md-view-toggle')?.addEventListener('click', (e) => {
       const opt = e.target.closest('.md-view-opt');
       if (!opt) return;
-      const wantPreview = opt.dataset.mdview === 'preview';
-      const mdPrev = document.getElementById('doc-md-preview');
-      const isPreview = mdPrev && mdPrev.style.display !== 'none';
-      if (wantPreview !== isPreview) toggleMarkdownPreview();
+      const view = opt.dataset.mdview; // 'edit' | 'preview' | 'split'
+      if (view === 'split') {
+        _setSplitActive(true);
+      } else {
+        // _setMarkdownPreviewActive clears Split, then sets edit/preview.
+        _setMarkdownPreviewActive(view === 'preview');
+      }
       _syncHeaderActions();
     });
 
@@ -4857,6 +4865,7 @@ import * as Modals from './modalManager.js';
         _autoTitleDebounce = setTimeout(() => autoTitleFromContent(ta.value), 600);
         clearTimeout(_autoSaveDebounce);
         _autoSaveDebounce = setTimeout(() => { saveDocument({ silent: true }); }, 2000);
+        _scheduleSplitPreview();  // live-update the Split preview as you type
       });
       ta.addEventListener('scroll', () => {
         const code = document.getElementById('doc-editor-code');
@@ -8746,71 +8755,79 @@ import * as Modals from './modalManager.js';
     if (mdToolbar?._syncOverflow) requestAnimationFrame(mdToolbar._syncOverflow);
   }
 
+  /** Render markdown into a preview element (no display swap). Shared by the
+   *  Preview toggle and the Split view. `related` runs the semantic "See also"
+   *  fetch — skipped on live keystroke re-renders in Split. */
+  function _renderDocPreviewHtml(preview, md, { related = true } = {}) {
+    md = md || '';
+    if (markdownModule && markdownModule.mdToHtml) {
+      preview.innerHTML = markdownModule.mdToHtml(md, { shortcodes: false }); // doc preview: keep :shortcodes: literal
+    } else {
+      preview.innerHTML = md.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g, '<br>');
+    }
+    if (window.hljs) {
+      preview.querySelectorAll('pre code').forEach(b => window.hljs.highlightElement(b));
+    }
+    if (markdownModule && markdownModule.renderMermaid) markdownModule.renderMermaid(preview);
+    // Fork (Obsidian-like): resolve ![[name]] gallery embeds against the gallery.
+    if (markdownModule && markdownModule.resolveGalleryEmbeds) markdownModule.resolveGalleryEmbeds(preview);
+    // Fork (Obsidian-like): surface semantically-related docs (top strip + See also).
+    if (related) _renderRelatedNotes(preview, activeDocId);
+    _bindDocPreviewClicks(preview);
+  }
+
+  /** Wiki-link navigation + interactive task checkboxes on the preview.
+   *  Delegated on the persistent preview element, bound once. */
+  function _bindDocPreviewClicks(preview) {
+    if (preview.dataset.forkClicks) return;
+    preview.dataset.forkClicks = '1';
+    preview.addEventListener('click', (ev) => {
+      const t = ev.target;
+      const wl = t.closest && t.closest('a.wiki-link[data-wikilink]');
+      if (wl) {
+        ev.preventDefault();
+        const title = wl.getAttribute('data-wikilink') || '';
+        if (!title) return;
+        fetch(`${API_BASE}/api/documents/library?search=${encodeURIComponent(title)}&limit=20`, { credentials: 'same-origin' })
+          .then(r => r.ok ? r.json() : null)
+          .then(data => {
+            const items = Array.isArray(data && data.documents) ? data.documents : [];
+            const exact = items.find(d => (d.title || '').toLowerCase() === title.toLowerCase());
+            const target = exact || items[0];
+            if (target && target.id) loadDocument(target.id);
+            else if (uiModule) uiModule.showToast(`No document named “${title}”`);
+          })
+          .catch(() => { if (uiModule) uiModule.showError('Could not open link'); });
+        return;
+      }
+      const rel = t.closest && t.closest('.doc-related-item[data-doc-id]');
+      if (rel) {
+        ev.preventDefault();
+        const rid = rel.getAttribute('data-doc-id');
+        if (rid) loadDocument(rid);
+        return;
+      }
+      const chk = t.closest && t.closest('.task-item .task-check');
+      if (chk) {
+        ev.preventDefault();
+        const tasks = Array.from(preview.querySelectorAll('.task-item'));
+        const idx = tasks.indexOf(chk.closest('.task-item'));
+        if (idx >= 0) _toggleSourceTask(idx);
+      }
+    });
+  }
+
   /** Toggle markdown preview */
   function _setMarkdownPreviewActive(active, { remember = true } = {}) {
     const preview = document.getElementById('doc-md-preview');
     const wrap = document.getElementById('doc-editor-wrap');
     const textarea = document.getElementById('doc-editor-textarea');
     if (!preview || !wrap || !textarea) return;
+    // Edit and Preview are single-pane — either one leaves the Split view.
+    document.getElementById('doc-editor-pane')?.classList.remove('doc-split');
 
     if (active) {
-      const md = textarea.value || '';
-      if (markdownModule && markdownModule.mdToHtml) {
-        preview.innerHTML = markdownModule.mdToHtml(md, { shortcodes: false }); // doc preview: keep :shortcodes: literal
-      } else {
-        preview.innerHTML = md.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g, '<br>');
-      }
-      if (window.hljs) {
-        preview.querySelectorAll('pre code').forEach(b => window.hljs.highlightElement(b));
-      }
-      if (markdownModule && markdownModule.renderMermaid) {
-        markdownModule.renderMermaid(preview);
-      }
-      // Fork (Obsidian-like): resolve ![[name]] gallery embeds against the
-      // gallery, then surface semantically-related docs (top strip + See also).
-      if (markdownModule && markdownModule.resolveGalleryEmbeds) {
-        markdownModule.resolveGalleryEmbeds(preview);
-      }
-      _renderRelatedNotes(preview, activeDocId);
-      // Fork (Obsidian-like): wiki-link navigation + interactive task checkboxes.
-      // Delegated on the persistent preview element, bound once.
-      if (!preview.dataset.forkClicks) {
-        preview.dataset.forkClicks = '1';
-        preview.addEventListener('click', (ev) => {
-          const t = ev.target;
-          const wl = t.closest && t.closest('a.wiki-link[data-wikilink]');
-          if (wl) {
-            ev.preventDefault();
-            const title = wl.getAttribute('data-wikilink') || '';
-            if (!title) return;
-            fetch(`${API_BASE}/api/documents/library?search=${encodeURIComponent(title)}&limit=20`, { credentials: 'same-origin' })
-              .then(r => r.ok ? r.json() : null)
-              .then(data => {
-                const items = Array.isArray(data && data.documents) ? data.documents : [];
-                const exact = items.find(d => (d.title || '').toLowerCase() === title.toLowerCase());
-                const target = exact || items[0];
-                if (target && target.id) loadDocument(target.id);
-                else if (uiModule) uiModule.showToast(`No document named “${title}”`);
-              })
-              .catch(() => { if (uiModule) uiModule.showError('Could not open link'); });
-            return;
-          }
-          const rel = t.closest && t.closest('.doc-related-item[data-doc-id]');
-          if (rel) {
-            ev.preventDefault();
-            const rid = rel.getAttribute('data-doc-id');
-            if (rid) loadDocument(rid);
-            return;
-          }
-          const chk = t.closest && t.closest('.task-item .task-check');
-          if (chk) {
-            ev.preventDefault();
-            const tasks = Array.from(preview.querySelectorAll('.task-item'));
-            const idx = tasks.indexOf(chk.closest('.task-item'));
-            if (idx >= 0) _toggleSourceTask(idx);
-          }
-        });
-      }
+      _renderDocPreviewHtml(preview, textarea.value || '');
       preview.style.display = '';
       wrap.style.display = 'none';
     } else {
@@ -8826,6 +8843,49 @@ import * as Modals from './modalManager.js';
       docs.get(activeDocId)._markdownPreviewActive = !!active;
     }
     _syncHeaderActions();
+  }
+
+  /** Split view: live-rendered preview on the LEFT, raw source on the RIGHT,
+   *  side by side. The `.doc-split` class flips the (display:contents) wrapper
+   *  around #doc-md-preview + #doc-editor-wrap into a flex row. */
+  function _setSplitActive(active, { remember = true } = {}) {
+    const pane = document.getElementById('doc-editor-pane');
+    const preview = document.getElementById('doc-md-preview');
+    const wrap = document.getElementById('doc-editor-wrap');
+    const textarea = document.getElementById('doc-editor-textarea');
+    if (!pane || !preview || !wrap || !textarea) return;
+    if (active) {
+      _renderDocPreviewHtml(preview, textarea.value || '');
+      preview.style.display = '';
+      wrap.style.display = '';
+      pane.classList.add('doc-split');
+    } else {
+      pane.classList.remove('doc-split');
+      preview.style.display = 'none';
+      preview.innerHTML = '';
+      wrap.style.display = '';
+    }
+    if (remember && activeDocId && docs.has(activeDocId)) {
+      docs.get(activeDocId)._splitActive = !!active;
+      if (active) docs.get(activeDocId)._markdownPreviewActive = false;
+    }
+    _syncHeaderActions();
+  }
+
+  /** Live-refresh the Split preview from the source as you type (debounced;
+   *  skips the "See also" fetch on keystrokes — no-op unless Split is on). */
+  let _splitLiveTimer = null;
+  function _scheduleSplitPreview() {
+    const pane = document.getElementById('doc-editor-pane');
+    if (!pane || !pane.classList.contains('doc-split')) return;
+    clearTimeout(_splitLiveTimer);
+    _splitLiveTimer = setTimeout(() => {
+      const preview = document.getElementById('doc-md-preview');
+      const textarea = document.getElementById('doc-editor-textarea');
+      if (preview && textarea && pane.classList.contains('doc-split')) {
+        _renderDocPreviewHtml(preview, textarea.value || '', { related: false });
+      }
+    }, 150);
   }
 
   function toggleMarkdownPreview() {

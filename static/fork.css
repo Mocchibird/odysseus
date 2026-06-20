@@ -1919,6 +1919,38 @@ body.gallery-selecting .gallery-card-menu-btn,
   will-change: auto !important;
 }
 
+/* ── Doc editor Split view (fork): live preview (left) + raw source (right) ──
+   The wrapper is display:contents normally, so the single-pane Edit/Preview
+   layout is untouched; .doc-split flips it into a flex row. Reuses the existing
+   pane border var — no new color/spacing tokens. */
+.doc-split-area { display: contents; }
+.doc-editor-pane.doc-split .doc-split-area {
+  display: flex;
+  flex-direction: row;
+  flex: 1;
+  min-height: 0;
+}
+.doc-editor-pane.doc-split #doc-md-preview {
+  flex: 1 1 50%;
+  min-width: 0;
+  order: 0;             /* preview on the LEFT */
+}
+.doc-editor-pane.doc-split #doc-editor-wrap {
+  flex: 1 1 50%;
+  min-width: 0;
+  max-width: none;      /* override the single-view 820px reading cap */
+  order: 1;             /* source on the RIGHT */
+  border-left: 1px solid var(--border);
+}
+/* Narrow screens: stack the panes instead of cramming two columns. */
+@media (max-width: 700px) {
+  .doc-editor-pane.doc-split .doc-split-area { flex-direction: column; }
+  .doc-editor-pane.doc-split #doc-editor-wrap {
+    border-left: none;
+    border-top: 1px solid var(--border);
+  }
+}
+
 /* ── Obsidian-like document extras (fork): gallery embeds, See-also panel,
    and `[[` link autocomplete. Built on existing intrinsics — no new colors. ── */
 
