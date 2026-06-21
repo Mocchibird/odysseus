@@ -101,15 +101,22 @@ def list_habits(owner: str, include_archived: bool = False) -> List[Dict[str, An
         if not include_archived:
             q = q.filter(Habit.status == "active")
         habits = q.order_by(Habit.sort_order.asc(), Habit.id.asc()).all()
+        # Batch-load all completed-log days for these habits in ONE query (was
+        # N+1: a HabitLog query per habit). No date bound — _streak_from_days
+        # walks history back indefinitely, so it needs the full set.
+        habit_ids = [h.id for h in habits]
+        days_by_habit: Dict[int, set] = {hid: set() for hid in habit_ids}
+        if habit_ids:
+            for habit_id, day in (
+                db.query(HabitLog.habit_id, HabitLog.day)
+                .filter(HabitLog.habit_id.in_(habit_ids), HabitLog.done == True)  # noqa: E712
+                .all()
+            ):
+                days_by_habit[habit_id].add(day)
         out = []
         for h in habits:
             d = _habit_dict(h)
-            done_days = {
-                row.day
-                for row in db.query(HabitLog.day)
-                .filter(HabitLog.habit_id == h.id, HabitLog.done == True)  # noqa: E712
-                .all()
-            }
+            done_days = days_by_habit[h.id]
             d["done_today"] = today in done_days
             d["done_yesterday"] = (date.fromisoformat(today) - timedelta(days=1)).isoformat() in done_days
             d["streak"] = _streak_from_days(done_days, today)

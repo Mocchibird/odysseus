@@ -361,12 +361,14 @@ def list_tags(owner: Optional[str]) -> List[str]:
 
     db = SessionLocal()
     try:
-        q = db.query(FileItem)
+        # Project only the two tag columns instead of hydrating full FileItem
+        # rows (each carries the large extracted-`text` blob) just to read tags.
+        q = db.query(FileItem.tags, FileItem.ai_tags)
         if owner is not None:
             q = q.filter(FileItem.owner == owner)
         seen = {}
-        for fi in q.all():
-            for t in content_extract.split_tags(fi.tags) + content_extract.split_tags(fi.ai_tags):
+        for tags, ai_tags in q.all():
+            for t in content_extract.split_tags(tags) + content_extract.split_tags(ai_tags):
                 seen.setdefault(t.lower(), t)
         return sorted(seen.values(), key=str.lower)
     finally:

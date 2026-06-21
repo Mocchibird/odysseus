@@ -118,7 +118,7 @@ def resolve_book_file(owner: Optional[str], kb_id: str) -> Path:
 
 
 def list_books(owner: Optional[str], query: str = "", limit: int = 50) -> list[dict]:
-    from core.database import SessionLocal, Book
+    from core.database import SessionLocal, Book, BookProgress
     cap = max(1, int(limit or 50))
     db = SessionLocal()
     try:
@@ -133,10 +133,22 @@ def list_books(owner: Optional[str], query: str = "", limit: int = 50) -> list[d
                 | Book.tags.ilike(like) | Book.ai_tags.ilike(like)
             )
         rows = q.order_by(Book.created_at.desc()).limit(500).all()
+        # Batch-load reading progress in ONE query instead of get_progress() per
+        # row (was N+1: a fresh session + BookProgress query per book, up to 500).
+        ids = [row.id for row in rows]
+        progress_map = {
+            pr.id: _progress_to_dict(pr, pr.id)
+            for pr in (db.query(BookProgress).filter(BookProgress.id.in_(ids)).all() if ids else [])
+        }
         books = []
         for row in rows:
             b = _book_dict(row)
-            b["progress"] = get_progress(owner, b["id"], missing_ok=True)
+            # Miss fallback mirrors get_progress()'s minimal default.
+            b["progress"] = progress_map.get(
+                row.id,
+                {"book_id": row.id, "path": row.id, "chapter_index": 0,
+                 "scroll_percent": 0, "updated_at": None},
+            )
             books.append(b)
     finally:
         db.close()
