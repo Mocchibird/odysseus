@@ -950,7 +950,8 @@ async def action_daily_brief(owner: str, **kwargs) -> Tuple[str, bool]:
                 en = event_local_datetime(e.dtend, e.is_utc, _tzinfo) or s
                 return s < _end_local and en > _start_local
             events = [e for e in events_raw if _overlaps_today(e)]
-            # ----- Notes: pinned + non-archived todos with at least one undone item -----
+            # ----- Notes: non-archived. Filtered below to those with an active
+            # reminder (due today / overdue) or pinned; see _due_local_date. -----
             n_q = db.query(Note).filter(Note.archived == False)  # noqa: E712
             if owner:
                 n_q = owner_filter(n_q, Note, owner, include_shared=_allow_null)
@@ -995,9 +996,36 @@ async def action_daily_brief(owner: str, **kwargs) -> Tuple[str, bool]:
         except Exception as ee:
             logger.debug(f"daily_brief: email fetch failed: {ee}")
 
-        # Pull active todo items from notes
+        # Keep only notes that warrant a spot in today's brief: those carrying
+        # an ACTIVE reminder (due today or already overdue, in the owner's local
+        # calendar) OR pinned ("always show me this"). Future-dated and undated,
+        # non-pinned notes are intentionally excluded so the brief stays a
+        # reminder digest rather than a dump of every checklist.
+        def _due_local_date(s):
+            """Owner-local calendar date of a note's due_date, or None.
+            Accepts 'YYYY-MM-DD', floating-local 'YYYY-MM-DDTHH:MM', and '...Z'."""
+            if not s:
+                return None
+            s = s.strip()
+            try:
+                if len(s) == 10 and s[4] == "-" and s[7] == "-":
+                    return _dt.strptime(s, "%Y-%m-%d").date()
+                if s.endswith("Z"):
+                    d = _dt.fromisoformat(s[:-1]).replace(tzinfo=_tz.utc)
+                else:
+                    d = _dt.fromisoformat(s)
+                    if d.tzinfo is None:
+                        d = d.replace(tzinfo=_tzinfo)  # floating local = owner's clock
+                return d.astimezone(_tzinfo).date()
+            except Exception:
+                return None
+
         todo_lines: list[str] = []
         for n in notes:
+            due_local = _due_local_date(n.due_date)
+            is_due = due_local is not None and due_local <= _day
+            if not (is_due or n.pinned):
+                continue
             if n.note_type == "checklist" and n.items:
                 try:
                     items = _json.loads(n.items)
@@ -1007,7 +1035,7 @@ async def action_daily_brief(owner: str, **kwargs) -> Tuple[str, bool]:
                             todo_lines.append(f"{n.title or 'Checklist'}: {t}")
                 except Exception:
                     continue
-            elif n.pinned and n.title:
+            elif n.title:
                 todo_lines.append(n.title)
 
         # ----- Compose -----
