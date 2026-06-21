@@ -7,7 +7,7 @@ import spinnerModule from './spinner.js';
 import * as Modals from './modalManager.js';
 import { makeWindowDraggable } from './windowDrag.js';
 import { attachColorPicker } from './colorPicker.js';
-import { bindMenuDismiss } from './escMenuStack.js';
+import { bindMenuDismiss, topPopupZ } from './escMenuStack.js';
 import {
   WEEKDAYS, WEEKDAYS_SUN, MONTHS, MON_SHORT,
   CAL_PALETTE, CAL_COLORS, _CAL_CUSTOM_GRADIENT, _TYPE_PALETTE,
@@ -499,6 +499,7 @@ function _showEventMoreMenu(ev, anchor) {
   dropdown._anchorRect = rect;
   _clampDropdown(dropdown, rect);
   dropdown.style.visibility = '';
+  dropdown.style.zIndex = String(topPopupZ());
   closeMenu = bindMenuDismiss(dropdown, () => dropdown.remove(), (ev2) => !dropdown.contains(ev2.target) && ev2.target !== anchor);}
 
 async function _createEventReminder(ev, dueDate) {

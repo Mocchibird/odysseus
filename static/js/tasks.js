@@ -8,7 +8,7 @@ import * as spinnerModule from './spinner.js';
 import { makeWindowDraggable } from './windowDrag.js';
 import { sortModelIds } from './modelSort.js';
 import { ordinalSuffix } from './util/ordinal.js';
-import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
+import { bindMenuDismiss, dismissOrRemove, topPopupZ } from './escMenuStack.js';
 
 const API_BASE = window.location.origin;
 let _open = false;
@@ -929,6 +929,7 @@ function _showTaskDropdown(anchor, items) {
   if (top + dd.offsetHeight > window.innerHeight - 8) top = rect.top - dd.offsetHeight - 4;
   dd.style.top = top + 'px';
   dd.style.left = left + 'px';
+  dd.style.zIndex = String(topPopupZ());
   const openedAt = performance.now();
   const close = bindMenuDismiss(dd, () => dd.remove(), (e) => {
     // Ignore any clicks that occur within 250ms of the open (covers touch

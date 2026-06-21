@@ -7,7 +7,7 @@ import uiModule from './ui.js';
 import spinnerModule from './spinner.js';
 import { providerLogo } from './providers.js';
 import { makeWindowDraggable } from './windowDrag.js';
-import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
+import { bindMenuDismiss, dismissOrRemove, topPopupZ } from './escMenuStack.js';
 import { _diagnose, _showDiagnosis, _clearDiagnosis, _runQuickCmd, ERROR_PATTERNS } from './cookbook-diagnosis.js';
 import { RECIPE_BACKENDS, recipesForBackend, pickRecipe, recipeCommands, RECIPE_DEFAULT_VARIANT } from './cookbook-deps-recipes.js';
 import { _hwfitCache, _hwfitDebounce, _hwfitFetch, _hwfitInit, _hwfitRenderList, _hwfitRenderHw, _renderGpuToggles, _expandModelRow, _fitColors, _hwfitColumns, _cachedModelIds, _gpuToggleTotal, _resetGpuToggleState } from './cookbook-hwfit.js?v=440';
@@ -1168,6 +1168,7 @@ async function _fetchDependencies() {
       });
       dropdown.appendChild(it);
       document.body.appendChild(dropdown);
+      dropdown.style.zIndex = String(topPopupZ());
       const close = bindMenuDismiss(
         dropdown,
         () => dropdown.remove(),

@@ -10,7 +10,7 @@ import spinnerModule from './spinner.js';
 import markdownModule from './markdown.js';
 import { makeWindowDraggable } from './windowDrag.js';
 import { langIcon } from './langIcons.js';
-import { registerMenuDismiss, dismissOrRemove } from './escMenuStack.js';
+import { registerMenuDismiss, dismissOrRemove, topPopupZ } from './escMenuStack.js';
 
 // ── Injected references from documentModule ──
 let API_BASE = '';
@@ -239,6 +239,7 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
       }
       if (mr.left < 8) { dd.style.left = '8px'; dd.style.right = 'auto'; }
     });
+    dd.style.zIndex = String(topPopupZ());
     // Single idempotent teardown shared by every dismissal path (item click,
     // outside click, swipe, and the Escape arbiter via registerMenuDismiss).
     let _unreg = () => {};

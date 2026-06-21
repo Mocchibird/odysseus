@@ -6,7 +6,7 @@
 
 import uiModule from './ui.js';
 import { _diagnose, _showDiagnosis, _clearDiagnosis } from './cookbook-diagnosis.js';
-import { registerMenuDismiss, dismissOrRemove } from './escMenuStack.js';
+import { registerMenuDismiss, dismissOrRemove, topPopupZ } from './escMenuStack.js';
 import { computeProgressSignal } from './cookbookProgressSignal.js';
 
 // Human-friendly badge label for a task's internal status. Avoids surfacing
@@ -2363,6 +2363,7 @@ export function _renderRunningTab() {
           }
           dropdown.style.top = top + 'px';
         }
+        dropdown.style.zIndex = String(topPopupZ());
 
         const closeHandler = (ev) => {
           if (!dropdown.contains(ev.target) && ev.target !== menuBtn) {

@@ -7,7 +7,7 @@ import { openEditor, closeEditor, isEditorOpen } from './galleryEditor.js';
 import spinnerModule from './spinner.js';
 import { makeWindowDraggable } from './windowDrag.js';
 import * as video360 from './video360.js';
-import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
+import { bindMenuDismiss, dismissOrRemove, topPopupZ } from './escMenuStack.js';
 
 const API_BASE = window.location.origin;
 let _open = false;
@@ -1551,6 +1551,7 @@ function _showCardMenu(anchor, img) {
   dropdown.style.left = `${menuLeft}px`;
   dropdown.style.top = `${menuTop}px`;
   dropdown.style.visibility = 'visible';
+  dropdown.style.zIndex = String(topPopupZ());
   const close = bindMenuDismiss(dropdown, () => { dropdown.remove(); },
     (ev) => !dropdown.contains(ev.target) && ev.target !== anchor && !anchor.contains(ev.target));
 }
@@ -1656,6 +1657,7 @@ function _showAlbumPicker(anchor, onPick) {
   dropdown.style.left = `${left}px`;
   dropdown.style.top = `${top}px`;
   dropdown.style.visibility = 'visible';
+  dropdown.style.zIndex = String(topPopupZ());
   const close = bindMenuDismiss(dropdown, () => { dropdown.remove(); },
     (ev) => !dropdown.contains(ev.target) && ev.target !== anchor && !anchor.contains(ev.target));
 }
@@ -3009,6 +3011,7 @@ export function openGallery() {
       dropdown.appendChild(it);
     }
     document.body.appendChild(dropdown);
+    dropdown.style.zIndex = String(topPopupZ());
     const close = bindMenuDismiss(dropdown, () => { dropdown.remove(); },
       (ev) => !dropdown.contains(ev.target) && ev.target !== anchor);
   }

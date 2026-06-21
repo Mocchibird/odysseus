@@ -11,7 +11,7 @@ import { makeWindowDraggable } from './windowDrag.js';
 import { snapModalToZone } from './tileManager.js';
 import { applyEdgeDock, clearDockSide } from './modalSnap.js';
 import { topToolWindowZ } from './toolWindowZOrder.js';
-import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
+import { bindMenuDismiss, dismissOrRemove, topPopupZ } from './escMenuStack.js';
 
 const API_BASE = window.location.origin;
 let _open = false;
@@ -3144,6 +3144,7 @@ function _buildForm(note = null) {
     const menu = document.createElement('div');
     menu.className = 'note-reminder-menu';
     document.body.appendChild(menu);
+    menu.style.zIndex = String(topPopupZ());
 
     const presetItems = [
       { label: 'Later today', sub: _laterTodayDate().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false }), action: () => _setReminder(_toLocalDatetimeStr(_laterTodayDate())) },
@@ -3408,6 +3409,7 @@ function _buildForm(note = null) {
     if (left < 8) left = 8;
     menu.style.top = top + 'px';
     menu.style.left = left + 'px';
+    menu.style.zIndex = String(topPopupZ());
     const dInput = menu.querySelector('.note-reminder-date-input');
     dInput.focus();
     if (typeof dInput.showPicker === 'function') {
@@ -4357,6 +4359,7 @@ function _openNoteCornerMenu(btn) {
   const below = window.innerHeight - r.bottom;
   const top = (below < mh + 8 && r.top > mh + 8) ? (r.top - mh - 4) : (r.bottom + 4);
   menu.style.cssText += `position:fixed;z-index:11000;top:${Math.round(top)}px;left:${Math.round(left)}px;`;
+  menu.style.zIndex = String(topPopupZ());
   const close = bindMenuDismiss(menu, () => { menu.remove(); });
   menu.querySelector('[data-act="copy"]').addEventListener('click', () => { close(); _copyNote(id, btn); });
   menu.querySelector('[data-act="agent"]').addEventListener('click', () => { close(); _agentSolveNote(id); });

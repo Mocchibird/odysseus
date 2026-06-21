@@ -7,7 +7,7 @@
 
 import uiModule from './ui.js';
 import * as spinnerModule from './spinner.js';
-import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
+import { bindMenuDismiss, dismissOrRemove, topPopupZ } from './escMenuStack.js';
 
 const API = window.location.origin;
 let skills = [];
@@ -454,6 +454,7 @@ function _openSkillMenu(btn, card, sk, name, isPublished) {
     menu.style.maxHeight = Math.max(80, window.innerHeight - 12 - mr2.top) + 'px';
     menu.style.overflowY = 'auto';
   }
+  menu.style.zIndex = String(topPopupZ());
   const close = bindMenuDismiss(menu, () => { menu.remove(); });
 }
 

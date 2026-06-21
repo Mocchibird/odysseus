@@ -8,7 +8,7 @@ import uiModule from './ui.js';
 import spinnerModule from './spinner.js';
 import { providerLogo } from './providers.js';
 import { modelColor } from './chatRenderer.js';
-import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
+import { bindMenuDismiss, dismissOrRemove, topPopupZ } from './escMenuStack.js';
 import { openCookbookDependencies } from './cookbook-diagnosis.js';
 
 // Shared state/functions injected by init()
@@ -494,6 +494,7 @@ function _rerenderCachedModels() {
         dropdown.style.top = top + 'px';
         dropdown.style.visibility = '';
       }
+      dropdown.style.zIndex = String(topPopupZ());
       closeDropdown = bindMenuDismiss(dropdown, () => { dropdown.remove(); btn.classList.remove('cookbook-menu-active'); }, (ev) => !dropdown.contains(ev.target) && ev.target !== btn);
     });
   });
@@ -1436,6 +1437,7 @@ function _rerenderCachedModels() {
         dropdown.style.left = `${left}px`;
         dropdown.style.top = `${top}px`;
         dropdown.style.visibility = '';
+        dropdown.style.zIndex = String(topPopupZ());
         closeMenu = bindMenuDismiss(dropdown, () => { dropdown.remove(); anchor.classList.remove('cookbook-menu-active'); }, (ev) => !dropdown.contains(ev.target) && ev.target !== anchor && !anchor.contains(ev.target));
       }
 
@@ -1539,6 +1541,7 @@ function _rerenderCachedModels() {
             }
             menu.style.top = top + 'px';
           }
+          menu.style.zIndex = String(topPopupZ());
           // Close on outside click or Escape (via the registry); also dismiss
           // on scroll since the popup is fixed-positioned to the arrow.
           const _scrollClose = () => closeMenu();
@@ -1640,6 +1643,7 @@ function _rerenderCachedModels() {
           if (top + ph > vh - 8) top = Math.max(8, r.top - ph - 4);
           popup.style.left = `${left}px`;
           popup.style.top  = `${top}px`;
+          popup.style.zIndex = String(topPopupZ());
 
           popup.querySelector('.cookbook-gpu-popup-close')?.addEventListener('click', _closeProbePopup);
           popup.querySelectorAll('.cookbook-gpu-kill').forEach(btn => {
