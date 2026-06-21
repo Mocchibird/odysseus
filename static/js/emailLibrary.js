@@ -6,7 +6,7 @@
 import spinnerModule from './spinner.js';
 import { styledConfirm, showToast, emptyStateIcon } from './ui.js';
 import { folderDisplayName, sortedFolders } from './emailInbox.js';
-import settingsModule from './settings.js?v=456';
+import settingsModule from './settings.js?v=457';
 import * as Modals from './modalManager.js';
 import { makeWindowDraggable } from './windowDrag.js';
 import {
@@ -23,6 +23,7 @@ import {
 } from './emailLibrary/signatureFold.js';
 import { state } from './emailLibrary/state.js';
 import { collapseSidebarToRail } from './modalSnap.js';
+import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
 
 const API_BASE = window.location.origin;
 let _emailUnreadChipClickWired = false;
@@ -4696,7 +4697,7 @@ function _wireAttachmentHandlers(reader, folder) {
               ownerModal.classList.add('hidden');
             }
           }
-          const docMod = await import('./document.js?v=463');
+          const docMod = await import('./document.js?v=464');
           const load = (docMod && docMod.loadDocument) || (docMod && docMod.default && docMod.default.loadDocument);
           if (typeof load === 'function') {
             await load(json.doc_id);
@@ -6317,8 +6318,11 @@ async function _runAiReplyFromButton(btn, em, data, mode, noteHint = '') {
 }
 
 function _closeAiReplyChoice() {
-  document.querySelectorAll('.email-ai-reply-choice').forEach(el => el.remove());
-  document.removeEventListener('click', _closeAiReplyChoice, true);
+  // Route every open popover through its registered dismiss callback so the
+  // outside-click listener and Escape-stack entry are released too, not just
+  // the node removed (a bare remove() would orphan them — the "button dead
+  // until refresh" bug).
+  document.querySelectorAll('.email-ai-reply-choice').forEach(dismissOrRemove);
 }
 
 function _showAiReplyChoice(btn, em, data) {
@@ -6387,22 +6391,18 @@ function _showAiReplyChoice(btn, em, data) {
     ev.stopPropagation();
     const mode = choice.getAttribute('data-mode') || 'ai-reply';
     const noteHint = (noteInput.value || '').trim();
-    _closeAiReplyChoice();
+    close();
     await _runAiReplyFromButton(btn, em, data, mode, noteHint);
   });
   // Esc closes the popover; ignore plain clicks inside the menu so the
   // textarea stays focused.
   menu.addEventListener('mousedown', (ev) => ev.stopPropagation());
   document.body.appendChild(menu);
-  // Outside-click closer: only fires when the click target is OUTSIDE
-  // the menu. The original handler closed on any click which made
-  // focusing the textarea immediately dismiss the popover.
-  const outsideClose = (ev) => {
-    if (menu.contains(ev.target)) return;
-    document.removeEventListener('click', outsideClose, true);
-    _closeAiReplyChoice();
-  };
-  setTimeout(() => document.addEventListener('click', outsideClose, true), 0);
+  // Outside-click + Escape closer via the central esc-stack helper: only the
+  // OUTSIDE-click case dismisses (clicks inside keep the textarea focused).
+  // The returned close() is reused by the item-click path so no dismissal
+  // route orphans the listener.
+  const close = bindMenuDismiss(menu, () => menu.remove(), (ev) => !menu.contains(ev.target));
 }
 
 function _handleAiReplyButton(ev, em, data) {

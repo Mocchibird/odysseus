@@ -39,6 +39,7 @@ import spinnerModule from '../spinner.js';
 import themeModule from '../theme.js?v=397';
 import presetsModule from '../presets.js';
 import markdownModule from '../markdown.js';
+import { bindMenuDismiss, dismissOrRemove } from '../escMenuStack.js';
 
 var escapeHtml = uiModule.esc;
 
@@ -1040,11 +1041,13 @@ function _toggleExportMenu(btn) {
   }
   document.body.appendChild(m);
   _exportMenuEl = m;
-  setTimeout(() => document.addEventListener('click', _closeExportMenu, { once: true }), 0);
+  _closeExportMenu = bindMenuDismiss(m, () => {
+    if (_exportMenuEl) { _exportMenuEl.remove(); _exportMenuEl = null; }
+  });
 }
-function _closeExportMenu() {
-  if (_exportMenuEl) { _exportMenuEl.remove(); _exportMenuEl = null; }
-}
+let _closeExportMenu = () => {
+  if (_exportMenuEl) { dismissOrRemove(_exportMenuEl); _exportMenuEl = null; }
+};
 
 async function _exportCopyMarkdown(_btn) {
   const md = _buildComparisonMarkdown();

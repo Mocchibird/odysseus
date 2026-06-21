@@ -9,6 +9,7 @@ import { sortModelIds } from './modelSort.js';
 import { providerLogo } from './providers.js';
 import { isAltGrEvent } from './platform.js';
 import { PROMPT_TEMPLATES } from './presets.js';
+import { bindMenuDismiss } from './escMenuStack.js';
 
 let initialized = false;
 let modalEl = null;
@@ -4301,7 +4302,7 @@ async function initUnifiedIntegrations() {
         if (lbl) lbl.textContent = text;
         if (ico) ico.innerHTML = _apiIconFor(k);
       };
-      const _close = () => { menu.style.display = 'none'; };
+      let _close = () => { menu.style.display = 'none'; };
       const _open = () => {
         menu.style.display = 'block';
         const tRect = trig.getBoundingClientRect();
@@ -4310,8 +4311,7 @@ async function initUnifiedIntegrations() {
         const above = tRect.top;
         if (mRect.height > below && above > below) { menu.style.top = 'auto'; menu.style.bottom = 'calc(100% + 2px)'; }
         else { menu.style.top = 'calc(100% + 2px)'; menu.style.bottom = 'auto'; }
-        const onDoc = (ev) => { if (!menu.contains(ev.target) && ev.target !== trig) { _close(); document.removeEventListener('click', onDoc, true); } };
-        setTimeout(() => document.addEventListener('click', onDoc, true), 0);
+        _close = bindMenuDismiss(menu, () => { menu.style.display = 'none'; }, (ev) => !menu.contains(ev.target) && ev.target !== trig);
       };
       trig.addEventListener('click', (e) => { e.stopPropagation(); menu.style.display === 'block' ? _close() : _open(); });
       menu.querySelectorAll('.ufapi-option').forEach(btn => {
@@ -5099,7 +5099,7 @@ async function initUnifiedIntegrations() {
         if (labelEl) labelEl.textContent = lbl;
         if (iconEl) iconEl.innerHTML = PROV_LOGO[k] || _customLogo;
       };
-      const _closeMenu = () => { menu.style.display = 'none'; };
+      let _closeMenu = () => { menu.style.display = 'none'; };
       const _openMenu = () => {
         menu.style.display = 'block';
         // Drop-up when there's not enough room below the trigger.
@@ -5112,8 +5112,7 @@ async function initUnifiedIntegrations() {
         } else {
           menu.style.top = 'calc(100% + 2px)'; menu.style.bottom = 'auto';
         }
-        const onDoc = (ev) => { if (!menu.contains(ev.target) && ev.target !== trigger) { _closeMenu(); document.removeEventListener('click', onDoc, true); } };
-        setTimeout(() => document.addEventListener('click', onDoc, true), 0);
+        _closeMenu = bindMenuDismiss(menu, () => { menu.style.display = 'none'; }, (ev) => !menu.contains(ev.target) && ev.target !== trigger);
       };
       trigger.addEventListener('click', (e) => { e.stopPropagation(); menu.style.display === 'block' ? _closeMenu() : _openMenu(); });
       menu.querySelectorAll('.ufp-option').forEach(btn => {
@@ -6167,7 +6166,7 @@ async function initUnifiedIntegrations() {
       addBtn.parentElement.classList.add('uf-add-anchor');
     }
     let _menuEl = null;
-    const _closeMenu = () => { if (_menuEl) { _menuEl.remove(); _menuEl = null; } };
+    let _closeMenu = () => { if (_menuEl) { _menuEl.remove(); _menuEl = null; } };
     addBtn.addEventListener('click', (e) => {
       e.stopPropagation();
       if (_menuEl) { _closeMenu(); return; }
@@ -6199,8 +6198,7 @@ async function initUnifiedIntegrations() {
           showForm(k, 'new');
         });
       });
-      const onDoc = (ev) => { if (!menu.contains(ev.target) && ev.target !== addBtn) { _closeMenu(); document.removeEventListener('click', onDoc, true); } };
-      setTimeout(() => document.addEventListener('click', onDoc, true), 0);
+      _closeMenu = bindMenuDismiss(menu, () => { if (_menuEl) { _menuEl.remove(); _menuEl = null; } }, (ev) => !menu.contains(ev.target) && ev.target !== addBtn);
     });
   }
 

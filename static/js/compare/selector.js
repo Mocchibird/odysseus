@@ -541,6 +541,11 @@ async function showModelSelector() {
       // Close on outside click. The dropdown lives in document.body, so check
       // both wrap and dropdown; and tear the dropdown down when the picker row
       // is removed from the DOM (rebuild) so it doesn't orphan in the body.
+      // The listener is scoped to an AbortController so the rebuild sweep can
+      // detach it deterministically (the handler used to only remove itself if
+      // it happened to fire after the row was already gone, orphaning one stale
+      // capture-phase listener on document per rebuild).
+      const _ac = new AbortController();
       function _closeHandler(e) {
         if (!wrap.contains(e.target) && !dropdown.contains(e.target)) {
           dropdown.style.display = 'none';
@@ -550,11 +555,13 @@ async function showModelSelector() {
           }
           if (!wrap.isConnected) {
             dropdown.remove();
-            document.removeEventListener('click', _closeHandler, true);
+            _ac.abort();
           }
         }
       }
-      setTimeout(() => document.addEventListener('click', _closeHandler, true), 0);
+      dropdown._ac = _ac;
+      wrap._ac = _ac;
+      setTimeout(() => document.addEventListener('click', _closeHandler, { capture: true, signal: _ac.signal }), 0);
 
       return wrap;
     }
@@ -563,7 +570,9 @@ async function showModelSelector() {
       if (!_modelsLoaded) return;
       // The picker dropdowns live in document.body (to escape modal clipping);
       // clear any leftovers before rebuilding the rows so they don't orphan.
-      document.querySelectorAll('.cmp-picker-dropdown').forEach(d => d.remove());
+      // Abort each one's outside-click listener controller first so the old
+      // rows' capture-phase document listeners don't leak across the rebuild.
+      document.querySelectorAll('.cmp-picker-dropdown').forEach(d => { d._ac?.abort(); d.remove(); });
 
       // ── Search mode: show provider dropdowns ──
       if (state._compareMode === 'search') {
@@ -879,8 +888,9 @@ async function showModelSelector() {
 
     function cleanup(result) {
       overlay.remove();
-      // Remove any body-appended picker dropdowns so they don't orphan.
-      document.querySelectorAll('.cmp-picker-dropdown').forEach(d => d.remove());
+      // Remove any body-appended picker dropdowns so they don't orphan, and
+      // abort their outside-click listener controllers so none leak on close.
+      document.querySelectorAll('.cmp-picker-dropdown').forEach(d => { d._ac?.abort(); d.remove(); });
       if (result) {
         state._selectedModels = selections.filter(Boolean);
         state._timeout = Math.max(5, parseInt(timeoutInput.value) || 30);

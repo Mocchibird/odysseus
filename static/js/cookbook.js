@@ -7,6 +7,7 @@ import uiModule from './ui.js';
 import spinnerModule from './spinner.js';
 import { providerLogo } from './providers.js';
 import { makeWindowDraggable } from './windowDrag.js';
+import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
 import { _diagnose, _showDiagnosis, _clearDiagnosis, _runQuickCmd, ERROR_PATTERNS } from './cookbook-diagnosis.js';
 import { RECIPE_BACKENDS, recipesForBackend, pickRecipe, recipeCommands, RECIPE_DEFAULT_VARIANT } from './cookbook-deps-recipes.js';
 import { _hwfitCache, _hwfitDebounce, _hwfitFetch, _hwfitInit, _hwfitRenderList, _hwfitRenderHw, _renderGpuToggles, _expandModelRow, _fitColors, _hwfitColumns, _cachedModelIds, _gpuToggleTotal, _resetGpuToggleState } from './cookbook-hwfit.js?v=440';
@@ -1141,7 +1142,7 @@ async function _fetchDependencies() {
 
     // Wire the ⋮ menu on installed packages — currently just "Update".
     function _showDepMenu(anchor) {
-      document.querySelectorAll('.cookbook-dep-menu').forEach(d => d.remove());
+      document.querySelectorAll('.cookbook-dep-menu').forEach(dismissOrRemove);
       const row = anchor.closest('.cookbook-dep-row');
       if (!row) return;
       const pipName = row.dataset.depPip;
@@ -1161,24 +1162,22 @@ async function _fetchDependencies() {
       it.title = `Update ${pkgName} to the latest version (pip install -U)`;
       it.addEventListener('click', async (e) => {
         e.stopPropagation();
-        dropdown.remove();
+        close();
         await _installDep(pipName, pkgName, isLocalOnly, true, null);
       });
       dropdown.appendChild(it);
       document.body.appendChild(dropdown);
-      const close = (ev) => {
-        if (!dropdown.contains(ev.target) && ev.target !== anchor && !anchor.contains(ev.target)) {
-          dropdown.remove();
-          document.removeEventListener('click', close, true);
-        }
-      };
-      setTimeout(() => document.addEventListener('click', close, true), 10);
+      const close = bindMenuDismiss(
+        dropdown,
+        () => dropdown.remove(),
+        (ev) => !dropdown.contains(ev.target) && ev.target !== anchor && !anchor.contains(ev.target),
+      );
     }
     list.querySelectorAll('.cookbook-dep-installed-btn').forEach(btn => {
       btn.addEventListener('click', (e) => {
         e.stopPropagation();
         if (document.querySelector('.cookbook-dep-menu')) {
-          document.querySelectorAll('.cookbook-dep-menu').forEach(d => d.remove());
+          document.querySelectorAll('.cookbook-dep-menu').forEach(dismissOrRemove);
           return;
         }
         _showDepMenu(btn);

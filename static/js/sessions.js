@@ -515,9 +515,10 @@ function createSessionItem(s) {
           if (mr.bottom > window.innerHeight - 8) dd.style.top = (rect.top - mr.height - 4) + 'px';
           if (mr.right > window.innerWidth - 8) { dd.style.left = 'auto'; dd.style.right = '8px'; }
         });
-        // Close on tap outside
-        const close = (ev) => { if (!dd.contains(ev.target)) { dd.style.display = 'none'; document.removeEventListener('click', close, true); } };
-        setTimeout(() => document.addEventListener('click', close, true), 100);
+        // Dismissal (tap-away + Escape) is handled by the shared global
+        // _initDropdownDismiss listener for .session-dropdown-menu (same as the
+        // desktop menu-button path); a per-open listener here would only
+        // self-remove on an outside click and orphan itself on an item tap.
       }
     }, 500);
   }, { passive: true });

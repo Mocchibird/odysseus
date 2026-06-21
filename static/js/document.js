@@ -3230,7 +3230,10 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
   let _docAiReplyChoiceMenu = null;
   function _closeDocAiReplyChoice() {
     if (_docAiReplyChoiceMenu) {
-      try { _docAiReplyChoiceMenu.remove(); } catch (_) {}
+      // Tear down through the menu's registered dismiss (releasing its
+      // outside-click listener and Escape-stack entry) rather than a bare
+      // remove() that would strand them.
+      dismissOrRemove(_docAiReplyChoiceMenu);
       _docAiReplyChoiceMenu = null;
     }
   }
@@ -3288,26 +3291,17 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
       ev.stopPropagation();
       const mode = choice.getAttribute('data-mode') || 'ai-reply-fast';
       const noteHint = (noteInput?.value || '').trim();
-      _closeDocAiReplyChoice();
+      close();
       await _aiReply({ mode, noteHint });
     });
     document.body.appendChild(menu);
     _docAiReplyChoiceMenu = menu;
-    const outsideClose = (ev) => {
-      if (menu.contains(ev.target)) return;
-      document.removeEventListener('click', outsideClose, true);
-      _closeDocAiReplyChoice();
-    };
-    setTimeout(() => document.addEventListener('click', outsideClose, true), 0);
-    // Esc to close.
-    const escClose = (ev) => {
-      if (ev.key === 'Escape') {
-        ev.stopPropagation();
-        document.removeEventListener('keydown', escClose, true);
-        _closeDocAiReplyChoice();
-      }
-    };
-    document.addEventListener('keydown', escClose, true);
+    // Outside-click AND Escape both route through bindMenuDismiss (Escape via
+    // the central esc-stack), so every path releases the listener + stack entry.
+    const close = bindMenuDismiss(menu, () => {
+      try { menu.remove(); } catch (_) {}
+      if (_docAiReplyChoiceMenu === menu) _docAiReplyChoiceMenu = null;
+    });
   }
 
   async function _aiReply(opts = {}) {
@@ -8492,7 +8486,7 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
     if (e) e.stopPropagation();
     // Remove existing menu if any
     const existing = document.getElementById('doc-export-menu');
-    if (existing) { existing.remove(); return; }
+    if (existing) { dismissOrRemove(existing); return; }
 
     // Position from provided rect, clicked element, or fallback to language select
     const rect = anchorRect
@@ -8510,6 +8504,7 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
     };
     const ext = extMap[lang] || '.txt';
 
+    let close;
     const menu = document.createElement('div');
     menu.id = 'doc-export-menu';
     menu.className = 'doc-overflow-menu open';
@@ -8542,7 +8537,7 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
       const item = document.createElement('button');
       item.className = 'doc-overflow-item';
       item.textContent = opt.label;
-      item.addEventListener('click', (ev) => { ev.stopPropagation(); menu.remove(); opt.fn(); });
+      item.addEventListener('click', (ev) => { ev.stopPropagation(); close(); opt.fn(); });
       menu.appendChild(item);
       if (opt._divider) {
         const sep = document.createElement('div');
@@ -8560,21 +8555,9 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
       menu.style.top = 'auto';
       menu.style.bottom = (window.innerHeight - rect.top + 2) + 'px';
     }
-    const close = (ev) => {
-      if (ev && ev.type === 'keydown') {
-        if (ev.key !== 'Escape') return;
-        ev.preventDefault();
-        ev.stopPropagation();
-        ev.stopImmediatePropagation?.();
-      } else if (ev && menu.contains(ev.target)) {
-        return;
-      }
-      menu.remove();
-      document.removeEventListener('click', close);
-      document.removeEventListener('keydown', close, true);
-    };
-    setTimeout(() => document.addEventListener('click', close), 100);
-    document.addEventListener('keydown', close, true);
+    // Outside-click AND Escape both route through bindMenuDismiss (Escape via
+    // the central esc-stack), so every path releases the listener + stack entry.
+    close = bindMenuDismiss(menu, () => { menu.remove(); });
   }
 
   function exportAsHtml() {
