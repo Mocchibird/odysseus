@@ -3764,6 +3764,7 @@ export function closeEditor() {
       });
     }
   } catch {}
+  document.getElementById('ge-save-menu')?.remove();
   if (state.container) {
     state.container.style.display = 'none';
     state.container.innerHTML = '';

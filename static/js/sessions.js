@@ -358,7 +358,6 @@ function buildFolderSubmenu(sessionId, currentFolder, dropdown) {
   });
 
   sub.addEventListener('click', (e) => e.stopPropagation());
-  document.addEventListener('click', () => { sub.style.display = 'none'; });
   document.body.appendChild(sub);
 
   return moveItem;
@@ -878,7 +877,7 @@ function _renderSessionListImpl() {
   }
 
   // Clean up any previous session dropdowns and folder submenus from body
-  document.querySelectorAll('.session-dropdown, .folder-submenu').forEach(d => d.remove());
+  document.querySelectorAll('.session-dropdown, .session-folder-submenu').forEach(d => d.remove());
 
   const _frag = document.createDocumentFragment();
 

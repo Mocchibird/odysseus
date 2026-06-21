@@ -621,6 +621,9 @@ function _getFilteredSkills() {
 function renderSkillsList() {
   const container = document.getElementById('skills-list');
   if (!container) return;
+  // Tear down any body-appended kebab menu before rebuilding — it would
+  // otherwise orphan on the search input re-render or the 1.5s audit poll.
+  document.querySelectorAll('.skill-kebab-menu').forEach(dismissOrRemove);
   // Re-render rebuilds the cards (none expanded), so clear the expand flag
   // on the admin-card or it would keep the toolbar hidden with nothing open.
   container.closest('.admin-card')?.classList.remove('skills-has-expanded');

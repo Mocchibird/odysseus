@@ -682,6 +682,10 @@ export function renderMemoryList() {
   }
 
   const filtered = getFilteredMemories();
+  // Tear down any body-appended item dropdowns before rebuilding the list so a
+  // background memory-refresh re-render can't orphan them (mirrors the reopen
+  // sweep below).
+  document.querySelectorAll('.memory-item-dropdown').forEach(d => d.remove());
   memoryList.innerHTML = '';
 
   if (filtered.length === 0) {

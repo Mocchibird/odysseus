@@ -738,6 +738,7 @@ export function _persistEnvState() {
 async function _fetchDependencies() {
   const list = document.getElementById('cookbook-deps-list');
   if (!list) return;
+  document.querySelectorAll('.cookbook-dep-menu').forEach(dismissOrRemove);
   // Use the shared whirlpool spinner so the user sees the request is in
   // flight (the package list takes a few seconds to enumerate on slow links).
   list.innerHTML = '';

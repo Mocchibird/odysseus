@@ -1738,6 +1738,7 @@ function _renderNotes() {
   _updateRailBadge();
   const body = document.querySelector('#notes-pane .notes-pane-body');
   if (!body) return;
+  document.querySelectorAll('.note-corner-menu-dropdown, .note-reminder-menu').forEach(dismissOrRemove);
   const prevPositions = _captureCardPositions();
   const activeReminderHighlights = _loadActiveHighlights();
 

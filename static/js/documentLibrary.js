@@ -2456,6 +2456,7 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
     function _renderChatsGrid() {
       const grid = document.getElementById('doclib-chats-grid');
       if (!grid) return;
+      document.querySelectorAll('._lib-dd').forEach(dismissOrRemove);
       const _csb = document.getElementById('doclib-chats-select-btn');
       if (_csb) { _csb.classList.toggle('active', _chatsSelectMode); _csb.textContent = _chatsSelectMode ? 'Cancel' : 'Select'; }
       let filtered = _chatsSessions.slice();
@@ -2806,6 +2807,7 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
     function _renderArcGrid() {
       const grid = document.getElementById('doclib-arc-grid');
       if (!grid) return;
+      document.querySelectorAll('._lib-dd').forEach(dismissOrRemove);
       const _asb = document.getElementById('doclib-arc-select-btn');
       if (_asb) { _asb.classList.toggle('active', _arcSelectMode); _asb.textContent = _arcSelectMode ? 'Cancel' : 'Select'; }
       let filtered = _arcSessions.slice();
@@ -3248,6 +3250,7 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
       const grid = document.getElementById('doclib-research-grid');
       const stats = document.getElementById('doclib-research-stats');
       if (!grid) return;
+      document.querySelectorAll('._lib-dd').forEach(dismissOrRemove);
       const _rsb = document.getElementById('doclib-research-select-btn');
       if (_rsb) { _rsb.classList.toggle('active', _researchSelectMode); _rsb.textContent = _researchSelectMode ? 'Cancel' : 'Select'; }
       let items = _researchItems;
@@ -3806,6 +3809,7 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
 
   export function closeLibrary() {
     if (!_libraryOpen) return;
+    document.querySelectorAll('._lib-dd').forEach(dismissOrRemove);
     _libraryOpen = false;
     _librarySelectMode = false;
     _librarySelectedIds.clear();

@@ -6,7 +6,7 @@
 
 import uiModule from './ui.js';
 import { _diagnose, _showDiagnosis, _clearDiagnosis } from './cookbook-diagnosis.js';
-import { registerMenuDismiss } from './escMenuStack.js';
+import { registerMenuDismiss, dismissOrRemove } from './escMenuStack.js';
 import { computeProgressSignal } from './cookbookProgressSignal.js';
 
 // Human-friendly badge label for a task's internal status. Avoids surfacing
@@ -1630,6 +1630,11 @@ export function _renderRunningTab() {
 
   const body = document.querySelector('#cookbook-modal .cookbook-body');
   if (!body) return;
+
+  // Tear down any open task-action dropdown before the card list is rebuilt.
+  // It is body-appended, so when the background status poll re-renders and
+  // removes the card whose menu is open, the popup would otherwise orphan.
+  document.querySelectorAll('.cookbook-task-dropdown').forEach(dismissOrRemove);
 
   // Capture expansion state so re-renders don't collapse whatever the user
   // had open. Task output: presence of .cookbook-task-collapsed means collapsed.

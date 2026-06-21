@@ -2866,6 +2866,7 @@ function _renderGrid() {
     try { d._menuAbort?.abort(); } catch (_) {}
     d.remove();
   });
+  _closeAiReplyChoice();
   grid.innerHTML = '';
 
   let filtered = state._libEmails;

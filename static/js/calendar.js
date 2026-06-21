@@ -738,6 +738,8 @@ function _isStaleRender(t) { return t !== _renderToken; }
 function _render() {
   // Don't rebuild the DOM while the user is typing in quick-add — defer it.
   if (_qaTyping()) { _renderPending = true; return; }
+  // Tear down body-appended event dropdowns before any rebuild so they can't orphan.
+  document.querySelectorAll('.cal-event-dropdown').forEach(d => { if (typeof d._dismiss === 'function') d._dismiss(); else d.remove(); });
   // Empty state: no calendars configured or connection failed
   if (!_calendars.length) {
     _renderEmpty();

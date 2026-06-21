@@ -1358,6 +1358,8 @@ function _renderGrid() {
   const loadMore = document.getElementById('gallery-load-more');
   if (!grid) return;
 
+  document.querySelectorAll('.gallery-card-menu, .gallery-album-picker, .gallery-bulk-menu').forEach(dismissOrRemove);
+
   // First tile: always-visible "Upload" affordance. Mirrors the Upload album
   // tile in the Albums tab so the upload entry point is consistent across
   // both grids.

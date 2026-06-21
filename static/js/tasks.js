@@ -632,6 +632,7 @@ function _taskClearCacheLabel(taskOrEntry) {
 function _renderList() {
   const list = document.getElementById('tasks-list');
   if (!list) return;
+  document.querySelectorAll('.task-dropdown').forEach(dismissOrRemove);
   list.innerHTML = '';
   // Sync the count badges (tab + header).
   const _tabCount = document.getElementById('tasks-tab-count');

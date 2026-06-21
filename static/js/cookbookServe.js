@@ -287,6 +287,8 @@ function _rerenderCachedModels() {
   const tagContainer = document.getElementById('serve-tags');
   if (!list || !_cachedAllModels.length) return;
 
+  document.querySelectorAll('.cookbook-saved-menu, .hwfit-cached-dropdown, .cookbook-gpu-split-menu, .cookbook-gpu-popup').forEach(d => { if (d._anchor) d._anchor.classList.remove('cookbook-menu-active'); if (typeof d._dismiss === 'function') d._dismiss(); else d.remove(); });
+
   const allModels = _cachedAllModels;
   const _h = (text) => `<span class="hwfit-hint" title="${text}">?</span>`;
 
