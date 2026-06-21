@@ -2824,7 +2824,7 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
             const resetFn = () => {
               ttsBtn.innerHTML = ICON_PLAY_TTS;
               ttsBtn.classList.remove('playing', 'loading');
-              ttsBtn.style.color = '#6b7280';
+              ttsBtn.style.color = 'var(--color-muted-alt, #6b7280)';
               ttsBtn.title = 'Read aloud';
             };
             if (streamingTTS) {

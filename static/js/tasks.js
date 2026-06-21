@@ -314,7 +314,7 @@ function _absoluteTime(iso) {
 }
 
 function _statusDot(status) {
-  const colors = { active: '#4caf50', paused: '#ff9800', completed: '#888', error: '#f44336' };
+  const colors = { active: 'var(--color-success, #4caf50)', paused: 'var(--color-blind-orange, #ff9800)', completed: 'var(--color-muted, #888)', error: 'var(--color-error, #f44336)' };
   const c = colors[status] || '#888';
   return `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${c};box-shadow:0 0 6px ${c}, 0 0 3px ${c};flex-shrink:0;position:relative;top:4px;"></span>`;
 }

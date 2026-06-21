@@ -224,7 +224,7 @@ function _maybeOpenFromHash() {
 // Falls back to the default (blue / unset) when scanner is off or no urgent.
 function _urgencyColor(score) {
   if (score >= 3) return 'var(--color-error, #e06c75)';   // red — urgent now
-  if (score === 2) return '#f0ad4e';                       // orange — reply soon
+  if (score === 2) return 'var(--warn, #f0ad4e)';         // orange — reply soon
   return '';                                                // default (blue / theme)
 }
 
@@ -509,7 +509,7 @@ function _createEmailItem(em) {
           const v = us.per_uid[k] || {};
           const score = v.score || 0;
           if (score >= 3) { _unreadColor = 'var(--color-error, #e06c75)'; _unreadTitle = 'Urgent — ' + (v.reason || 'needs reply now'); }
-          else if (score === 2) { _unreadColor = '#f0ad4e'; _unreadTitle = 'Reply soon — ' + (v.reason || ''); }
+          else if (score === 2) { _unreadColor = 'var(--warn, #f0ad4e)'; _unreadTitle = 'Reply soon — ' + (v.reason || ''); }
           break;
         }
       }

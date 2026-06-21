@@ -169,7 +169,7 @@ def _clear_note_ping_cache(owner, note_id):
         import json as _json
         from pathlib import Path as _P
         slug = "".join(c if (c.isalnum() or c in "-_.@") else "_" for c in (owner or "default"))
-        p = _P(f"data/note_pings_{slug}.json")
+        p = _P(DATA_DIR) / f"note_pings_{slug}.json"
         if not p.exists():
             return
         cache = _json.loads(p.read_text(encoding="utf-8"))

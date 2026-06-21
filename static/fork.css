@@ -1001,9 +1001,9 @@ details.md-callout[open] > summary::after { transform: rotate(-135deg); }
   justify-content: center;
   padding: 14px;
   text-align: center;
-  font: 12px/1.4 ui-monospace, Menlo, Consolas, monospace;
-  color: #b00020;
-  background: #fff;
+  font: 12px/1.4 var(--mono-font, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
+  color: var(--red, var(--color-danger));
+  background: var(--panel, var(--bg));
 }
 /* Center + show the page number on placeholders that haven't rasterized yet. */
 .pdfjs-page:not(:has(.pdfjs-canvas)) .pdfjs-page-num {

@@ -444,17 +444,17 @@ export function addAITTSButton(messageElement, text) {
     playButton.type = 'button';
     playButton.title = 'Read aloud';
     playButton.innerHTML = ICON_PLAY;
-    playButton.style.cssText = 'background:none;border:none;color:#6b7280;cursor:pointer;padding:2px 6px;border-radius:4px;transition:color .15s;line-height:1;display:inline-flex;align-items:center;';
+    playButton.style.cssText = 'background:none;border:none;color:var(--color-muted-alt, #6b7280);cursor:pointer;padding:2px 6px;border-radius:4px;transition:color .15s;line-height:1;display:inline-flex;align-items:center;';
 
     playButton.addEventListener('mouseenter', () => { playButton.style.color = '#ccc'; });
     playButton.addEventListener('mouseleave', () => {
-        if (!playButton.classList.contains('playing') && !playButton.classList.contains('loading')) playButton.style.color = '#6b7280';
+        if (!playButton.classList.contains('playing') && !playButton.classList.contains('loading')) playButton.style.color = 'var(--color-muted-alt, #6b7280)';
     });
 
     function resetButton() {
         playButton.innerHTML = ICON_PLAY;
         playButton.classList.remove('playing', 'loading');
-        playButton.style.color = '#6b7280';
+        playButton.style.color = 'var(--color-muted-alt, #6b7280)';
         playButton.title = 'Read aloud';
     }
 
