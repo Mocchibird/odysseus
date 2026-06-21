@@ -100,3 +100,29 @@ export function bindMenuDismiss(el, onClose, isOutside) {
   el._dismiss = close;
   return close;
 }
+
+// ── Dynamic stacking ─────────────────────────────────────────────────────
+// Returns one above the highest z-index among <body>'s currently-visible
+// direct children, so a transient popup appended to <body> can sit ABOVE
+// whatever window/panel is topmost right now — WITHOUT hard-coding a magic
+// number that silently loses to the next high-z element someone adds. A
+// body-level popup can only be covered by another body-level (or body-rooted)
+// stacking context, so scanning direct body children is sufficient; the set is
+// tiny, so this is cheap to call on every open. `floor` keeps the result at
+// least at the historical hard-coded value so it never regresses downward.
+//
+//   menuEl.style.zIndex = String(topPopupZ());  // after appending to <body>
+export function topPopupZ(floor = 10001) {
+  let max = floor;
+  const body = globalThis.document && globalThis.document.body;
+  const gs = globalThis.getComputedStyle;
+  if (!body || typeof gs !== 'function') return max + 1;
+  for (const el of Array.from(body.children)) {
+    let cs;
+    try { cs = gs(el); } catch { continue; }
+    if (!cs || cs.display === 'none' || cs.visibility === 'hidden') continue;
+    const z = parseInt(cs.zIndex, 10);
+    if (Number.isFinite(z) && z > max) max = z;
+  }
+  return max + 1;
+}

@@ -23,7 +23,7 @@ import {
 } from './emailLibrary/signatureFold.js';
 import { state } from './emailLibrary/state.js';
 import { collapseSidebarToRail } from './modalSnap.js';
-import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
+import { bindMenuDismiss, dismissOrRemove, topPopupZ } from './escMenuStack.js';
 
 const API_BASE = window.location.origin;
 let _emailUnreadChipClickWired = false;
@@ -5545,6 +5545,10 @@ async function _generateSummary(reader, data, btn) {
 // bottom (e.g. an email low on a phone screen), flip it above the anchor if
 // there's more room up there, and cap height + scroll if it still overflows.
 function _fitEmailDropdown(dropdown, rect) {
+  // Stack above whatever window/panel is currently topmost — computed
+  // dynamically (no hard-coded z), which fixes the menu opening BEHIND a
+  // raised/docked reading panel. Shared by the card, reader-more and bulk menus.
+  dropdown.style.zIndex = String(topPopupZ());
   requestAnimationFrame(() => {
     const margin = 8;
     // Horizontal clamp — keep the dropdown inside the viewport regardless of
@@ -6411,6 +6415,7 @@ function _showAiReplyChoice(btn, em, data) {
   // textarea stays focused.
   menu.addEventListener('mousedown', (ev) => ev.stopPropagation());
   document.body.appendChild(menu);
+  menu.style.zIndex = String(topPopupZ());  // dynamic: sit above the topmost panel
   // Outside-click + Escape closer via the central esc-stack helper: only the
   // OUTSIDE-click case dismisses (clicks inside keep the textarea focused).
   // The returned close() is reused by the item-click path so no dismissal
