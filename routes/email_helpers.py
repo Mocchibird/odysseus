@@ -37,6 +37,7 @@ from typing import Optional, List
 
 from src.auth_helpers import _auth_disabled, get_current_user
 from src.secret_storage import decrypt as _decrypt
+from src.constants import LOOPBACK_HOSTS
 
 logger = logging.getLogger(__name__)
 
@@ -342,7 +343,7 @@ def _require_auth(request: Request) -> str:
     # network traffic must authenticate even before auth is set up.
     client = getattr(request, "client", None)
     host = (client.host if client else "") or ""
-    if host in ("127.0.0.1", "::1", "localhost"):
+    if host in LOOPBACK_HOSTS:
         return ""
     raise HTTPException(401, "Not authenticated")
 

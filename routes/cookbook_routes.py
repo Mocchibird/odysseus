@@ -15,7 +15,7 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException, Request, Depends
 
 from src.auth_helpers import require_user
-from src.constants import COOKBOOK_STATE_FILE
+from src.constants import COOKBOOK_STATE_FILE, OLLAMA_DEFAULT_PORT
 from pydantic import BaseModel
 
 from core.middleware import require_admin
@@ -1072,7 +1072,7 @@ def setup_cookbook_routes() -> APIRouter:
         elif ollama_host_match:
             port = int(ollama_host_match.group(1))
         elif "ollama" in req.cmd:
-            port = 11434
+            port = OLLAMA_DEFAULT_PORT
         else:
             port = 8080  # llama.cpp's llama-server default — the Apple Silicon path
 
@@ -1274,7 +1274,7 @@ def setup_cookbook_routes() -> APIRouter:
         if re.search(r"\bollama\s+serve\b", req.cmd) and "OLLAMA_HOST=" not in req.cmd:
             _ollama_bind_host = "0.0.0.0" if remote else "127.0.0.1"
             _ollama_chosen_port = _pick_free_port_for_ollama(
-                remote, req.ssh_port, start_port=11434, max_offset=10,
+                remote, req.ssh_port, start_port=OLLAMA_DEFAULT_PORT, max_offset=10,
             )
             if _ollama_chosen_port:
                 req.cmd = f"OLLAMA_HOST={_ollama_bind_host}:{_ollama_chosen_port} {req.cmd}"

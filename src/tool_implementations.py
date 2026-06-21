@@ -12,7 +12,7 @@ import os
 import re
 from typing import Any, Dict, List, Optional
 
-from src.constants import DEEP_RESEARCH_DIR, VAULT_FILE
+from src.constants import DEEP_RESEARCH_DIR, VAULT_FILE, OLLAMA_DEFAULT_PORT
 from src.tool_utils import get_mcp_manager
 from core.constants import internal_api_base
 
@@ -3071,7 +3071,7 @@ def _infer_serve_port(cmd: str) -> int:
         except Exception:
             pass
     if "ollama" in cmd:
-        return 11434
+        return OLLAMA_DEFAULT_PORT
     return 8080
 
 

@@ -20,6 +20,7 @@ from src.model_context import estimate_tokens
 from src.settings import get_setting
 from src.prompt_security import untrusted_context_message
 from src.tool_security import blocked_tools_for_owner, plan_mode_disabled_tools
+from src.constants import OLLAMA_DEFAULT_PORT
 from src.tool_policy import GUIDE_ONLY_DIRECTIVE, ToolPolicy
 from src.tool_utils import _truncate, get_mcp_manager
 from src.agent_tools import (
@@ -559,7 +560,7 @@ def _is_ollama_openai_compat_url(endpoint_url: str) -> bool:
     except Exception:
         return False
     path = (parsed.path or "").rstrip("/")
-    return parsed.port == 11434 and (path == "/v1" or path.startswith("/v1/"))
+    return parsed.port == OLLAMA_DEFAULT_PORT and (path == "/v1" or path.startswith("/v1/"))
 
 
 def _endpoint_lookup_keys(endpoint_url: str) -> List[str]:

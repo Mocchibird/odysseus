@@ -18,6 +18,7 @@ from pydantic import BaseModel
 from fastapi.responses import StreamingResponse
 from core.database import SessionLocal, ModelEndpoint, Session as DbSession
 from core.middleware import require_admin
+from src.constants import OLLAMA_DEFAULT_PORT, LOCAL_HOSTS
 from src.llm_core import _detect_provider, _host_match, ANTHROPIC_MODELS
 from src.tls_overrides import llm_verify
 from src.settings import load_settings as _load_settings, save_settings as _save_settings
@@ -489,7 +490,7 @@ def _is_ollama_base(base_url: str) -> bool:
     try:
         parsed = urlparse(base_url)
         host = (parsed.hostname or "").lower()
-        return parsed.port == 11434 or "ollama" in host
+        return parsed.port == OLLAMA_DEFAULT_PORT or "ollama" in host
     except Exception:
         return "ollama" in (base_url or "").lower()
 
@@ -661,7 +662,7 @@ def _probe_single_model(base: str, api_key: str, model_id: str, timeout: int = 1
 
 
 # Hostnames / IP prefixes that indicate a local endpoint
-_LOCAL_HOSTS = {"localhost", "127.0.0.1", "0.0.0.0", "::1"}
+_LOCAL_HOSTS = LOCAL_HOSTS  # localhost + loopback + IPv4 any-bind; see src.constants
 _PRIVATE_NETWORKS = (
     ipaddress.ip_network("10.0.0.0/8"),
     ipaddress.ip_network("172.16.0.0/12"),
@@ -790,7 +791,7 @@ def _probe_endpoint(base_url: str, api_key: str = None, timeout: int = 5) -> Lis
     # the OpenAI-compatible /v1/models path is unavailable.
     try:
         parsed = urlparse(base)
-        if parsed.port == 11434 or "ollama" in (parsed.hostname or "").lower():
+        if parsed.port == OLLAMA_DEFAULT_PORT or "ollama" in (parsed.hostname or "").lower():
             root = base[:-3].rstrip("/") if base.endswith("/v1") else base
             r = httpx.get(root + "/api/tags", timeout=timeout, verify=llm_verify())
             r.raise_for_status()
@@ -820,7 +821,7 @@ def _ping_endpoint(base_url: str, api_key: str = None, timeout: float = 1.5) -> 
     # /models as a generic health check because large proxy catalogs can be slow.
     parsed_base = urlparse(base)
     looks_like_ollama = (
-        parsed_base.port == 11434
+        parsed_base.port == OLLAMA_DEFAULT_PORT
         or "ollama" in (parsed_base.hostname or "").lower()
     )
 
@@ -907,7 +908,7 @@ def _model_endpoint_error_message(base_url: str, ping: Dict[str, Any] = None) ->
         probed = base_url
     parsed = urlparse(base_url)
     host = (parsed.hostname or "").lower()
-    is_ollama = parsed.port == 11434 or "ollama" in host or "ollama" in base_url.lower()
+    is_ollama = parsed.port == OLLAMA_DEFAULT_PORT or "ollama" in host or "ollama" in base_url.lower()
     is_lmstudio = (
         parsed.port == 1234
         or "lmstudio" in host

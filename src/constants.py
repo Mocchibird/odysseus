@@ -100,6 +100,22 @@ LLM_HOSTS = [h.strip() for h in os.getenv("LLM_HOSTS", "").split(",") if h.strip
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 SEARXNG_INSTANCE = os.getenv("SEARXNG_INSTANCE", "http://localhost:8080")
 
+# Ollama's default REST port. Used to launch managed instances and to detect
+# "is this endpoint an Ollama server?" by port. Env-overridable for the rare
+# custom-port deploy.
+OLLAMA_DEFAULT_PORT = int(os.getenv("OLLAMA_DEFAULT_PORT", "11434"))
+
+# Hostnames that resolve to "this machine". Two tiers on purpose — callers need
+# different breadth and conflating them is a security footgun:
+#   LOOPBACK_HOSTS - the request genuinely originated on this host; use for
+#                    caller-origin / auth-bypass checks. Loopback only.
+#   LOCAL_HOSTS    - a *target* URL points at the local machine, including the
+#                    IPv4 any-bind address a local server may advertise; use for
+#                    target-locality checks ("is this LLM endpoint local?").
+#                    Never use this for caller-origin checks.
+LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
+LOCAL_HOSTS = frozenset({"localhost", "127.0.0.1", "0.0.0.0", "::1"})
+
 
 # Cleanup configuration
 CLEANUP_ENABLED = os.getenv("CLEANUP_ENABLED", "True").lower() == "true"

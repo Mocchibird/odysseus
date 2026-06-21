@@ -36,7 +36,7 @@ from src.bg import spawn
 
 from fastapi import APIRouter, Query, UploadFile, File, BackgroundTasks, HTTPException, Depends, Request
 from fastapi.responses import FileResponse
-from src.constants import DATA_DIR
+from src.constants import DATA_DIR, LOOPBACK_HOSTS
 
 from src.llm_core import llm_call_async
 from src.upload_limits import read_upload_limited, EMAIL_COMPOSE_UPLOAD_MAX_BYTES
@@ -111,7 +111,7 @@ def _mail_endpoint_error(host: str, port: int, exc: Exception) -> str:
     raw = str(exc)[:160] or exc.__class__.__name__
     hint = ""
     normalized_host = (host or "").strip().lower()
-    if normalized_host in {"localhost", "127.0.0.1", "::1"}:
+    if normalized_host in LOOPBACK_HOSTS:
         hint = (
             "localhost is the Odysseus container in Docker; use "
             "proton-bridge:143/25 for the compose sidecar or "

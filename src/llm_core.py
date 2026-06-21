@@ -12,6 +12,7 @@ from fastapi import HTTPException
 from typing import Optional, Dict, List, Tuple
 from src.model_context import get_context_length, DEFAULT_CONTEXT
 from urllib.parse import urlparse
+from src.constants import OLLAMA_DEFAULT_PORT, LOCAL_HOSTS
 
 logger = logging.getLogger(__name__)
 
@@ -292,7 +293,7 @@ def _is_ollama_native_url(url: str) -> bool:
         return True
     if path.startswith("/v1"):
         return False
-    local_ollama_host = host in {"localhost", "127.0.0.1", "0.0.0.0", "::1"} or parsed.port == 11434
+    local_ollama_host = host in LOCAL_HOSTS or parsed.port == OLLAMA_DEFAULT_PORT
     return local_ollama_host and (path == "" or path == "/api" or path.startswith("/api/"))
 
 
@@ -310,7 +311,7 @@ def _is_ollama_openai_compat_url(url: str) -> bool:
         return False
     host = parsed.hostname or ""
     path = (parsed.path or "").rstrip("/")
-    local_ollama_host = host in {"localhost", "127.0.0.1", "0.0.0.0", "::1"} or parsed.port == 11434
+    local_ollama_host = host in LOCAL_HOSTS or parsed.port == OLLAMA_DEFAULT_PORT
     return local_ollama_host and (path == "/v1" or path.startswith("/v1/"))
 
 
@@ -1341,7 +1342,7 @@ def list_model_ids(
         return model_ids
     except Exception:
         try:
-            if ":11434" in base_chat_url or "ollama" in base_chat_url.lower():
+            if f":{OLLAMA_DEFAULT_PORT}" in base_chat_url or "ollama" in base_chat_url.lower():
                 root = base_chat_url.replace("/v1/chat/completions", "").replace("/chat/completions", "").rstrip("/")
                 r = httpx.get(root + "/api/tags", timeout=timeout)
                 r.raise_for_status()

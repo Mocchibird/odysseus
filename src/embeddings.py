@@ -14,7 +14,7 @@ Set EMBEDDING_URL in .env, e.g.:
 
 import os
 
-from src.constants import FASTEMBED_CACHE_DIR, EMBEDDING_ENDPOINT_FILE
+from src.constants import FASTEMBED_CACHE_DIR, EMBEDDING_ENDPOINT_FILE, OLLAMA_DEFAULT_PORT
 
 # Windows: force HuggingFace/fastembed to COPY model files rather than symlink
 # them. On a network-share/UNC cache dir Windows can't follow HF's symlinks
@@ -43,7 +43,7 @@ class EmbeddingClient:
     def __init__(self, url: Optional[str] = None, model: Optional[str] = None, api_key: Optional[str] = None):
         self.url = url or os.getenv(
             "EMBEDDING_URL",
-            f"http://{os.getenv('LLM_HOST', 'localhost')}:11434/v1/embeddings",
+            f"http://{os.getenv('LLM_HOST', 'localhost')}:{OLLAMA_DEFAULT_PORT}/v1/embeddings",
         )
         self.model = model or os.getenv("EMBEDDING_MODEL", _DEFAULT_MODEL)
         self.api_key = api_key or os.getenv("EMBEDDING_API_KEY")

@@ -11,6 +11,7 @@ import sys
 from typing import Dict, List, Optional, Tuple
 
 from urllib.parse import urlparse
+from src.constants import OLLAMA_DEFAULT_PORT
 
 import httpx
 
@@ -78,7 +79,7 @@ def _configured_endpoint_kind(url: str) -> Optional[str]:
                     parsed = urlparse(base)
                     host = (parsed.hostname or "").lower()
                     path = (parsed.path or "").rstrip("/")
-                    if parsed.port != 11434 and "ollama" not in host and (path.endswith("/v1") or "/openai" in path):
+                    if parsed.port != OLLAMA_DEFAULT_PORT and "ollama" not in host and (path.endswith("/v1") or "/openai" in path):
                         return "proxy"
                 return "auto"
         finally:

@@ -14,6 +14,7 @@ from fastapi import HTTPException
 from pydantic import BaseModel
 
 from core.platform_compat import _ssh_exec_argv
+from src.constants import OLLAMA_DEFAULT_PORT
 
 logger = logging.getLogger(__name__)
 
@@ -617,25 +618,25 @@ def _ollama_bind_from_cmd(cmd: str | None, *, default_host: str = "127.0.0.1") -
     wider default host so the resulting API is reachable by Odysseus.
     """
     if not cmd:
-        return default_host, "11434"
+        return default_host, str(OLLAMA_DEFAULT_PORT)
     match = _OLLAMA_HOST_ASSIGNMENT_RE.search(cmd)
     if not match:
-        return default_host, "11434"
+        return default_host, str(OLLAMA_DEFAULT_PORT)
     value = match.group(1).strip("'\"")
     bind_match = _OLLAMA_BIND_RE.match(value)
     if not bind_match:
-        return "127.0.0.1", "11434"
+        return "127.0.0.1", str(OLLAMA_DEFAULT_PORT)
     bracketed_host = bind_match.group(1)
     host = bracketed_host or bind_match.group(3) or "127.0.0.1"
-    port = bind_match.group(2) or bind_match.group(4) or "11434"
+    port = bind_match.group(2) or bind_match.group(4) or str(OLLAMA_DEFAULT_PORT)
     if not _OLLAMA_BIND_HOST_RE.match(host):
-        return "127.0.0.1", "11434"
+        return "127.0.0.1", str(OLLAMA_DEFAULT_PORT)
     try:
         port_num = int(port, 10)
     except ValueError:
-        return "127.0.0.1", "11434"
+        return "127.0.0.1", str(OLLAMA_DEFAULT_PORT)
     if port_num < 1 or port_num > 65535:
-        return "127.0.0.1", "11434"
+        return "127.0.0.1", str(OLLAMA_DEFAULT_PORT)
     return f"[{host}]" if bracketed_host else host, port
 
 

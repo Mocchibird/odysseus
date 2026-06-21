@@ -20,7 +20,7 @@ from pathlib import Path
 
 import httpx
 from core.constants import internal_api_base
-from src.constants import COOKBOOK_STATE_FILE
+from src.constants import COOKBOOK_STATE_FILE, OLLAMA_DEFAULT_PORT
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +53,7 @@ async def _delete_endpoint_for_task(task: dict) -> None:
     elif ollama_host_match:
         port = int(ollama_host_match.group(1))
     elif "ollama" in cmd:
-        port = 11434
+        port = OLLAMA_DEFAULT_PORT
     else:
         port = 8080
     base_url = f"http://{host}:{port}/v1"
