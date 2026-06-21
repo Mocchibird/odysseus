@@ -31,6 +31,7 @@ class NoteCreate(BaseModel):
     label: Optional[str] = None
     pinned: bool = False
     due_date: Optional[str] = None
+    reminder_at: Optional[str] = None
     source: str = "user"
     session_id: Optional[str] = None
     image_url: Optional[str] = None
@@ -48,6 +49,7 @@ class NoteUpdate(BaseModel):
     pinned: Optional[bool] = None
     archived: Optional[bool] = None
     due_date: Optional[str] = None
+    reminder_at: Optional[str] = None
     image_url: Optional[str] = None
     repeat: Optional[str] = None
     sort_order: Optional[int] = None
@@ -84,6 +86,7 @@ def _note_to_dict(note: Note) -> Dict[str, Any]:
         "pinned": note.pinned,
         "archived": note.archived,
         "due_date": note.due_date,
+        "reminder_at": getattr(note, "reminder_at", None),
         "source": note.source,
         "session_id": note.session_id,
         "sort_order": note.sort_order or 0,
@@ -173,8 +176,14 @@ def _clear_note_ping_cache(owner, note_id):
         if not p.exists():
             return
         cache = _json.loads(p.read_text(encoding="utf-8"))
-        if str(note_id) in cache:
-            del cache[str(note_id)]
+        # Drop BOTH the one-shot due-date key and the daily reminder dedupe key
+        # so a snoozed reminder can re-fire at its new time (even later today).
+        changed = False
+        for k in (str(note_id), f"{note_id}#rem"):
+            if k in cache:
+                del cache[k]
+                changed = True
+        if changed:
             p.write_text(_json.dumps(cache), encoding="utf-8")
     except Exception:
         pass
@@ -732,6 +741,7 @@ def setup_note_routes(task_scheduler=None):
                 label=body.label,
                 pinned=body.pinned,
                 due_date=body.due_date,
+                reminder_at=body.reminder_at,
                 source=body.source,
                 session_id=body.session_id,
                 image_url=body.image_url,
@@ -795,6 +805,8 @@ def setup_note_routes(task_scheduler=None):
                 note.archived = body.archived
             if body.due_date is not None:
                 note.due_date = body.due_date
+            if body.reminder_at is not None:
+                note.reminder_at = body.reminder_at
             if body.image_url is not None:
                 note.image_url = body.image_url
             if body.repeat is not None:
@@ -987,15 +999,18 @@ def setup_note_routes(task_scheduler=None):
                 raise HTTPException(404, "Reminder not found")
             from src.i18n import get_user_language as _get_lang, t as _i18n_t
             _lang = _get_lang(owner)
+            # Act on the field that drives the nudge: the daily "Remind me"
+            # (reminder_at) when set, else the one-shot "Due by" (due_date).
+            _field = "reminder_at" if getattr(note, "reminder_at", None) else "due_date"
             if action == "done":
-                note.due_date = None
+                setattr(note, _field, None)
                 msg = _i18n_t("ack_dismissed", _lang)
             elif action == "snooze1h":
-                note.due_date = (_dt.now() + _td(hours=1)).isoformat()
+                setattr(note, _field, (_dt.now() + _td(hours=1)).isoformat())
                 msg = _i18n_t("ack_snoozed_1h", _lang)
             else:  # tomorrow
                 t = (_dt.now() + _td(days=1)).replace(hour=9, minute=0, second=0, microsecond=0)
-                note.due_date = t.isoformat()
+                setattr(note, _field, t.isoformat())
                 msg = _i18n_t("ack_snoozed_tomorrow", _lang)
             db.commit()
         finally:

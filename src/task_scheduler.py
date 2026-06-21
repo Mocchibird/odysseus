@@ -642,10 +642,13 @@ class TaskScheduler:
             for r in db.query(ScheduledTask.owner).distinct().all():
                 if r[0]:
                     owners.add(r[0])
+            from sqlalchemy import or_, and_
             note_q = db.query(Note.owner).filter(
-                Note.due_date.isnot(None),
-                Note.due_date != "",
                 Note.archived == False,  # noqa: E712
+                or_(
+                    and_(Note.due_date.isnot(None), Note.due_date != ""),
+                    and_(Note.reminder_at.isnot(None), Note.reminder_at != ""),
+                ),
             ).distinct()
             for r in note_q.all():
                 if r[0]:

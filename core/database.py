@@ -1838,7 +1838,8 @@ class Note(TimestampMixin, Base):
     label      = Column(String, nullable=True)
     pinned     = Column(Boolean, default=False)
     archived   = Column(Boolean, default=False)
-    due_date   = Column(String, nullable=True)
+    due_date   = Column(String, nullable=True)      # "Due by" deadline — one-shot ping when reached
+    reminder_at = Column(String, nullable=True)     # "Remind me" — re-nudges daily until checked
     source     = Column(String, default="user")     # "user" or "agent"
     session_id = Column(String, nullable=True)
     sort_order = Column(Integer, default=0)
@@ -2134,6 +2135,31 @@ class Ping(TimestampMixin, Base):
 # Any future migrations or schema changes that temporarily violate foreign-key
 # constraints will fail. To perform such operations, foreign_keys must be
 # temporarily disabled around the migration workflow.
+def _migrate_add_notes_reminder_at():
+    """Add the reminder_at column to notes — the daily-nag 'Remind me' time,
+    distinct from due_date (the one-shot 'Due by' deadline)."""
+    import sqlite3
+    db_path = DATABASE_URL.replace("sqlite:///", "")
+    if not os.path.exists(db_path):
+        return
+    conn = None
+    try:
+        conn = sqlite3.connect(db_path)
+        cursor = conn.execute("PRAGMA table_info(notes)")
+        columns = [row[1] for row in cursor.fetchall()]
+        if columns and "reminder_at" not in columns:
+            conn.execute("ALTER TABLE notes ADD COLUMN reminder_at TEXT")
+            conn.commit()
+            logging.getLogger(__name__).info("Migrated: added 'reminder_at' column to notes")
+    except Exception as e:
+        logging.getLogger(__name__).warning(f"notes.reminder_at migration failed: {e}")
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
 def init_db():
     """
     Initialize the database by creating all tables.
@@ -2145,6 +2171,7 @@ def init_db():
     _migrate_add_cached_models_column()
     _migrate_add_pinned_models_column()
     _migrate_add_notes_sort_order()
+    _migrate_add_notes_reminder_at()
     _migrate_add_model_type_column()
     _migrate_add_model_endpoint_refresh_columns()
     _migrate_add_model_endpoint_owner_column()

@@ -1023,8 +1023,10 @@ async def action_daily_brief(owner: str, **kwargs) -> Tuple[str, bool]:
         todo_lines: list[str] = []
         for n in notes:
             due_local = _due_local_date(n.due_date)
-            is_due = due_local is not None and due_local <= _day
-            if not (is_due or n.pinned):
+            rem_local = _due_local_date(getattr(n, "reminder_at", None))
+            is_active = (due_local is not None and due_local <= _day) or \
+                        (rem_local is not None and rem_local <= _day)
+            if not (is_active or n.pinned):
                 continue
             if n.note_type == "checklist" and n.items:
                 try:
@@ -1266,7 +1268,7 @@ async def action_ping_notes(owner: str, **kwargs) -> Tuple[str, bool]:
     """
     try:
         import json as _json
-        from datetime import datetime as _dt, timezone as _tz, timedelta as _td
+        from datetime import datetime as _dt, timezone as _tz, timedelta as _td, time as _dtime
         from pathlib import Path as _P
         from core.database import SessionLocal as _SL, Note as _N
 
@@ -1313,8 +1315,12 @@ async def action_ping_notes(owner: str, **kwargs) -> Tuple[str, bool]:
 
         db = _SL()
         try:
+            from sqlalchemy import or_ as _or, and_ as _and
             q = db.query(_N).filter(_N.archived == False)  # noqa: E712
-            q = q.filter(_N.due_date.isnot(None), _N.due_date != "")
+            q = q.filter(_or(
+                _and(_N.due_date.isnot(None), _N.due_date != ""),
+                _and(_N.reminder_at.isnot(None), _N.reminder_at != ""),
+            ))
             if owner:
                 # Match owner OR legacy null-owner notes (single-user installs).
                 q = owner_filter(q, _N, owner)
@@ -1328,28 +1334,22 @@ async def action_ping_notes(owner: str, **kwargs) -> Tuple[str, bool]:
             seen_ids = set()
             sent = []
 
-            for n in notes:
-                seen_ids.add(n.id)
-                due = _parse_due(n.due_date)
-                if not due:
-                    continue
-                # Inside the ±5min window?
-                if abs((due - now).total_seconds()) > window.total_seconds():
-                    continue
-                # Recently pinged? Skip.
-                last = cache.get(n.id)
-                if last:
-                    try:
-                        if isinstance(last, dict):
-                            last = last.get("at")
-                        last_dt = _dt.fromisoformat(str(last))
-                        if last_dt.tzinfo is None:
-                            last_dt = last_dt.replace(tzinfo=_tz.utc)
-                        if last_dt >= reping_cutoff:
-                            continue
-                    except Exception:
-                        pass
-                # Compose + dispatch.
+            def _all_checked(n):
+                """True only for a checklist whose every item is done/checked.
+                Plain notes (no items) are never 'fully checked' — their
+                reminder nags until the user clears it or archives the note."""
+                if not n.items:
+                    return False
+                try:
+                    items = _json.loads(n.items)
+                except Exception:
+                    return False
+                return bool(items) and all(
+                    it.get("done") or it.get("checked") for it in items
+                )
+
+            async def _fire(n):
+                """Compose the reminder text from the note row and dispatch it."""
                 title = (n.title or "Reminder").strip() or "Reminder"
                 body_parts = []
                 if n.content:
@@ -1370,16 +1370,62 @@ async def action_ping_notes(owner: str, **kwargs) -> Tuple[str, bool]:
                     except Exception:
                         pass
                 body = "\n\n".join(p for p in body_parts if p) or title
-                try:
-                    from routes.note_routes import dispatch_reminder
-                    await dispatch_reminder(
-                        title=title, note_body=body, note_id=n.id,
-                        owner=n.owner or owner or "",
-                    )
-                    cache[n.id] = now.isoformat()
-                    sent.append(title)
-                except Exception as e:
-                    logger.warning(f"ping_notes: dispatch failed for {n.id}: {e}")
+                from routes.note_routes import dispatch_reminder
+                await dispatch_reminder(
+                    title=title, note_body=body, note_id=n.id,
+                    owner=n.owner or owner or "",
+                )
+                return title
+
+            for n in notes:
+                seen_ids.add(n.id)
+                seen_ids.add(f"{n.id}#rem")
+
+                # --- "Due by" (due_date): one-shot ping at the due moment. ---
+                fired = False
+                due = _parse_due(n.due_date)
+                if due and abs((due - now).total_seconds()) <= window.total_seconds():
+                    recent = False
+                    last = cache.get(n.id)
+                    if last:
+                        try:
+                            if isinstance(last, dict):
+                                last = last.get("at")
+                            last_dt = _dt.fromisoformat(str(last))
+                            if last_dt.tzinfo is None:
+                                last_dt = last_dt.replace(tzinfo=_tz.utc)
+                            recent = last_dt >= reping_cutoff
+                        except Exception:
+                            pass
+                    if not recent:
+                        try:
+                            sent.append(await _fire(n))
+                            cache[n.id] = now.isoformat()
+                            fired = True
+                        except Exception as e:
+                            logger.warning(f"ping_notes: due dispatch failed for {n.id}: {e}")
+
+                # --- "Remind me" (reminder_at): re-nudge once per local day until
+                #     the note is checked off. Skipped if the due-date ping already
+                #     fired this tick (no double notification). ---
+                if not fired:
+                    rem = _parse_due(n.reminder_at)
+                    if rem and rem <= now and not _all_checked(n):
+                        now_local = now.astimezone()
+                        rem_local = rem.astimezone()
+                        # On days after the reminder's first day, hold the nudge
+                        # until its time-of-day (date-only reminders -> 09:00).
+                        ok_time = True
+                        if now_local.date() > rem_local.date():
+                            gate = rem_local.time() if "T" in (n.reminder_at or "") else _dtime(9, 0)
+                            ok_time = now_local.time() >= gate
+                        today_key = now_local.date().isoformat()
+                        if ok_time and cache.get(f"{n.id}#rem") != today_key:
+                            try:
+                                sent.append(await _fire(n))
+                                cache[f"{n.id}#rem"] = today_key
+                            except Exception as e:
+                                logger.warning(f"ping_notes: reminder dispatch failed for {n.id}: {e}")
 
             # Prune cache entries for notes that no longer exist.
             for stale in [k for k in cache if k not in seen_ids]:

@@ -114,15 +114,20 @@ def setup_today_routes() -> APIRouter:
                 n_q = owner_filter(n_q, Note, owner, include_shared=allow_null)
             rem_rows = []
             for n in n_q.all():
-                if not n.due_date:
-                    continue
-                due = _parse_due(n.due_date)  # local-naive, for sort + overdue only
-                if due is None or due >= tomorrow:
-                    continue  # only due-today or overdue
+                # Active reminder if EITHER the "Due by" deadline or the
+                # "Remind me" time is today/overdue; surface the earliest.
+                cand = [
+                    (_parse_due(v), v)
+                    for v in (n.due_date, getattr(n, "reminder_at", None))
+                ]
+                active = [(d, v) for d, v in cand if d is not None and d < tomorrow]
+                if not active:
+                    continue  # only due-today or overdue (by either field)
+                due, raw = min(active, key=lambda x: x[0])
                 rem_rows.append((due, {
                     "id": n.id,
                     "title": n.title or "(untitled)",
-                    "due": n.due_date,  # RAW ISO — the browser formats it in local tz
+                    "due": raw,  # RAW ISO — the browser formats it in local tz
                     "overdue": due < start,
                 }))
             rem_rows.sort(key=lambda x: x[0])
