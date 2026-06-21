@@ -268,8 +268,8 @@ function _setReminderCardGlow(noteId, on = true) {
 // the rest of the unpinned section) and the entry-glow flush.
 function _hasActiveReminder(n) {
   if (!n || n.archived || _isNoteFullyDone(n)) return false;
-  if (!n.due_date) return false;
-  const t = new Date(n.due_date).getTime();
+  if (!n.reminder_at) return false;
+  const t = new Date(n.reminder_at).getTime();
   return !isNaN(t) && t <= Date.now();
 }
 function _savePendingHighlights(set) {
@@ -292,7 +292,7 @@ function _flushPendingHighlights() {
   // only glow the ones we haven't already shown — otherwise reopening the
   // panel keeps lighting up old reminders forever.
   for (const n of _notes) {
-    if (!_hasActiveReminder(n) || !_hasTimeComponent(n.due_date)) continue;
+    if (!_hasActiveReminder(n) || !_hasTimeComponent(n.reminder_at)) continue;
     if (queued.has(n.id) || !glowed.has(n.id)) toGlow.add(n.id);
   }
   // Always consume the queue.
@@ -909,20 +909,20 @@ function _checkReminders() {
   const fired = _loadFiredReminders();
   let changed = false;
   for (const note of _notes) {
-    if (!note.due_date || note.archived) continue;
-    if (!_hasTimeComponent(note.due_date)) continue;
+    if (!note.reminder_at || note.archived) continue;
+    if (!_hasTimeComponent(note.reminder_at)) continue;
     if (fired.has(note.id)) continue;
-    const due = new Date(note.due_date).getTime();
+    const due = new Date(note.reminder_at).getTime();
     if (isNaN(due)) continue;
     if (due <= now && due > now - 60000) {
       _fireReminder(note);
-      // Recurring? advance the due_date instead of marking as fired
+      // Recurring? advance the reminder_at instead of marking as fired
       if (note.repeat && note.repeat !== 'none') {
-        const next = _advanceRecurring(note.due_date, note.repeat);
+        const next = _advanceRecurring(note.reminder_at, note.repeat);
         if (next) {
-          note.due_date = next;
-          _patchNote(note.id, { due_date: next }).catch(() => {});
-          // Don't add to fired — new due_date is in the future
+          note.reminder_at = next;
+          _patchNote(note.id, { reminder_at: next }).catch(() => {});
+          // Don't add to fired — new reminder_at is in the future
           continue;
         }
       }
@@ -931,10 +931,10 @@ function _checkReminders() {
     } else if (due <= now - 60000) {
       // Past, never seen — silently advance recurring or mark fired
       if (note.repeat && note.repeat !== 'none') {
-        const next = _advanceRecurring(note.due_date, note.repeat);
+        const next = _advanceRecurring(note.reminder_at, note.repeat);
         if (next) {
-          note.due_date = next;
-          _patchNote(note.id, { due_date: next }).catch(() => {});
+          note.reminder_at = next;
+          _patchNote(note.id, { reminder_at: next }).catch(() => {});
           continue;
         }
       }
@@ -1027,7 +1027,7 @@ function _startReminderLoop() {
 }
 
 function _countDueReminders() {
-  return _notes.filter(n => !n.archived && _isDueTodayOrOverdue(n.due_date) && !_isNoteFullyDone(n)).length;
+  return _notes.filter(n => !n.archived && _isDueTodayOrOverdue(n.reminder_at) && !_isNoteFullyDone(n)).length;
 }
 
 let _firedDotDismissedAt = (() => {
@@ -1043,8 +1043,8 @@ function _countFiredReminders() {
   const now = Date.now();
   return _notes.filter(n => {
     if (n.archived || _isNoteFullyDone(n)) return false;
-    if (!n.due_date || !_hasTimeComponent(n.due_date)) return false;
-    const t = new Date(n.due_date).getTime();
+    if (!n.reminder_at || !_hasTimeComponent(n.reminder_at)) return false;
+    const t = new Date(n.reminder_at).getTime();
     if (isNaN(t) || t > now) return false;
     return t > _firedDotDismissedAt;
   }).length;
@@ -1092,8 +1092,8 @@ function _updateRailBadge() {
       card.classList.remove('note-card-reminder-due');
       return;
     }
-    if (note.due_date && _hasTimeComponent(note.due_date)) {
-      const t = new Date(note.due_date).getTime();
+    if (note.reminder_at && _hasTimeComponent(note.reminder_at)) {
+      const t = new Date(note.reminder_at).getTime();
       card.classList.toggle('note-card-reminder-due', !isNaN(t) && t <= Date.now());
     } else {
       card.classList.remove('note-card-reminder-due');
@@ -1489,7 +1489,7 @@ function _updateBulkBar() {
 function _noteTags(n) {
   const tags = [];
   if (n?.label) tags.push(...n.label.trim().split(/\s+/).filter(Boolean));
-  if (n?.due_date && _hasTimeComponent(n.due_date)) tags.push('reminder');
+  if (n?.reminder_at && _hasTimeComponent(n.reminder_at)) tags.push('reminder');
   return [...new Set(tags.map(t => t.replace(/^#+/, '').trim()).filter(Boolean))];
 }
 
@@ -1498,8 +1498,8 @@ function _visibleNoteTags(n) {
 }
 
 function _isPastReminder(n) {
-  if (!n?.due_date || !_hasTimeComponent(n.due_date)) return false;
-  const due = new Date(n.due_date).getTime();
+  if (!n?.reminder_at || !_hasTimeComponent(n.reminder_at)) return false;
+  const due = new Date(n.reminder_at).getTime();
   return !isNaN(due) && due <= Date.now();
 }
 
@@ -1525,8 +1525,8 @@ function _renderLabels(root = document) {
   const labels = new Set();
   for (const n of _notes) for (const t of _visibleNoteTags(n)) labels.add(t);
   const sortedLabels = [...labels].sort();
-  // Count active reminders (not archived, has datetime due_date)
-  const reminderCount = _notes.filter(n => !n.archived && n.due_date && _hasTimeComponent(n.due_date)).length;
+  // Count active reminders (not archived, has datetime reminder_at)
+  const reminderCount = _notes.filter(n => !n.archived && n.reminder_at && _hasTimeComponent(n.reminder_at)).length;
   const pastReminderCount = _notes.filter(n => !n.archived && _isPastReminder(n)).length;
   const defaultCount = _notes.filter(n => !n.archived && _visibleNoteTags(n).length === 0).length;
   // Active goals = non-archived goal notes. Today view lists pending steps
@@ -1744,9 +1744,9 @@ function _renderNotes() {
 
   let filtered = _activeLabel ? _notes.filter(n => _noteTags(n).includes(_activeLabel)) : _notes;
   if (_activeFilter === 'reminders') {
-    filtered = filtered.filter(n => n.due_date && _hasTimeComponent(n.due_date));
+    filtered = filtered.filter(n => n.reminder_at && _hasTimeComponent(n.reminder_at));
   } else if (_activeFilter === 'no-reminders') {
-    filtered = filtered.filter(n => !(n.due_date && _hasTimeComponent(n.due_date)));
+    filtered = filtered.filter(n => !(n.reminder_at && _hasTimeComponent(n.reminder_at)));
   } else if (_activeFilter === 'default') {
     filtered = filtered.filter(n => _visibleNoteTags(n).length === 0);
   } else if (_activeFilter === 'goals') {
@@ -1766,10 +1766,10 @@ function _renderNotes() {
     });
   }
   const sorted = [...filtered].sort((a, b) => {
-    // In reminders view: sort by due date ascending (soonest first)
+    // In reminders view: sort by reminder time ascending (soonest first)
     if (_activeFilter === 'reminders') {
-      const da = new Date(a.due_date || 0).getTime();
-      const db = new Date(b.due_date || 0).getTime();
+      const da = new Date(a.reminder_at || 0).getTime();
+      const db = new Date(b.reminder_at || 0).getTime();
       return da - db;
     }
     // Archived view: newest archived first (ignore manual sort_order).
@@ -1869,14 +1869,17 @@ function _renderNotes() {
     const cc = (note.color && !isBg) ? ' note-color-' + note.color : '';
     const cardStyle = isBg ? ` style="${_customColorStyle(note.color)}"` : '';
     const sel = _selectedIds.has(note.id) ? ' note-card-selected' : '';
-    const reminderTagHtml = note.due_date && _hasTimeComponent(note.due_date)
-      ? `<div class="note-card-reminder${overdue ? ' overdue' : ''}">
+    const reminderOverdue = _isDueOverdue(note.reminder_at);
+    const reminderTagHtml = note.reminder_at && _hasTimeComponent(note.reminder_at)
+      ? `<div class="note-card-reminder${reminderOverdue ? ' overdue' : ''}">
           <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
-          <span>${_esc(_formatReminderTag(note.due_date))}${note.repeat && note.repeat !== 'none' ? ' · ' + _esc(_formatRepeatLabel(note.repeat, new Date(note.due_date))) : ''}</span>
+          <span>${_esc(_formatReminderTag(note.reminder_at))}${note.repeat && note.repeat !== 'none' ? ' · ' + _esc(_formatRepeatLabel(note.repeat, new Date(note.reminder_at))) : ''}</span>
         </div>`
       : '';
     const noteTags = _visibleNoteTags(note);
-    const dueBadge = dueFmt && !_hasTimeComponent(note.due_date) ? `<span class="note-due-inline${overdue ? ' note-due-overdue' : ''}">${dueFmt}</span>` : '';
+    // "Due by" deadline badge — driven by due_date, shown whenever set
+    // (date-only or with a time), independent of the timed reminder above.
+    const dueBadge = note.due_date && dueFmt ? `<span class="note-due-inline${overdue ? ' note-due-overdue' : ''}">Due ${dueFmt}</span>` : '';
     const colorDots = COLORS.map(c => `<span class="note-card-color-dot${_dotIsActive(c.value, note.color) ? ' active' : ''}" data-color="${c.value}" style="background:${_dotBg(c.value, note.color)}" title="${c.name || 'default'}"></span>`).join('');
     const goalClass = note.note_type === 'goal' ? ' note-card-goal' : '';
     const reminderGlowClass = activeReminderHighlights.has(note.id) && _hasActiveReminder(note) ? ' note-card-reminder-fired-sticky' : '';
@@ -2795,7 +2798,8 @@ function _collectFormDraft(form) {
     note_type: type,
     title: form.querySelector('.note-form-title')?.value || '',
     label: form.querySelector('.note-form-label')?.value || '',
-    due_date: form.querySelector('.note-form-due')?.value || null,
+    reminder_at: form.querySelector('.note-form-reminder')?.value || null,
+    due_date: form.querySelector('.note-form-dueby')?.value || null,
     repeat: form.querySelector('.note-form-repeat')?.value || 'none',
   };
   if (type === 'note') d.content = form.querySelector('.note-form-content')?.value || '';
@@ -2838,7 +2842,7 @@ function _applyDraftToNote(note, id) {
   const d = _loadDraft(id);
   if (_isDraftEmpty(d)) return { note, restored: false };
   const merged = { ...(note || {}) };
-  ['note_type', 'title', 'label', 'due_date', 'repeat', 'content', 'items'].forEach(k => {
+  ['note_type', 'title', 'label', 'reminder_at', 'due_date', 'repeat', 'content', 'items'].forEach(k => {
     if (d[k] !== undefined) merged[k] = d[k];
   });
   return { note: merged, restored: true };
@@ -2860,10 +2864,10 @@ function _buildForm(note = null) {
   form.innerHTML = `
     <div class="note-form-header">
       <input type="text" class="note-form-title" placeholder="Title" value="${_esc(note?.title || '')}" />
-      <button type="button" class="note-form-icon-btn note-form-remind-btn${note?.due_date ? ' has-date' : ''}" title="Remind me">
+      <button type="button" class="note-form-icon-btn note-form-remind-btn${note?.reminder_at ? ' has-date' : ''}" title="Remind me">
         <svg width="31" height="31" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
       </button>
-      <input type="hidden" class="note-form-due" value="${note?.due_date || ''}" />
+      <input type="hidden" class="note-form-reminder" value="${note?.reminder_at || ''}" />
       <input type="hidden" class="note-form-repeat" value="${note?.repeat || 'none'}" />
     </div>
     ${currentImageUrl && type !== 'draw' ? `<div class="note-form-image-wrap"><img class="note-form-image" src="${_esc(currentImageUrl)}" draggable="false" /><button class="note-form-image-rm" title="Remove">&times;</button></div>` : ''}
@@ -2877,6 +2881,10 @@ function _buildForm(note = null) {
         : _buildChecklistHtml(items)}
     </div>
     <div class="note-form-reminder-tags"></div>
+    <div class="note-form-dueby-row">
+      <label class="note-form-dueby-label">Due by</label>
+      <input type="datetime-local" class="note-reminder-date-input note-form-dueby" value="${_esc(note?.due_date || '')}" />
+    </div>
     <div class="note-form-meta">
       <div class="note-form-type-seg${type === 'todo' ? ' is-todo' : type === 'draw' ? ' is-draw' : ''}" role="group">
         <button type="button" class="note-form-type-pill${type === 'note' ? ' active' : ''}" data-type="note">
@@ -3111,7 +3119,9 @@ function _buildForm(note = null) {
 
   // Reminder bell — opens dropdown menu
   const remindBtn = form.querySelector('.note-form-remind-btn');
-  const dueInput = form.querySelector('.note-form-due');
+  // The bell + popover + presets + repeat all drive the timed REMINDER, which
+  // now lives in reminder_at (.note-form-reminder), not the due_date deadline.
+  const dueInput = form.querySelector('.note-form-reminder');
   const repeatInput = form.querySelector('.note-form-repeat');
   const tagsEl = form.querySelector('.note-form-reminder-tags');
 
@@ -3565,14 +3575,15 @@ function _buildForm(note = null) {
     // re-join with single spaces. Empty → null.
     const _rawLabel = form.querySelector('.note-form-label')?.value || '';
     const _tags = [...new Set(_rawLabel.split(/\s+/).map(t => t.replace(/^#+/, '').trim()).filter(Boolean))];
-    if (form.querySelector('.note-form-due').value && !_tags.includes('reminder')) _tags.push('reminder');
+    if (form.querySelector('.note-form-reminder').value && !_tags.includes('reminder')) _tags.push('reminder');
     const labelVal = _tags.length ? _tags.join(' ') : null;
     const payload = {
       title,
       note_type: currentType,
       color: currentColor,
       label: labelVal,
-      due_date: form.querySelector('.note-form-due').value || null,
+      reminder_at: form.querySelector('.note-form-reminder').value || null,
+      due_date: form.querySelector('.note-form-dueby')?.value || null,
       repeat: form.querySelector('.note-form-repeat')?.value || 'none',
       image_url: currentImageUrl || null,
     };
@@ -3595,10 +3606,10 @@ function _buildForm(note = null) {
       payload.items = _collectItems(form);
     }
     if (isEdit) payload.id = note.id;
-    // Reset fired reminder if due_date changed (so re-arm works), and also
+    // Reset fired reminder if reminder_at changed (so re-arm works), and also
     // clear the entry-glow seen flag so the new firing glows again on the
     // next time the user opens the panel.
-    if (isEdit && note.due_date !== payload.due_date) {
+    if (isEdit && note.reminder_at !== payload.reminder_at) {
       const fired = _loadFiredReminders();
       fired.delete(note.id);
       _saveFiredReminders(fired);

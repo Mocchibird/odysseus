@@ -32502,6 +32502,19 @@ body.notes-mobile-mode.notes-drag-mode .note-card-pin.active {
   gap: 4px;
 }
 .note-form-reminder-tags:empty { display: none; }
+/* "Due by" deadline control (separate from the timed reminder bell) */
+.note-form-dueby-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.note-form-dueby-label {
+  font-size: 10px;
+  opacity: 0.5;
+  letter-spacing: 0.3px;
+  flex-shrink: 0;
+}
+.note-form-dueby-row .note-form-dueby { width: auto; flex: 1; }
 .note-reminder-tag {
   display: inline-flex;
   align-items: center;
