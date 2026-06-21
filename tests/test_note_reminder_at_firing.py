@@ -20,6 +20,14 @@ def _iso_local(dt_utc):
     return dt_utc.astimezone().replace(tzinfo=None).isoformat()
 
 
+def _today_local_midnight_iso():
+    """Local 'today' at 00:00 — unambiguously <= now on the same local calendar
+    day no matter when the suite runs. Avoids a midnight flake where 'now - 5min'
+    lands on the previous day and hits the later-day time-of-day gate."""
+    n = datetime.now().astimezone()
+    return f"{n.year:04d}-{n.month:02d}-{n.day:02d}T00:00"
+
+
 def _note(**kw):
     base = dict(
         id="n1", title="Groceries", content=None, items=None,
@@ -78,8 +86,7 @@ def _run(notes, monkeypatch, tmp_path, owner="alice"):
 
 
 def test_reminder_at_nudges_when_overdue_with_pending(monkeypatch, tmp_path):
-    now = datetime.now(timezone.utc)
-    rem = _iso_local(now - timedelta(minutes=5))  # active today
+    rem = _today_local_midnight_iso()  # active earlier today; robust across midnight
     note = _note(
         note_type="checklist",
         items=json.dumps([{"text": "buy milk", "done": False}]),

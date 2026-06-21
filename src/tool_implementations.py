@@ -2200,7 +2200,7 @@ async def do_manage_notes(content: str, owner: Optional[str] = None) -> Dict:
                 # keep the existing note so the user gets only one dispatch.
                 existing_q = db.query(Note).filter(
                     Note.archived == False,  # noqa: E712
-                    Note.due_date == due_iso,
+                    Note.reminder_at == due_iso,
                 )
                 if owner is not None:
                     existing_q = existing_q.filter(Note.owner == owner)
@@ -2223,7 +2223,10 @@ async def do_manage_notes(content: str, owner: Optional[str] = None) -> Dict:
                 color=args.get("color"),
                 label=args.get("label"),
                 pinned=args.get("pinned", False),
-                due_date=due_iso,
+                # The tool's `due_date` param is documented as the reminder time
+                # (fires a notification), so store it as reminder_at — not a
+                # "Due by" deadline, which would show a spurious due badge.
+                reminder_at=due_iso,
                 source="agent",
                 session_id=args.get("session_id"),
             )
@@ -2261,11 +2264,12 @@ async def do_manage_notes(content: str, owner: Optional[str] = None) -> Dict:
             # never fired.
             if args.get("due_date") is not None:
                 due_raw = args["due_date"]
+                # The tool's `due_date` param is the reminder time → reminder_at.
                 try:
                     from routes.calendar_routes import parse_due_for_user as _pdt_user
-                    note.due_date = _pdt_user(due_raw)
+                    note.reminder_at = _pdt_user(due_raw)
                 except Exception:
-                    note.due_date = due_raw  # fall through; trust the model
+                    note.reminder_at = due_raw  # fall through; trust the model
             new_items = args.get("checklist_items")
             if new_items is None:
                 new_items = args.get("items")
@@ -2475,12 +2479,12 @@ async def do_manage_calendar(content: str, owner: Optional[str] = None) -> Dict:
         start_fmt = dtstart.strftime("%a %b %d") if all_day else dtstart.strftime("%a %b %d %H:%M")
         loc = f" @ {location}" if location else ""
         text = f"{summary}{loc} — {start_fmt}"
-        due_date = remind_at.isoformat() + ("Z" if is_utc else "")
+        reminder_at = remind_at.isoformat() + ("Z" if is_utc else "")
         from src.i18n import get_user_language as _gl, strip_reminder_prefix as _strip_rp, t as _t18
         expected_title = _t18("reminder_prefix", _gl(owner), title=summary)
         existing_q = db.query(Note).filter(
             Note.archived == False,  # noqa: E712
-            Note.due_date == due_date,
+            Note.reminder_at == reminder_at,
         )
         if owner is not None:
             existing_q = existing_q.filter(Note.owner == owner)
@@ -2496,7 +2500,7 @@ async def do_manage_calendar(content: str, owner: Optional[str] = None) -> Dict:
             items=json.dumps([{"text": text, "done": False, "checked": False}]),
             note_type="todo",
             label="calendar",
-            due_date=due_date,
+            reminder_at=reminder_at,
             source="calendar",
         )
         db.add(note)

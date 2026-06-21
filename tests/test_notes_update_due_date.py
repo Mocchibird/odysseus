@@ -77,7 +77,7 @@ def test_update_parses_natural_language_due_date(monkeypatch):
     note = SimpleNamespace(
         id="abc12345-existing", owner=None, title="Dentist", content=None,
         note_type="note", color=None, label=None, items=None,
-        pinned=False, archived=False, due_date=None,
+        pinned=False, archived=False, due_date=None, reminder_at=None,
     )
     calls = _install_fakes(monkeypatch, note)
 
@@ -86,8 +86,9 @@ def test_update_parses_natural_language_due_date(monkeypatch):
     )
 
     assert result.get("exit_code") == 0
-    # Stored value went through the parser, not the raw literal.
-    assert note.due_date == "PARSED::tomorrow at 9am"
+    # Stored value went through the parser, not the raw literal — and lands in
+    # reminder_at (the tool's `due_date` param is the reminder time, not a deadline).
+    assert note.reminder_at == "PARSED::tomorrow at 9am"
     assert calls["parsed"] == ["tomorrow at 9am"]
 
 
@@ -95,7 +96,7 @@ def test_update_still_sets_other_fields_without_parsing_them(monkeypatch):
     note = SimpleNamespace(
         id="abc12345-existing", owner=None, title="Old", content=None,
         note_type="note", color=None, label=None, items=None,
-        pinned=False, archived=False, due_date=None,
+        pinned=False, archived=False, due_date=None, reminder_at=None,
     )
     calls = _install_fakes(monkeypatch, note)
 
