@@ -2854,6 +2854,18 @@ async function _loadScheduled(grid, sp) {
 function _renderGrid() {
   const grid = document.getElementById('email-lib-grid');
   if (!grid) return;
+  // Tear down any open card / reader / bulk "..." menu BEFORE rebuilding the
+  // grid. These dropdowns are appended to <body> (to escape card clipping), so
+  // grid.innerHTML='' below destroys their anchor button but leaves the menu
+  // orphaned at z-index 10001 over the fresh buttons — an undismissable overlay
+  // that makes every "..." look dead until a page refresh. This fires whenever
+  // a render runs while a menu is open (delete-removal animation, auto-advance,
+  // the visibilitychange refetch, background polling, …); aborting each menu's
+  // controller also releases its outside-click listener.
+  document.querySelectorAll('.email-card-dropdown').forEach(d => {
+    try { d._menuAbort?.abort(); } catch (_) {}
+    d.remove();
+  });
   grid.innerHTML = '';
 
   let filtered = state._libEmails;
