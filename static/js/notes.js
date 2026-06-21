@@ -11,6 +11,7 @@ import { makeWindowDraggable } from './windowDrag.js';
 import { snapModalToZone } from './tileManager.js';
 import { applyEdgeDock, clearDockSide } from './modalSnap.js';
 import { topToolWindowZ } from './toolWindowZOrder.js';
+import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
 
 const API_BASE = window.location.origin;
 let _open = false;
@@ -4328,7 +4329,7 @@ function _serializeNoteForCopy(note) {
 // toast. Shared by the corner-copy button click and the Ctrl/Cmd+C shortcut.
 // ── ⋯ corner menu (Copy + Agent) ───────────────────────────────────
 function _openNoteCornerMenu(btn) {
-  document.querySelectorAll('.note-corner-menu-dropdown').forEach(d => d.remove());
+  document.querySelectorAll('.note-corner-menu-dropdown').forEach(dismissOrRemove);
   const id = btn.dataset.noteId;
   const note = _notes.find(n => n.id === id);
   if (!note) return;
@@ -4355,14 +4356,9 @@ function _openNoteCornerMenu(btn) {
   const below = window.innerHeight - r.bottom;
   const top = (below < mh + 8 && r.top > mh + 8) ? (r.top - mh - 4) : (r.bottom + 4);
   menu.style.cssText += `position:fixed;z-index:11000;top:${Math.round(top)}px;left:${Math.round(left)}px;`;
-  const close = (ev) => {
-    if (ev && menu.contains(ev.target)) return;
-    menu.remove();
-    document.removeEventListener('click', close, true);
-  };
-  setTimeout(() => document.addEventListener('click', close, true), 0);
-  menu.querySelector('[data-act="copy"]').addEventListener('click', () => { menu.remove(); _copyNote(id, btn); });
-  menu.querySelector('[data-act="agent"]').addEventListener('click', () => { menu.remove(); _agentSolveNote(id); });
+  const close = bindMenuDismiss(menu, () => { menu.remove(); });
+  menu.querySelector('[data-act="copy"]').addEventListener('click', () => { close(); _copyNote(id, btn); });
+  menu.querySelector('[data-act="agent"]').addEventListener('click', () => { close(); _agentSolveNote(id); });
 }
 
 // Build the prompt the agent gets from a note: title + body, plus any

@@ -3242,6 +3242,19 @@ const sessionModule = {
   ensureFullHistoryRendered
 };
 
+// Cross-device freshness: when the tab regains focus, refetch the session list
+// so a chat started on another device shows up without a manual refresh.
+// Throttled so rapid tab-flips don't hammer the API; a targeted loadSessions()
+// fetch-and-rebuild — NOT the disruptive full reload that used to fire here.
+let _lastSessionVisRefetch = 0;
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) return;
+  const now = Date.now();
+  if (now - _lastSessionVisRefetch < 10000) return;
+  _lastSessionVisRefetch = now;
+  loadSessions().catch(() => {});
+});
+
 export { updateModelPicker };
 
 export default sessionModule;

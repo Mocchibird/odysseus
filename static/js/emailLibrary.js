@@ -905,6 +905,19 @@ export function initEmailLibrary(config) {
 
 export function isOpen() { return state._libOpen; }
 
+// Cross-device freshness: when the tab regains focus while the library is open,
+// refetch the inbox so mail received on another device appears without a manual
+// refresh. Throttled so quick tab-flips don't hammer IMAP; force-fetches past
+// the server's short list cache, like the manual refresh button.
+let _lastEmailVisRefetch = 0;
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden || !state._libOpen) return;
+  const now = Date.now();
+  if (now - _lastEmailVisRefetch < 10000) return;
+  _lastEmailVisRefetch = now;
+  _loadEmails({ force: true }).catch(() => {});
+});
+
 export function openEmailLibrary(opts = {}) {
   // Force-clean any stale state from previous attempts
   const existing = document.getElementById('email-lib-modal');
@@ -4683,7 +4696,7 @@ function _wireAttachmentHandlers(reader, folder) {
               ownerModal.classList.add('hidden');
             }
           }
-          const docMod = await import('./document.js?v=462');
+          const docMod = await import('./document.js?v=463');
           const load = (docMod && docMod.loadDocument) || (docMod && docMod.default && docMod.default.loadDocument);
           if (typeof load === 'function') {
             await load(json.doc_id);
@@ -5553,6 +5566,7 @@ function _showReaderMoreMenu(em, card, reader, anchor) {
   // Toggle: if a dropdown for THIS anchor is already open, close it.
   const existing = document.querySelector('.email-card-dropdown');
   if (existing && existing._anchor === anchor) {
+    try { existing._menuAbort?.abort(); } catch (_) {}
     existing.remove();
     anchor.classList.remove('reader-more-active');
     return;
@@ -5561,6 +5575,7 @@ function _showReaderMoreMenu(em, card, reader, anchor) {
   // state) before opening a fresh one.
   document.querySelectorAll('.email-card-dropdown').forEach(d => {
     if (d._anchor) d._anchor.classList.remove('reader-more-active');
+    try { d._menuAbort?.abort(); } catch (_) {}
     d.remove();
   });
 
@@ -5570,6 +5585,10 @@ function _showReaderMoreMenu(em, card, reader, anchor) {
   anchor.classList.add('reader-more-active');
   const rect = anchor.getBoundingClientRect();
   dropdown.style.cssText = `position:fixed;z-index:10001;min-width:180px;background:var(--panel,var(--bg));border:1px solid var(--border);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,0.3);padding:4px;font-size:12px;top:${rect.bottom + 4}px;right:${window.innerWidth - rect.right}px;`;
+
+  const ac = new AbortController();
+  dropdown._menuAbort = ac;
+  const closeMenu = () => { dropdown.remove(); anchor.classList.remove('reader-more-active'); ac.abort(); };
 
   const _icon = (svg) => `<span class="dropdown-icon">${svg}</span>`;
   const _unreadIcon = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3" fill="currentColor"/></svg>';
@@ -5775,8 +5794,7 @@ function _showReaderMoreMenu(em, card, reader, anchor) {
         _showLibRemindSubmenu(em, dropdown);
         return;
       }
-      dropdown.remove();
-      anchor.classList.remove('reader-more-active');
+      closeMenu();
       a.action();
     });
     dropdown.appendChild(item);
@@ -5789,30 +5807,38 @@ function _showReaderMoreMenu(em, card, reader, anchor) {
   cancelItem.innerHTML = _icon(_cancelIco) + '<span>Cancel</span>';
   cancelItem.addEventListener('click', (e) => {
     e.stopPropagation();
-    dropdown.remove();
-    anchor.classList.remove('reader-more-active');
+    closeMenu();
   });
   dropdown.appendChild(cancelItem);
 
   document.body.appendChild(dropdown);
   _fitEmailDropdown(dropdown, rect);
-  const close = (ev) => {
-    if (!dropdown.contains(ev.target) && ev.target !== anchor) {
-      dropdown.remove();
-      anchor.classList.remove('reader-more-active');
-      document.removeEventListener('click', close, true);
-    }
-  };
-  setTimeout(() => document.addEventListener('click', close, true), 10);
+  // Outside-click dismissal, scoped to the AbortController so the listener is
+  // torn down on EVERY close path (item click / Cancel / another menu opening)
+  // and can never linger past the menu to kill the next one.
+  setTimeout(() => {
+    document.addEventListener('click', (ev) => {
+      if (!dropdown.contains(ev.target) && ev.target !== anchor) closeMenu();
+    }, { capture: true, signal: ac.signal });
+  }, 10);
 }
 
 function _showCardMenu(em, anchor) {
-  document.querySelectorAll('.email-card-dropdown').forEach(d => d.remove());
+  document.querySelectorAll('.email-card-dropdown').forEach(d => { try { d._menuAbort?.abort(); } catch (_) {} d.remove(); });
 
   const dropdown = document.createElement('div');
   dropdown.className = 'email-card-dropdown';
   const rect = anchor.getBoundingClientRect();
   dropdown.style.cssText = `position:fixed;z-index:10001;min-width:140px;background:var(--panel,var(--bg));border:1px solid var(--border);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,0.3);padding:4px;font-size:12px;top:${rect.bottom + 4}px;right:${window.innerWidth - rect.right}px;`;
+
+  // Lifecycle-scoped teardown: EVERY dismissal path (item click, Cancel,
+  // outside click, or another menu opening) calls closeMenu(), which aborts
+  // the controller — so the outside-click listener can never linger past the
+  // menu and kill the next one (the "… stops working after a delete" bug:
+  // the listener survived the async confirm + removal animation + re-render).
+  const ac = new AbortController();
+  dropdown._menuAbort = ac;
+  const closeMenu = () => { dropdown.remove(); anchor.classList.remove('reader-more-active'); ac.abort(); };
 
   const _icon = (svg) => `<span class="dropdown-icon">${svg}</span>`;
   const _replyIcon = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 17 4 12 9 7"/><path d="M20 18v-2a4 4 0 0 0-4-4H4"/></svg>';
@@ -5997,8 +6023,7 @@ function _showCardMenu(em, anchor) {
         _showLibRemindSubmenu(em, dropdown);
         return;
       }
-      dropdown.remove();
-      anchor.classList.remove('reader-more-active');
+      closeMenu();
       a.action();
     });
     dropdown.appendChild(item);
@@ -6011,30 +6036,36 @@ function _showCardMenu(em, anchor) {
   cancelItem.innerHTML = _icon(_cancelIco) + '<span>Cancel</span>';
   cancelItem.addEventListener('click', (e) => {
     e.stopPropagation();
-    dropdown.remove();
-    anchor.classList.remove('reader-more-active');
+    closeMenu();
   });
   dropdown.appendChild(cancelItem);
 
   document.body.appendChild(dropdown);
   _fitEmailDropdown(dropdown, rect);
-  const close = (ev) => {
-    if (!dropdown.contains(ev.target) && ev.target !== anchor) {
-      dropdown.remove();
-      anchor.classList.remove('reader-more-active');
-      document.removeEventListener('click', close, true);
-    }
-  };
-  setTimeout(() => document.addEventListener('click', close, true), 10);
+  // Outside-click dismissal, scoped to the AbortController so the listener is
+  // torn down on EVERY close path (item click / Cancel / another menu opening)
+  // and can never linger past the menu to kill the next one.
+  setTimeout(() => {
+    document.addEventListener('click', (ev) => {
+      if (!dropdown.contains(ev.target) && ev.target !== anchor) closeMenu();
+    }, { capture: true, signal: ac.signal });
+  }, 10);
 }
 
 // Bulk "Actions" dropdown for select mode — Delete is a separate visible button.
 function _showBulkActionsMenu(anchor) {
-  document.querySelectorAll('.email-card-dropdown').forEach(d => d.remove());
+  document.querySelectorAll('.email-card-dropdown').forEach(d => { try { d._menuAbort?.abort(); } catch (_) {} d.remove(); });
   const dropdown = document.createElement('div');
   dropdown.className = 'email-card-dropdown email-bulk-menu';
   const rect = anchor.getBoundingClientRect();
   dropdown.style.cssText = `position:fixed;z-index:10001;min-width:160px;background:var(--panel,var(--bg));border:1px solid var(--border);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,0.3);padding:4px;font-size:12px;top:${rect.bottom + 4}px;left:${rect.left}px;`;
+  // Lifecycle-scoped teardown: EVERY dismissal path (item click, Cancel,
+  // outside click, or another menu opening) calls closeMenu(), which aborts
+  // the controller — so the outside-click listener can never linger past the
+  // menu and kill the next one.
+  const ac = new AbortController();
+  dropdown._menuAbort = ac;
+  const closeMenu = () => { dropdown.remove(); ac.abort(); };
   const _readIco = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2 11 13"/><path d="m22 2-7 20-4-9-9-4 20-7z"/></svg>';
   const _unreadIco = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3" fill="currentColor"/></svg>';
   const _doneIco = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>';
@@ -6047,7 +6078,7 @@ function _showBulkActionsMenu(anchor) {
     const it = document.createElement('div');
     it.className = 'dropdown-item-compact' + (a.danger ? ' dropdown-item-danger' : '');
     it.innerHTML = `<span class="dropdown-icon">${a.icon}</span><span>${a.label}</span>`;
-    it.addEventListener('click', (e) => { e.stopPropagation(); dropdown.remove(); a.action(); });
+    it.addEventListener('click', (e) => { e.stopPropagation(); closeMenu(); a.action(); });
     dropdown.appendChild(it);
   }
   // Mobile-only Cancel — matches the per-card and sidebar dropdowns.
@@ -6057,7 +6088,7 @@ function _showBulkActionsMenu(anchor) {
   cancelIt.innerHTML = `<span class="dropdown-icon">${_cancelIco2}</span><span>Cancel</span>`;
   cancelIt.addEventListener('click', (e) => {
     e.stopPropagation();
-    dropdown.remove();
+    closeMenu();
     // Cancel inside the bulk-Actions menu also exits select mode — matches the
     // documents bulk dropdown.
     state._selectMode = false;
@@ -6068,13 +6099,14 @@ function _showBulkActionsMenu(anchor) {
   dropdown.appendChild(cancelIt);
   document.body.appendChild(dropdown);
   _fitEmailDropdown(dropdown, rect);
-  const close = (ev) => {
-    if (!dropdown.contains(ev.target) && ev.target !== anchor) {
-      dropdown.remove();
-      document.removeEventListener('click', close, true);
-    }
-  };
-  setTimeout(() => document.addEventListener('click', close, true), 10);
+  // Outside-click dismissal, scoped to the AbortController so the listener is
+  // torn down on EVERY close path (item click / Cancel / another menu opening)
+  // and can never linger past the menu to kill the next one.
+  setTimeout(() => {
+    document.addEventListener('click', (ev) => {
+      if (!dropdown.contains(ev.target) && ev.target !== anchor) closeMenu();
+    }, { capture: true, signal: ac.signal });
+  }, 10);
 }
 
 function _updateBulkBar() {

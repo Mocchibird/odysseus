@@ -9,6 +9,7 @@ import { initEmailLibrary, openEmailLibrary, closeEmailLibrary, isOpen as isLibO
 import * as Modals from './modalManager.js';
 import { applyEdgeDock } from './modalSnap.js';
 import { buildReplyAllCc } from './emailLibrary/replyRecipients.js';
+import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
 
 const API_BASE = window.location.origin;
 const _acct = () => window.__odysseusActiveEmailAccount
@@ -922,7 +923,7 @@ async function _openEmail(em, itemEl, preloadedData = null, mode = 'reply', note
 }
 
 function _showEmailMenu(em, anchor, itemEl) {
-  document.querySelectorAll('.email-dropdown').forEach(d => d.remove());
+  document.querySelectorAll('.email-dropdown').forEach(dismissOrRemove);
 
   const dropdown = document.createElement('div');
   dropdown.className = 'dropdown email-dropdown show';
@@ -945,7 +946,7 @@ function _showEmailMenu(em, anchor, itemEl) {
         _showRemindSubmenu(em, dropdown);
         return;
       }
-      dropdown.remove();
+      close();
       a.action();
     });
     dropdown.appendChild(menuItem);
@@ -953,13 +954,15 @@ function _showEmailMenu(em, anchor, itemEl) {
 
   anchor.appendChild(dropdown);
 
-  const close = (e) => {
-    if (!dropdown.contains(e.target) && !anchor.contains(e.target)) {
-      dropdown.remove();
-      document.removeEventListener('click', close, true);
-    }
-  };
-  setTimeout(() => document.addEventListener('click', close, true), 10);
+  // The dropdown is appended INTO the anchor, so a click on the anchor (the
+  // menu trigger) must still count as "inside" — otherwise reopening would
+  // immediately self-close. bindMenuDismiss handles the deferred attach, the
+  // Escape stack, and idempotent teardown so this can't leak on any path.
+  const close = bindMenuDismiss(
+    dropdown,
+    () => { dropdown.remove(); },
+    (e) => !dropdown.contains(e.target) && !anchor.contains(e.target),
+  );
 }
 
 // ---- Reminder submenu (creates a Note with a reminder for this email) ----
@@ -994,7 +997,7 @@ function _showRemindSubmenu(em, parentDropdown) {
     item.innerHTML = `<span>${p.label}</span><span style="margin-left:auto;opacity:0.5;font-size:10px;">${p.sub}</span>`;
     item.addEventListener('click', async (e) => {
       e.stopPropagation();
-      parentDropdown.remove();
+      dismissOrRemove(parentDropdown);
       await _createReplyReminder(em, p.date);
     });
     parentDropdown.appendChild(item);
@@ -1004,7 +1007,7 @@ function _showRemindSubmenu(em, parentDropdown) {
   customItem.innerHTML = '<span>Pick date and time…</span>';
   customItem.addEventListener('click', async (e) => {
     e.stopPropagation();
-    parentDropdown.remove();
+    dismissOrRemove(parentDropdown);
     const tmp = document.createElement('input');
     tmp.type = 'datetime-local';
     const def = new Date(tomorrow);

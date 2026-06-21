@@ -7,6 +7,7 @@ import { openEditor, closeEditor, isEditorOpen } from './galleryEditor.js';
 import spinnerModule from './spinner.js';
 import { makeWindowDraggable } from './windowDrag.js';
 import * as video360 from './video360.js';
+import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
 
 const API_BASE = window.location.origin;
 let _open = false;
@@ -1515,7 +1516,7 @@ function _renderGrid() {
 // Per-card actions dropdown. Built fixed-positioned at the button (same as the
 // bulk-actions menu) so it never clips inside the grid's scroll container.
 function _showCardMenu(anchor, img) {
-  document.querySelectorAll('.gallery-card-menu').forEach(d => d.remove());
+  document.querySelectorAll('.gallery-card-menu').forEach(dismissOrRemove);
   const dropdown = document.createElement('div');
   dropdown.className = 'dropdown gallery-card-menu';
   dropdown.style.cssText = `position:fixed;display:block;z-index:10001;left:0;top:0;right:auto;min-width:160px;background:var(--panel,var(--bg));border:1px solid var(--border);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,0.3);padding:6px;font-size:11px;visibility:hidden;`;
@@ -1533,7 +1534,7 @@ function _showCardMenu(anchor, img) {
     const it = document.createElement('div');
     it.className = 'dropdown-item-compact' + (a.danger ? ' dropdown-item-danger' : '');
     it.innerHTML = `<span class="dropdown-icon">${a.icon}</span><span>${a.label}</span>`;
-    it.addEventListener('click', (e) => { e.stopPropagation(); dropdown.remove(); a.action(); });
+    it.addEventListener('click', (e) => { e.stopPropagation(); close(); a.action(); });
     dropdown.appendChild(it);
   }
   document.body.appendChild(dropdown);
@@ -1548,13 +1549,8 @@ function _showCardMenu(anchor, img) {
   dropdown.style.left = `${menuLeft}px`;
   dropdown.style.top = `${menuTop}px`;
   dropdown.style.visibility = 'visible';
-  const close = (ev) => {
-    if (!dropdown.contains(ev.target) && ev.target !== anchor && !anchor.contains(ev.target)) {
-      dropdown.remove();
-      document.removeEventListener('click', close, true);
-    }
-  };
-  setTimeout(() => document.addEventListener('click', close, true), 10);
+  const close = bindMenuDismiss(dropdown, () => { dropdown.remove(); },
+    (ev) => !dropdown.contains(ev.target) && ev.target !== anchor && !anchor.contains(ev.target));
 }
 
 // Hide / unhide a single photo from the card menu. When hiding while the grid
@@ -1611,7 +1607,7 @@ function _cardEdit(img) {
 // invokes onPick(albumId) with the chosen/created album. Used by both the
 // per-card ⋮ menu and the bulk-actions menu so "Add to album" behaves the same.
 function _showAlbumPicker(anchor, onPick) {
-  document.querySelectorAll('.gallery-card-menu, .gallery-bulk-menu, .gallery-album-picker').forEach(d => d.remove());
+  document.querySelectorAll('.gallery-card-menu, .gallery-bulk-menu, .gallery-album-picker').forEach(dismissOrRemove);
   const dropdown = document.createElement('div');
   dropdown.className = 'dropdown gallery-album-picker';
   dropdown.style.cssText = `position:fixed;display:block;z-index:10001;left:0;top:0;right:auto;min-width:180px;max-height:280px;overflow-y:auto;background:var(--panel,var(--bg));border:1px solid var(--border);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,0.3);padding:6px;font-size:11px;visibility:hidden;`;
@@ -1621,7 +1617,7 @@ function _showAlbumPicker(anchor, onPick) {
   const newIt = mkItem(`<span class="dropdown-icon">${_plusIco}</span><span>New album…</span>`);
   newIt.addEventListener('click', async (e) => {
     e.stopPropagation();
-    dropdown.remove();
+    close();
     const name = (uiModule.styledPrompt
       ? await uiModule.styledPrompt('Name your new album.', { title: 'New album', placeholder: 'e.g. Vacation 2026', confirmText: 'Create' })
       : prompt('Album name:'));
@@ -1645,7 +1641,7 @@ function _showAlbumPicker(anchor, onPick) {
   }
   _albums.forEach(a => {
     const it = mkItem(`<span class="dropdown-icon">${_albIco}</span><span>${_esc(a.name)}</span>`);
-    it.addEventListener('click', (e) => { e.stopPropagation(); dropdown.remove(); onPick(a.id); });
+    it.addEventListener('click', (e) => { e.stopPropagation(); close(); onPick(a.id); });
     dropdown.appendChild(it);
   });
   document.body.appendChild(dropdown);
@@ -1658,13 +1654,8 @@ function _showAlbumPicker(anchor, onPick) {
   dropdown.style.left = `${left}px`;
   dropdown.style.top = `${top}px`;
   dropdown.style.visibility = 'visible';
-  const close = (ev) => {
-    if (!dropdown.contains(ev.target) && ev.target !== anchor && !anchor.contains(ev.target)) {
-      dropdown.remove();
-      document.removeEventListener('click', close, true);
-    }
-  };
-  setTimeout(() => document.addEventListener('click', close, true), 10);
+  const close = bindMenuDismiss(dropdown, () => { dropdown.remove(); },
+    (ev) => !dropdown.contains(ev.target) && ev.target !== anchor && !anchor.contains(ev.target));
 }
 
 // Add a single photo (from its card ⋮ menu) to an album.

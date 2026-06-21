@@ -16,6 +16,7 @@ import spinnerModule from './spinner.js';
 import { openLibrary, closeLibrary, isLibraryOpen, initLibrary } from './documentLibrary.js?v=460';
 import signatureModule from './signature.js';
 import * as Modals from './modalManager.js';
+import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
 
   let API_BASE = '';
   let isOpen = false;
@@ -5512,7 +5513,7 @@ import * as Modals from './modalManager.js';
     // Ignore a same-kind re-invocation within 400ms so the menu stays up.
     if (existing && existing.dataset.dd === kind && (now - _mdDdOpenedAt) < 400) return;
     const prevKind = existing && existing.dataset.dd;
-    if (existing) existing.remove();
+    if (existing) dismissOrRemove(existing);
     if (existing && prevKind === kind) return; // same toggle clicked → just close
     _mdDdOpenedAt = now;
 
@@ -5524,6 +5525,7 @@ import * as Modals from './modalManager.js';
     const items = groups[kind];
     if (!items) return;
 
+    let close;
     const rect = toggleBtn.getBoundingClientRect();
     const menu = document.createElement('div');
     menu.id = 'doc-md-dd-menu';
@@ -5544,35 +5546,25 @@ import * as Modals from './modalManager.js';
       it.append(icoSpan, lbl);
       // Don't let the menu item steal focus from the editor (preserve selection).
       it.addEventListener('mousedown', (ev) => ev.preventDefault());
-      it.addEventListener('click', (ev) => { ev.stopPropagation(); menu.remove(); applyMdFormat(md); });
+      it.addEventListener('click', (ev) => { ev.stopPropagation(); close(); applyMdFormat(md); });
       menu.appendChild(it);
     });
     document.body.appendChild(menu);
 
-    const close = (ev) => {
-      if (ev && ev.type === 'keydown') {
-        if (ev.key !== 'Escape') return;
-        ev.preventDefault();
-        ev.stopPropagation();
-        ev.stopImmediatePropagation?.();
-      }
-      if (ev && ev.type === 'click') {
-        // Ignore the ghost/duplicate click mobile fires right after opening.
-        if (Date.now() - _mdDdOpenedAt < 400) return;
-        if (menu.contains(ev.target) || toggleBtn.contains(ev.target)) return;
-      }
+    // Scroll/resize reposition the anchor, so dismiss the menu through close().
+    const onReflow = () => close();
+    close = bindMenuDismiss(menu, () => {
       menu.remove();
-      document.removeEventListener('click', close, true);
-      document.removeEventListener('keydown', close, true);
-      window.removeEventListener('scroll', close, true);
-      window.removeEventListener('resize', close, true);
-    };
-    setTimeout(() => {
-      document.addEventListener('click', close, true);
-      document.addEventListener('keydown', close, true);
-      window.addEventListener('scroll', close, true);
-      window.addEventListener('resize', close, true);
-    }, 0);
+      window.removeEventListener('scroll', onReflow, true);
+      window.removeEventListener('resize', onReflow, true);
+    }, (ev) => {
+      // Ignore the ghost/duplicate click mobile fires right after opening, and
+      // treat clicks on the toggle button as "inside" (it owns the open/close).
+      if (Date.now() - _mdDdOpenedAt < 400) return false;
+      return !menu.contains(ev.target) && !toggleBtn.contains(ev.target);
+    });
+    window.addEventListener('scroll', onReflow, true);
+    window.addEventListener('resize', onReflow, true);
   }
 
   function initMdToolbar() {
