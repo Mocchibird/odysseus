@@ -12,6 +12,12 @@ let _open = false;
 let _habitsOpen = false;
 let _tab = 'calories';
 const _editingHabits = new Set();  // habit ids (as strings) currently in inline-edit mode
+// Per-habit heatmap cache (habit id -> {days,total,streak}). The 371-day heatmap
+// only changes when a habit's done-state changes, so we fetch it once and reuse
+// it across re-renders instead of refetching EVERY habit's heatmap on every
+// mutation (was N network requests per click). Invalidated per-habit on
+// check/uncheck/delete; cleared wholesale on open.
+const _heatmapCache = {};
 
 const esc = uiModule.esc;  // reuse the canonical HTML-escape helper
 
@@ -269,8 +275,15 @@ async function _renderHabits() {
   try { data = await _api('/habits'); } catch (e) { b.innerHTML = `<div class="health-error">${esc(e.message)}</div>`; return; }
   const habits = data.habits || [];
   const cards = await Promise.all(habits.map(async (h) => {
-    let hm = { days: [], total: 0, streak: h.streak };
-    try { hm = await _api(`/habits/${h.id}/heatmap?days=371`); } catch (_) {}
+    let hm = _heatmapCache[h.id];
+    if (!hm) {
+      try {
+        hm = await _api(`/habits/${h.id}/heatmap?days=371`);
+        _heatmapCache[h.id] = hm;  // cache only on success (don't pin a transient error)
+      } catch (_) {
+        hm = { days: [], total: 0, streak: h.streak };
+      }
+    }
     const editing = _editingHabits.has(String(h.id));
     const head = editing ? `
         <form class="health-inline-form health-habit-edit" data-edit-form="${h.id}">
@@ -331,18 +344,20 @@ async function _renderHabits() {
   b.querySelectorAll('[data-check]').forEach((btn) => btn.addEventListener('click', async () => {
     try {
       await _api(`/habits/${btn.dataset.check}/check`, { method: 'POST', body: JSON.stringify({ day: _todayLocal() }) });
+      delete _heatmapCache[btn.dataset.check];  // done-state changed -> refetch just this heatmap
       _renderHabits();
     } catch (err) { uiModule.showError?.(err.message); }
   }));
   b.querySelectorAll('[data-check-yday]').forEach((btn) => btn.addEventListener('click', async () => {
     try {
       await _api(`/habits/${btn.dataset.checkYday}/check`, { method: 'POST', body: JSON.stringify({ day: _yesterdayLocal() }) });
+      delete _heatmapCache[btn.dataset.checkYday];  // done-state changed -> refetch just this heatmap
       _renderHabits();
     } catch (err) { uiModule.showError?.(err.message); }
   }));
   b.querySelectorAll('[data-del-habit]').forEach((btn) => btn.addEventListener('click', async () => {
     if (!await uiModule.styledConfirm('Delete this habit and its history?', { confirmText: 'Delete', danger: true })) return;
-    try { await _api(`/habits/${btn.dataset.delHabit}`, { method: 'DELETE' }); _renderHabits(); }
+    try { await _api(`/habits/${btn.dataset.delHabit}`, { method: 'DELETE' }); delete _heatmapCache[btn.dataset.delHabit]; _renderHabits(); }
     catch (err) { uiModule.showError?.(err.message); }
   }));
   // Inline edit (rename / emoji / category) — mirrors the add-habit form.
@@ -868,6 +883,9 @@ export function openHabits() {
   _habitsEsc = (e) => { if (e.key === 'Escape' && _habitsOpen) closeHabits(); };
   document.addEventListener('keydown', _habitsEsc);
 
+  // Fresh open: drop cached heatmaps so external changes (Today panel, agent)
+  // made while this was closed are reflected.
+  Object.keys(_heatmapCache).forEach((k) => delete _heatmapCache[k]);
   _renderHabits();
 }
 

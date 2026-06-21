@@ -28,7 +28,7 @@ import tasksModule from './js/tasks.js';
 import calendarModule from './js/calendar.js';
 import notesModule from './js/notes.js?v=464';
 import booksModule from './js/books.js?v=420';
-import healthModule from './js/health.js?v=398';
+import healthModule from './js/health.js?v=399';
 import pingsModule from './js/pings.js?v=396';
 import todayModule from './js/today.js?v=422';
 import adminModule from './js/admin.js?v=450';
