@@ -15980,6 +15980,29 @@ body.left-dock-active.doc-view .doc-editor-pane.doc-left ~ .chat-container {
   flex: 0 0 auto !important;
   overflow: visible !important;
 }
+/* Launch/Serve tab: fill the modal height so the cached-model list occupies the
+   available space instead of leaving dead space below a short list. Desktop only
+   (the max-width:768px block keeps mobile's single-modal-scroller model) and
+   scoped to the *active* Serve group (`:not(.hidden)`) so every other cookbook
+   tab keeps the content-sized / modal-scrolls layout the redesign intends.
+   With the body and card no longer scrolling, the cached list (flex:1 1 auto;
+   min-height:0; overflow-y:auto above) is the SOLE scroll surface — a tall list
+   or an expanded serve panel scrolls inside it and the Launch button stays
+   reachable, with no nested-scroll wheel-trap. */
+@media (min-width: 769px) {
+  #cookbook-modal .cookbook-body:has(> .cookbook-group[data-backend-group="Serve"]:not(.hidden)) {
+    flex: 1 1 auto;
+    overflow: hidden;
+  }
+  #cookbook-modal .cookbook-group[data-backend-group="Serve"]:not(.hidden) {
+    flex: 1 1 auto;
+    min-height: 0;
+  }
+  #cookbook-modal .cookbook-group[data-backend-group="Serve"]:not(.hidden) > .admin-card {
+    flex: 1 1 auto !important;
+    overflow: hidden !important;
+  }
+}
 /* Drag-and-drop visual hint for the email compose pane. Subtle accent
    outline + tinted overlay so it's obvious files will attach if dropped. */
 .doc-editor-pane.email-dragover {
