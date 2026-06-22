@@ -518,6 +518,36 @@ def _extract_text(msg):
     return ""
 
 
+# A "body" string is really HTML (not plain text) when it carries a doctype, a
+# structural/block opening tag, or ANY closing tag. Inline-ambiguous openers
+# (<b>, <a>, <i>…) deliberately do NOT trigger on their own.
+_HTML_BODY_RE = re.compile(
+    r"(?:<!doctype\b|</[a-z][\w-]*\s*>|<(?:html|head|body|div|p|br|hr|table|"
+    r"thead|tbody|tr|td|th|ul|ol|li|blockquote|pre)\b)",
+    re.I,
+)
+
+
+def _plaintext_email_body(body):
+    """Coerce an accidentally-HTML body to plain text.
+
+    send_email's body is contractually plain text (set_content makes a
+    text/plain part). If an LLM wraps it in `<html><body>…</body></html>`,
+    the recipient would otherwise see the literal markup. Detect a real HTML
+    body and flatten it; plain bodies pass through untouched.
+    """
+    if not body:
+        return body or ""
+    if not _HTML_BODY_RE.search(body):
+        return body
+    t = re.sub(r"(?is)<(script|style)\b[^>]*>.*?</\1>", "", body)
+    t = re.sub(r"(?i)<br\s*/?>", "\n", t)
+    t = re.sub(r"(?i)</(?:p|div|h[1-6]|li|tr|blockquote|pre)>", "\n", t)
+    t = re.sub(r"<[^>]+>", "", t)
+    t = html.unescape(t)
+    return re.sub(r"\n{3,}", "\n\n", t).strip()
+
+
 def _get_cached_summaries():
     """Read pre-computed summaries from SQLite cache."""
     cfg = _load_config()
@@ -960,6 +990,9 @@ def _stash_agent_draft(*, to, subject, body, in_reply_to=None, references=None,
         from src.constants import SCHEDULED_EMAILS_DB
     except Exception:
         return {"success": False, "error": "Pending-email storage unavailable"}
+    # Body is plain text; flatten an accidentally-HTML body so the review card
+    # and the eventual send both stay free of literal <html><body>… markup.
+    body = _plaintext_email_body(body)
     pending_id = uuid.uuid4().hex[:16]
     far_future = "9999-12-31T00:00:00"
     now = datetime.utcnow().isoformat()
@@ -1056,7 +1089,7 @@ def _send_email(to, subject, body, in_reply_to=None, references=None, cc=None, b
         msg["Date"] = email.utils.formatdate(localtime=True)
     if "Message-ID" not in msg:
         msg["Message-ID"] = email.utils.make_msgid()
-    msg.set_content(body)
+    msg.set_content(_plaintext_email_body(body))
 
     recipients = []
     if isinstance(to, str):
@@ -1741,7 +1774,7 @@ async def list_tools() -> list[Tool]:
                 "properties": {
                     "to": {"type": "string", "description": "Recipient email address(es), comma-separated"},
                     "subject": {"type": "string", "description": "Email subject line"},
-                    "body": {"type": "string", "description": "Plain text body"},
+                    "body": {"type": "string", "description": "Plain text body. Do NOT wrap in HTML tags (no <html>/<body>/<p>) — write plain text; formatting like blank lines is preserved."},
                     "cc": {"type": "string", "description": "CC address(es), comma-separated (optional)"},
                     "bcc": {"type": "string", "description": "BCC address(es), comma-separated (optional)"},
                     **ACCOUNT_PROP,

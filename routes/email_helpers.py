@@ -1402,6 +1402,42 @@ def _extract_text(msg):
     return ""
 
 
+# A "body" string is really HTML (not plain text) when it carries a doctype, a
+# structural/block opening tag, or ANY closing tag. Inline-ambiguous openers
+# (<b>, <a>, <i>…) deliberately do NOT trigger on their own — "a < b" or a
+# stray "<b>" in prose stays plain unless a matching "</b>" proves it's markup.
+_HTML_BODY_RE = re.compile(
+    r"(?:<!doctype\b|</[a-z][\w-]*\s*>|<(?:html|head|body|div|p|br|hr|table|"
+    r"thead|tbody|tr|td|th|ul|ol|li|blockquote|pre)\b)",
+    re.I,
+)
+
+
+def _plaintext_email_body(body: str) -> str:
+    """Coerce an accidentally-HTML body back to plain text.
+
+    The scheduled-send / agent-draft channel is PLAIN-TEXT only: the
+    `scheduled_emails` row has no html column, and the poller derives the
+    text/html MIME part by HTML-escaping the body. If a caller — e.g. an LLM
+    that ignored the tool's "plain text body" contract — wraps the body in
+    `<html><body>…</body></html>`, the old path shipped the raw tags in the
+    text/plain part AND escaped them into the text/html part, so the recipient
+    saw the literal markup in BOTH. Detect a real HTML body and flatten it to
+    text so the downstream construction renders cleanly. Plain bodies pass
+    through untouched.
+    """
+    if not body:
+        return body or ""
+    if not _HTML_BODY_RE.search(body):
+        return body
+    t = re.sub(r"(?is)<(script|style)\b[^>]*>.*?</\1>", "", body)  # drop script/style content
+    t = re.sub(r"(?i)<br\s*/?>", "\n", t)
+    t = re.sub(r"(?i)</(?:p|div|h[1-6]|li|tr|blockquote|pre)>", "\n", t)
+    t = re.sub(r"<[^>]+>", "", t)                                  # strip remaining tags
+    t = html.unescape(t)
+    return re.sub(r"\n{3,}", "\n\n", t).strip()
+
+
 def _fetch_sender_thread_context(sender_addr: str,
                                  exclude_uid: str = "",
                                  exclude_folder: str = "INBOX",

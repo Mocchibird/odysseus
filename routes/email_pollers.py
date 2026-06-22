@@ -35,7 +35,7 @@ from routes.email_helpers import (
     _send_smtp_message,
     _imap_connect, _imap, _decode_header,
     _detect_sent_folder, _detect_spam_folder, _imap_move,
-    _extract_attachment_text, _extract_text,
+    _extract_attachment_text, _extract_text, _plaintext_email_body,
     _attach_compose_uploads, _cleanup_compose_uploads, _q,
     SCHEDULED_DB, _EMAIL_REPLY_SYS_PROMPT_BASE, _email_cache_owner_clause,
 )
@@ -1046,8 +1046,12 @@ def _scheduled_poll_once() -> dict:
                     outer["In-Reply-To"] = r[6]
                 if r[7]:
                     outer["References"] = r[7]
-                body_container.attach(MIMEText(r[5] or "", "plain", "utf-8"))
-                html_body = html.escape(r[5] or "").replace("\n", "<br>\n")
+                # The body channel is plain text; flatten an accidentally-HTML
+                # body (e.g. an LLM that wrapped it in <html><body>…) so the
+                # recipient doesn't see literal markup in both parts.
+                _pbody = _plaintext_email_body(r[5] or "")
+                body_container.attach(MIMEText(_pbody, "plain", "utf-8"))
+                html_body = html.escape(_pbody).replace("\n", "<br>\n")
                 body_container.attach(MIMEText(f"<html><body>{html_body}</body></html>", "html", "utf-8"))
                 if has_atts:
                     outer.attach(body_container)
