@@ -204,6 +204,47 @@ async def test_related_includes_wikilinks_and_backlinks(monkeypatch):
         droutes.SessionLocal = previous
 
 
+def test_series_key_parses_trailing_number():
+    assert droutes._series_key("Japanese A1.2 Lesson 22") == ("japanese a1.2 lesson", 22)
+    assert droutes._series_key("Lesson 7") == ("lesson", 7)
+    assert droutes._series_key("Chapter   12  ") == ("chapter", 12)
+    assert droutes._series_key("No number here") == (None, None)
+    assert droutes._series_key("") == (None, None)
+
+
+@pytest.mark.asyncio
+async def test_related_orders_series_siblings_by_numeric_proximity(monkeypatch):
+    """For a lesson in a series, the nearest siblings rank first and in order:
+    Lesson 22 -> 21 then 23 (distance 1), ahead of 20 (distance 2). Title
+    similarity scores all three identically, so this guards the numeric-proximity
+    tiebreak (without it the two shown fell to DB insertion order)."""
+    previous = _bind_test_db()
+    try:
+        related_ep = _endpoint("GET", "/api/document/{doc_id}/related")
+        l20, l21, l22, l23 = (str(uuid.uuid4()) for _ in range(4))
+        db = _TS()
+        try:
+            db.query(Document).delete()
+            # Insert in a deliberately non-ascending order so a correct result
+            # can't come from DB insertion order alone.
+            db.add(_doc(l20, "Japanese A1.2 Lesson 20", "alice"))
+            db.add(_doc(l23, "Japanese A1.2 Lesson 23", "alice"))
+            db.add(_doc(l22, "Japanese A1.2 Lesson 22", "alice"))
+            db.add(_doc(l21, "Japanese A1.2 Lesson 21", "alice"))
+            db.commit()
+        finally:
+            db.close()
+        monkeypatch.setattr(content_rag, "semantic_search", lambda *a, **k: [])  # RAG cold
+        res = await related_ep(_req("alice"), l22, k=6)
+        ids = [r["id"] for r in res["related"]]
+        # The "Most relevant" strip is items[:2] in the UI — adjacent, in order.
+        assert ids[:2] == [l21, l23]
+        # The distance-2 sibling ranks below both adjacents.
+        assert ids.index(l20) > ids.index(l23)
+    finally:
+        droutes.SessionLocal = previous
+
+
 def test_obsidian_extras_frontend_wiring_present():
     """Guard the front-end hooks so a refactor can't silently drop them."""
     from pathlib import Path

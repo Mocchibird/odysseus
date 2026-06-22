@@ -56,6 +56,28 @@ def _like_escape(s: str) -> str:
     return s.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
+_TRAILING_NUM_RE = re.compile(r"^(.*?)(\d+)\s*$")
+
+
+def _series_key(title: str):
+    """For a title that ends in a number — a lesson/part SERIES like
+    ``Japanese A1.2 Lesson 22`` — return ``(stem, number)`` where ``stem`` is the
+    title minus that trailing number (lowercased, whitespace-collapsed), else
+    ``(None, None)``. Title similarity alone scores every sibling identically
+    (``20``/``21``/``23`` are equally-different tokens with the same common
+    prefix), so without this the two shown in "Most relevant" fall to DB
+    insertion order. The numeric distance lets adjacent lessons win and sort
+    in order (for Lesson 22 → 21, then 23, ahead of 20)."""
+    m = _TRAILING_NUM_RE.match((title or "").strip())
+    if not m:
+        return None, None
+    stem = re.sub(r"\s+", " ", m.group(1).strip().lower())
+    try:
+        return stem, int(m.group(2))
+    except ValueError:
+        return None, None
+
+
 
 def _get_session_or_404(db, session_id: str, user: Optional[str]):
     session = db.query(DbSession).filter(DbSession.id == session_id).first()
@@ -559,6 +581,8 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
             elif snippet and not cur.get("snippet"):
                 cur["snippet"] = snippet
 
+        a_stem, a_num = _series_key(title)
+
         for cid, ctitle, csess in cands:
             ct = ctitle or ""
             if ct.lower() in out_links or cid in backlinks:
@@ -567,6 +591,17 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
             sim = _title_similarity(title, ct)
             if sim >= 0.15:
                 _add(cid, ct, 200.0 + sim * 100.0, "series" if sim >= 0.45 else "topic")
+                # Same series (identical stem, different trailing number)? Record
+                # the numeric distance so adjacent entries (Lesson 21/23 for
+                # Lesson 22) beat farther ones (Lesson 20) — title similarity
+                # ties all siblings at the same score (see _series_key).
+                if a_stem is not None:
+                    c_stem, c_num = _series_key(ct)
+                    if c_stem == a_stem and c_num is not None:
+                        ent = scored.get(cid)
+                        if ent is not None:
+                            ent["series_distance"] = abs(c_num - a_num)
+                            ent["series_num"] = c_num
             elif sess and csess == sess:
                 _add(cid, ct, 120.0, "same session")
 
@@ -586,7 +621,17 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
             except Exception:
                 logger.debug("related semantic supplement failed", exc_info=True)
 
-        ranked = sorted(scored.values(), key=lambda d: d["score"], reverse=True)[:k]
+        # Primary: relevance score. Ties (notably a lesson series, where every
+        # sibling scores identically) break by numeric proximity, then ascending
+        # number — so Lesson 22 surfaces 21 then 23, not insertion-order 20.
+        ranked = sorted(
+            scored.values(),
+            key=lambda d: (
+                -d["score"],
+                d.get("series_distance", float("inf")),
+                d.get("series_num", float("inf")),
+            ),
+        )[:k]
 
         # Fill snippets for ranked entries that don't carry one (title/link/session).
         need = [d["id"] for d in ranked if not d.get("snippet")]
