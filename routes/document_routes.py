@@ -647,13 +647,26 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
         automatic backfill. Ids/text are snapshotted on the request thread; the
         embedding runs in a background thread so the response returns immediately."""
         user = get_current_user(request)
-        # RAG is an optional dependency — degrade clearly when it's unavailable.
+        # Surface the SPECIFIC blocker — a Chroma connection problem and a missing
+        # embedding model need very different fixes, so don't collapse both into a
+        # vague "unavailable" (which reads as "Chroma down" even when Chroma is fine).
+        try:
+            from src.chroma_client import get_chroma_client
+            get_chroma_client()  # raises with a host:port / install hint if down
+        except Exception as e:
+            return {"ok": False, "error": f"ChromaDB not reachable: {e}"}
         try:
             from src.rag_singleton import get_rag_manager
-            if get_rag_manager() is None:
-                return {"ok": False, "error": "Search index is unavailable on this server (RAG/embeddings not running)."}
-        except Exception:
-            return {"ok": False, "error": "Search index is unavailable on this server."}
+            rag_ok = get_rag_manager() is not None
+        except Exception as e:
+            return {"ok": False, "error": f"Search index unavailable: {e}"}
+        if not rag_ok:
+            return {"ok": False, "error": (
+                "Connected to ChromaDB, but no embedding model is available (no "
+                "embedding lanes). Set EMBEDDING_URL (+ EMBEDDING_API_KEY / "
+                "EMBEDDING_MODEL) to a reachable embeddings endpoint, or install "
+                "fastembed — see the server log for the per-lane errors."
+            )}
 
         from core.database import FileItem, Book
         db = SessionLocal()

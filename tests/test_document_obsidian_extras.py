@@ -239,11 +239,13 @@ async def test_reindex_content_queues_owner_content(monkeypatch):
     books and returns the queued counts. The embedding itself is backgrounded,
     so only the synchronous count is asserted here."""
     import src.rag_singleton as rag_singleton
+    import src.chroma_client as chroma_client
     from core.database import FileItem, Book
     previous = _bind_test_db()
     try:
-        # RAG "available" so the endpoint proceeds past the availability gate;
-        # stub the embedding calls so the backgrounded work never needs a store.
+        # ChromaDB reachable + RAG "available" so the endpoint proceeds past both
+        # gates; stub the embedding calls so the backgrounded work never needs a store.
+        monkeypatch.setattr(chroma_client, "get_chroma_client", lambda: object(), raising=False)
         monkeypatch.setattr(rag_singleton, "get_rag_manager", lambda: object(), raising=False)
         monkeypatch.setattr(content_rag, "index_text", lambda *a, **k: True, raising=False)
         monkeypatch.setattr(content_rag, "deindex", lambda *a, **k: 0, raising=False)
@@ -265,15 +267,34 @@ async def test_reindex_content_queues_owner_content(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_reindex_content_degrades_when_rag_unavailable(monkeypatch):
-    """When RAG is unavailable, reindex returns a clear error instead of crashing."""
+async def test_reindex_reports_chromadb_unreachable(monkeypatch):
+    """Chroma down → the error names ChromaDB specifically (not a vague 'unavailable')."""
+    import src.chroma_client as chroma_client
+    previous = _bind_test_db()
+    try:
+        def _boom():
+            raise RuntimeError("ChromaDB is not reachable at chromadb:8000")
+        monkeypatch.setattr(chroma_client, "get_chroma_client", _boom, raising=False)
+        ep = _endpoint("POST", "/api/search/reindex")
+        res = await ep(_req("alice"))
+        assert res["ok"] is False and "chromadb" in res["error"].lower()
+    finally:
+        droutes.SessionLocal = previous
+
+
+@pytest.mark.asyncio
+async def test_reindex_reports_missing_embedder(monkeypatch):
+    """Chroma reachable but no embedder → the error points at EMBEDDING_URL/fastembed,
+    not at ChromaDB (the bug that confused setup)."""
+    import src.chroma_client as chroma_client
     import src.rag_singleton as rag_singleton
     previous = _bind_test_db()
     try:
+        monkeypatch.setattr(chroma_client, "get_chroma_client", lambda: object(), raising=False)
         monkeypatch.setattr(rag_singleton, "get_rag_manager", lambda: None, raising=False)
         ep = _endpoint("POST", "/api/search/reindex")
         res = await ep(_req("alice"))
-        assert res["ok"] is False and "unavailable" in res["error"].lower()
+        assert res["ok"] is False and "embedding" in res["error"].lower()
     finally:
         droutes.SessionLocal = previous
 
