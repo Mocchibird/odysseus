@@ -15964,7 +15964,14 @@ body.left-dock-active.doc-view .doc-editor-pane.doc-left ~ .chat-container {
 }
 .cookbook-group[data-backend-group="Serve"] > .admin-card > #hwfit-cached-list,
 .cookbook-group[data-backend-group="Serve"] > .admin-card > .hwfit-cached-list {
-  flex: 1 1 0;
+  /* flex-basis auto, NOT 0: the ancestor chain (.cookbook-body →
+     .cookbook-group → .admin-card) is content-sized, so `flex: 1 1 0` gave
+     this list a 0px basis with no free space to grow into — it collapsed to
+     0 height and the model rows rendered but were clipped away (counts showed,
+     list looked empty). `auto` basis falls back to the content height so rows
+     are always visible, and it still grows to fill if a parent becomes sized.
+     Same class of bug the mobile @media block already worked around. */
+  flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto !important;
   overscroll-behavior: contain;
