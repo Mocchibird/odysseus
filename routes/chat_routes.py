@@ -872,7 +872,11 @@ def setup_chat_routes(
         from src.settings import get_setting
         _global_disabled = get_setting("disabled_tools", [])
         if _global_disabled and isinstance(_global_disabled, list):
-            disabled_tools.update(_global_disabled)
+            explicit_web_allowed = allow_web_search is not None and str(allow_web_search).lower() == "true"
+            if explicit_web_allowed:
+                disabled_tools.update(t for t in _global_disabled if t not in {"web_search", "web_fetch"})
+            else:
+                disabled_tools.update(_global_disabled)
 
         # Light auto-escalation: the user is in chat mode and just expressed a
         # notes/calendar/email intent. Grant the relevant managers but withhold
@@ -1322,6 +1326,11 @@ def setup_chat_routes(
                         _agent_fallbacks = _fallback_candidates
 
                     _meal_photo_linked = False  # link an attached food photo to the first meal Iris logs this turn
+
+                    _forced_tools = None
+                    if allow_web_search is not None and str(allow_web_search).lower() == "true":
+                        _forced_tools = {"web_search", "web_fetch"}
+
                     async for chunk in stream_agent_loop(
                         _agent_url,
                         _agent_model,
@@ -1343,6 +1352,7 @@ def setup_chat_routes(
                         plan_mode=plan_mode,
                         approved_plan=approved_plan or None,
                         workspace=workspace or None,
+                        forced_tools=_forced_tools,
                     ):
                         if chunk.startswith("data: ") and not chunk.startswith("data: [DONE]"):
                             try:

@@ -36,6 +36,14 @@ function linkHtml(text, url) {
   return `<a href="${escapeHtml(safeUrl)}" target="_blank" rel="noopener noreferrer">${safeText}</a>`;
 }
 
+function imageHtml(alt, url, title) {
+  const safeUrl = safeLinkUrl(url);
+  if (!safeUrl || safeUrl.startsWith('#')) return escapeHtml(alt || '');
+  const safeAlt = escapeHtml(alt || '');
+  const safeTitle = title ? ` title="${escapeHtml(title)}"` : '';
+  return `<img src="${escapeHtml(safeUrl)}" alt="${safeAlt}"${safeTitle} loading="lazy" decoding="async">`;
+}
+
 function _isModelEndpointUrl(rawUrl) {
   try {
     const parsed = new URL(String(rawUrl || ''), window.location.origin);
@@ -176,7 +184,7 @@ function cleanRevealAnswer(answer) {
  * Check if text has unclosed think tag
  */
 export function hasUnclosedThinkTag(text) {
-  text = text || '';
+  text = normalizeThinkingMarkup(text || '');
   const openCount =
     (text.match(/<(?:think(?:ing)?|thought)(?:\s+[^>]*)?>/gi) || []).length
     + (text.match(/<\|channel>thought/gi) || []).length;
@@ -193,6 +201,10 @@ export function startsWithReasoningPrefix(text) {
 export function normalizeThinkingMarkup(text) {
   if (!text) return text;
   let normalized = text;
+  // MiniMax M-series can emit namespaced reasoning tags like
+  // <mm:think>...</mm:think>. Normalize them into the shared thinking parser.
+  normalized = normalized.replace(/<mm:think(\s+[^>]*)?>/gi, (_m, attrs = '') => `<think${attrs || ''}>`);
+  normalized = normalized.replace(/<\/mm:think>/gi, '</think>');
   normalized = normalized.replace(/<thought(\s+[^>]*)?>/gi, (_m, attrs = '') => `<think${attrs || ''}>`);
   normalized = normalized.replace(/<\/thought>/gi, '</think>');
   normalized = normalized.replace(/<\|channel>thought\s*\n?([\s\S]*?)<channel\|>\s*/gi, (_m, content = '') => {
@@ -679,11 +691,12 @@ export function mdToHtml(src, opts) {
     allowedHtmlBlocks.push(`<a href="#" class="chat-link wiki-link" data-wikilink="${escapeHtml(page)}">${escapeHtml(display)}</a>`);
     return ph;
   };
-  const _mdImage = (alt, url) => {
+  const _mdImage = (alt, url, title) => {
     const safe = safeLinkUrl(url);
     if (!safe) return null;
     const ph = `___ALLOWED_HTML_${allowedHtmlBlocks.length}___`;
-    allowedHtmlBlocks.push(`<img class="md-img" src="${escapeHtml(safe)}" alt="${escapeHtml(alt || '')}" loading="lazy">`);
+    const safeTitle = title ? ` title="${escapeHtml(title)}"` : '';
+    allowedHtmlBlocks.push(`<img class="md-img" src="${escapeHtml(safe)}" alt="${escapeHtml(alt || '')}"${safeTitle} loading="lazy" decoding="async">`);
     return ph;
   };
   // A gallery embed by human NAME (e.g. `![[beach sunset]]`). The renderer is
@@ -757,9 +770,11 @@ export function mdToHtml(src, opts) {
   // Images ![alt](url) — MUST run before the [text](url) link pass so the
   // image isn't turned into a plain link. URL gated by safeLinkUrl (http(s) +
   // same-origin relative, e.g. /api/generated-image/… or /api/files/…/raw);
-  // unsafe → plain alt text (no broken <img>).
-  s = s.replace(/!\[([^\]]*)\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g, (match, alt, url) => {
-    return _mdImage(alt, url) || escapeHtml(alt);
+  // unsafe → plain alt text (no broken <img>). The optional "title" is
+  // captured and forwarded (upstream improvement); alt is constrained to a
+  // single line so it doesn't run across newlines.
+  s = s.replace(/!\[([^\]\n]*)\]\(([^)\s]+)(?:\s+"([^"]*)")?\)/g, (match, alt, url, title) => {
+    return _mdImage(alt, url, title) || escapeHtml(alt);
   });
 
   // Convert markdown links [text](url) to clickable links
@@ -800,8 +815,9 @@ export function mdToHtml(src, opts) {
     return placeholder;
   });
 
-  // ALSO preserve <a> tags the same way (they're now in the HTML from markdown conversion)
-  s = s.replace(/<a\s+[^>]*>.*?<\/a>/gi, (match) => {
+  // ALSO preserve <a>/<img> tags the same way (they're now in the HTML from
+  // markdown conversion)
+  s = s.replace(/<(?:a\s+[^>]*>.*?<\/a|img\s+[^>]*?)>/gi, (match) => {
     const placeholder = `___ALLOWED_HTML_${allowedHtmlBlocks.length}___`;
     allowedHtmlBlocks.push(sanitizeAllowedHtml(match));
     return placeholder;

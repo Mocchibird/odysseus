@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/odysseus-wordmark.png" alt="Odysseus" width="280">
+  <img src="docs/odysseus-wordmark.png" alt="Odysseus" width="238">
 </p>
 
 # Odysseus
@@ -12,7 +12,7 @@
 ───────────────────────────────────────────────
 ```
 
-![Odysseus](docs/odysseus.jpg)
+![Odysseus](docs/odysseus-browser.jpg)
 
 A self-hosted AI workspace -- meant to be the self-hosted version of the UI experience you get from ChatGPT and Claude. But with more jank and fun. Running on your own hardware, with your own data -- local-first, privacy-first, and no trojan.
 
