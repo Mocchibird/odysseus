@@ -27,6 +27,7 @@ if os.name == "nt":
     os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
 
 import logging
+import traceback
 import numpy as np
 import httpx
 from typing import List, Optional
@@ -108,10 +109,22 @@ class FastEmbedClient:
     def __init__(self, model: Optional[str] = None):
         try:
             from fastembed import TextEmbedding
-        except ImportError as e:
+        except BaseException as e:
+            # fastembed installs cleanly, but its internal `import onnxruntime`
+            # can fail (ImportError) — or sys.exit (SystemExit) — when a prior
+            # in-process import left onnxruntime half-initialized in sys.modules
+            # (e.g. an onnxruntime-gpu / rembg[gpu] load that couldn't find
+            # libcudart under the slim GPU overlay). The old `except ImportError`
+            # masked the true cause as a flat "not installed" AND would not
+            # catch SystemExit at all (crashing the lane warmup). Surface the
+            # real error + traceback so the actual blocker is diagnosable.
+            logger.error(
+                "FastEmbed import failed (real cause: %r):\n%s",
+                e, traceback.format_exc(),
+            )
             raise RuntimeError(
-                "Local fastembed is not installed. Either install it "
-                "(pip install fastembed) or point the app at a remote "
+                f"Local fastembed could not be imported: {e!r}. Either install "
+                "it (pip install fastembed) or point the app at a remote "
                 "embeddings server."
             ) from e
 
