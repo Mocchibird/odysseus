@@ -163,6 +163,19 @@ function _injectSettingsRows() {
         '<span style="opacity:0.6;">to</span><input id="set-quiet-hours-end" class="settings-select" type="time" style="flex:0 0 auto;width:auto;" /></div></div>');
     }
   }
+  // Search-index re-index card — after the Web Search card (Search tab). Re-embeds
+  // the caller's documents/files/books so semantic search + the doc "See also"
+  // panel find content created before indexing existed (no automatic backfill).
+  if (!document.getElementById('set-reindexBtn')) {
+    const _reIco = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2v6h-6"/><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M3 22v-6h6"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/></svg>';
+    _afterAnchor('set-searchTestBtn',
+      '<div class="admin-card"><h2><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px;opacity:0.6"><path d="M21 2v6h-6"/><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M3 22v-6h6"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/></svg>Search index</h2>' +
+      '<div class="admin-toggle-sub" style="margin-bottom:8px">Re-embed all your documents, files, and books so semantic search and the document “See also” panel can find content created before indexing existed (there is no automatic backfill). Runs in the background.</div>' +
+      '<div style="display:flex;align-items:center;gap:10px;">' +
+      '<button type="button" class="admin-btn-sm" id="set-reindexBtn" style="display:inline-flex;align-items:center;gap:4px;flex-shrink:0;">' + _reIco + 'Re-index content</button>' +
+      '<span id="set-reindexMsg" style="font-size:11px;color:color-mix(in srgb, var(--fg) 45%, transparent);"></span></div></div>',
+      '.admin-card');
+  }
 }
 
 // ── Hide admin-global settings from non-admins ───────────────────────────────

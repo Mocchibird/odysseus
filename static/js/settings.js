@@ -1807,6 +1807,47 @@ async function initSearchSettings() {
       }
     });
   }
+
+  // ── Re-index button ── re-embed the caller's documents/files/books into RAG so
+  // semantic search + the doc "See also" panel pick up content that predates
+  // indexing (no automatic backfill). The actual embedding runs server-side in
+  // the background; this just kicks it off and reports the queued counts.
+  var reBtn = el('set-reindexBtn');
+  if (reBtn) {
+    var reMsg = el('set-reindexMsg');
+    reBtn.addEventListener('click', async function() {
+      reBtn.disabled = true;
+      var origHtml = reBtn.innerHTML;
+      var wp = null;
+      try {
+        var sp = window.spinnerModule || (await import('./spinner.js')).default;
+        wp = sp.createWhirlpool(11);
+        wp.element.style.cssText = 'display:inline-flex;width:11px;height:11px;margin:0 4px 0 0;';
+        reBtn.innerHTML = ''; reBtn.appendChild(wp.element); reBtn.appendChild(document.createTextNode('Re-indexing'));
+      } catch (_) {}
+      if (reMsg) reMsg.textContent = '';
+      try {
+        var r = await fetch('/api/search/reindex', { method: 'POST', credentials: 'same-origin' });
+        var d = await r.json();
+        if (!d.ok) {
+          if (reMsg) { reMsg.textContent = '✗ ' + (d.error || 'Re-index failed'); reMsg.style.color = 'var(--red)'; }
+        } else {
+          var q = d.queued || {};
+          var n = (q.documents || 0) + (q.files || 0) + (q.books || 0);
+          if (reMsg) {
+            reMsg.textContent = '✓ Re-indexing ' + n + ' item' + (n === 1 ? '' : 's') +
+              ' in the background (' + (q.documents || 0) + ' docs, ' + (q.files || 0) + ' files, ' + (q.books || 0) + ' books)';
+            reMsg.style.color = 'var(--fg)';
+          }
+        }
+      } catch (e) {
+        if (reMsg) { reMsg.textContent = '✗ ' + (e && e.message ? e.message : e); reMsg.style.color = 'var(--red)'; }
+      } finally {
+        if (wp) { try { wp.destroy(); } catch (_) {} }
+        reBtn.disabled = false; reBtn.innerHTML = origHtml;
+      }
+    });
+  }
 }
 
 // SVG logos for each search provider (16×16 viewBox normalised to 24×24).

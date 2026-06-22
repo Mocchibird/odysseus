@@ -233,6 +233,51 @@ async def test_related_includes_wikilinks_and_backlinks(monkeypatch):
         droutes.SessionLocal = previous
 
 
+@pytest.mark.asyncio
+async def test_reindex_content_queues_owner_content(monkeypatch):
+    """POST /api/search/reindex enumerates the caller's documents, files, and
+    books and returns the queued counts. The embedding itself is backgrounded,
+    so only the synchronous count is asserted here."""
+    import src.rag_singleton as rag_singleton
+    from core.database import FileItem, Book
+    previous = _bind_test_db()
+    try:
+        # RAG "available" so the endpoint proceeds past the availability gate;
+        # stub the embedding calls so the backgrounded work never needs a store.
+        monkeypatch.setattr(rag_singleton, "get_rag_manager", lambda: object(), raising=False)
+        monkeypatch.setattr(content_rag, "index_text", lambda *a, **k: True, raising=False)
+        monkeypatch.setattr(content_rag, "deindex", lambda *a, **k: 0, raising=False)
+        db = _TS()
+        try:
+            db.query(Document).delete(); db.query(FileItem).delete(); db.query(Book).delete()
+            db.add(_doc(str(uuid.uuid4()), "Homelab", "alice", content="# homelab"))
+            db.add(FileItem(id=str(uuid.uuid4()), owner="alice", filename="notes.txt", text="hi"))
+            db.add(Book(id=str(uuid.uuid4()), owner="alice", filename="b.epub", text="ch1"))
+            db.commit()
+        finally:
+            db.close()
+        ep = _endpoint("POST", "/api/search/reindex")
+        res = await ep(_req("alice"))
+        assert res["ok"] is True
+        assert res["queued"] == {"documents": 1, "files": 1, "books": 1}
+    finally:
+        droutes.SessionLocal = previous
+
+
+@pytest.mark.asyncio
+async def test_reindex_content_degrades_when_rag_unavailable(monkeypatch):
+    """When RAG is unavailable, reindex returns a clear error instead of crashing."""
+    import src.rag_singleton as rag_singleton
+    previous = _bind_test_db()
+    try:
+        monkeypatch.setattr(rag_singleton, "get_rag_manager", lambda: None, raising=False)
+        ep = _endpoint("POST", "/api/search/reindex")
+        res = await ep(_req("alice"))
+        assert res["ok"] is False and "unavailable" in res["error"].lower()
+    finally:
+        droutes.SessionLocal = previous
+
+
 def test_obsidian_extras_frontend_wiring_present():
     """Guard the front-end hooks so a refactor can't silently drop them."""
     from pathlib import Path

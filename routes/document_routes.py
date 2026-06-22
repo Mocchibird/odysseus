@@ -602,6 +602,12 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
                     kid = h.get("kb_id")
                     if not kid or kid == doc_id:
                         continue
+                    # Relevance floor: the semantic supplement has no signal beyond
+                    # the vector match, so drop weak hits (score is a 0..1 similarity)
+                    # instead of filling the See-also slots with loosely-related docs.
+                    _sc = h.get("score")
+                    if _sc is not None and _sc < 0.40:
+                        continue
                     snip = " ".join((h.get("text") or "").split())[:160]
                     _add(kid, h.get("filename") or "Untitled",
                          max(10.0, 60.0 - rank * 4.0), "topic", snippet=snip)
@@ -632,6 +638,69 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
              "snippet": d.get("snippet") or "", "reason": d["reason"]}
             for d in ranked
         ]}
+
+    @router.post("/api/search/reindex")
+    async def reindex_content(request: Request) -> Dict[str, Any]:
+        """Re-embed the caller's documents, files, and books into the shared RAG
+        store. Fixes semantic recall (the See-also panel + search) for content
+        created before RAG indexing existed, or never re-saved since — there is no
+        automatic backfill. Ids/text are snapshotted on the request thread; the
+        embedding runs in a background thread so the response returns immediately."""
+        user = get_current_user(request)
+        # RAG is an optional dependency — degrade clearly when it's unavailable.
+        try:
+            from src.rag_singleton import get_rag_manager
+            if get_rag_manager() is None:
+                return {"ok": False, "error": "Search index is unavailable on this server (RAG/embeddings not running)."}
+        except Exception:
+            return {"ok": False, "error": "Search index is unavailable on this server."}
+
+        from core.database import FileItem, Book
+        db = SessionLocal()
+        try:
+            _arch = or_(Document.archived == False, Document.archived.is_(None))  # noqa: E712
+            dq = _owner_session_filter(
+                db.query(Document).filter(Document.is_active == True).filter(_arch), user)  # noqa: E712
+            doc_items = [
+                (d.id, (d.owner or user),
+                 re.sub(r"<!--.*?-->", "", d.current_content or "", flags=re.DOTALL).strip(),
+                 d.title or "")
+                for d in dq.all()
+            ]
+            fq = db.query(FileItem)
+            if user is not None:
+                fq = fq.filter(FileItem.owner == user)
+            file_items = [(f.id, f.owner, f.text or "", f.filename or "", f.source or "") for f in fq.all()]
+            bq = db.query(Book)
+            if user is not None:
+                bq = bq.filter(Book.owner == user)
+            book_items = [(b.id, b.owner, b.text or "", b.filename or "") for b in bq.all()]
+        finally:
+            db.close()
+
+        def _work():
+            from src import content_rag
+            for sid, owner, text, title in doc_items:
+                content_rag.deindex(sid)
+                if text:
+                    content_rag.index_text(owner, sid, text, "document", filename=title)
+            for sid, owner, text, fn, src in file_items:
+                content_rag.deindex(sid)
+                if text:
+                    content_rag.index_text(owner, sid, text, "file", filename=fn, source=src)
+            for sid, owner, text, fn in book_items:
+                content_rag.deindex(sid)
+                if text:
+                    content_rag.index_text(owner, sid, text, "book", filename=fn, source="book")
+
+        try:
+            import asyncio as _aio
+            _aio.create_task(_aio.to_thread(_work))
+        except RuntimeError:
+            _work()
+        return {"ok": True, "queued": {
+            "documents": len(doc_items), "files": len(file_items), "books": len(book_items),
+        }}
 
     # ---- GET /api/documents/{session_id} ----
     @router.get("/api/documents/{session_id}")
