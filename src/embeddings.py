@@ -41,9 +41,17 @@ class EmbeddingClient:
     """Drop-in replacement for SentenceTransformer.encode() using an HTTP API."""
 
     def __init__(self, url: Optional[str] = None, model: Optional[str] = None, api_key: Optional[str] = None):
-        self.url = url or os.getenv(
-            "EMBEDDING_URL",
-            f"http://{os.getenv('LLM_HOST', 'localhost')}:{OLLAMA_DEFAULT_PORT}/v1/embeddings",
+        # NB: read EMBEDDING_URL with `or`, not os.getenv's default arg. docker
+        # compose passes `EMBEDDING_URL=${EMBEDDING_URL:-}` — i.e. the key exists
+        # but is an empty string — so os.getenv("EMBEDDING_URL", <default>) returns
+        # "" (the default only applies when the key is ABSENT). An empty URL then
+        # makes httpx raise "Request URL is missing an 'http://' ... protocol",
+        # which masquerades as the endpoint being down and needlessly trips the
+        # FastEmbed fallback. Treat empty/whitespace as unset.
+        self.url = (
+            url
+            or (os.getenv("EMBEDDING_URL") or "").strip()
+            or f"http://{os.getenv('LLM_HOST', 'localhost')}:{OLLAMA_DEFAULT_PORT}/v1/embeddings"
         )
         self.model = model or os.getenv("EMBEDDING_MODEL", _DEFAULT_MODEL)
         self.api_key = api_key or os.getenv("EMBEDDING_API_KEY")

@@ -1152,7 +1152,12 @@ def setup_shell_routes() -> APIRouter:
             },
             {
                 "name": "rembg",
-                "pip": "rembg[gpu]",
+                # CPU extra, not [gpu]: the default Odysseus image is CPU-only
+                # (python-slim, no CUDA). rembg[gpu] pulls onnxruntime-gpu, whose
+                # CUDA build can't load (libcudart.so.* missing) AND clobbers the
+                # CPU onnxruntime that fastembed/magika depend on — taking down
+                # RAG, semantic memory, and tool selection. [cpu] is safe here.
+                "pip": "rembg[cpu]",
                 "desc": "AI background removal for image editor",
                 "category": "Image",
                 "target": "local",
@@ -1368,11 +1373,15 @@ def setup_shell_routes() -> APIRouter:
                     pkg["installed"] = False
                 except importlib_metadata.PackageNotFoundError:
                     pkg["installed"] = False
-                except Exception:
+                except (Exception, SystemExit):
                     # Installed but crashes on import — e.g. a CUDA build of
                     # llama-cpp-python raising FileNotFoundError when the CUDA
-                    # toolkit dir is absent. One broken optional package must not
-                    # 500 the entire packages panel; report it as not usable.
+                    # toolkit dir is absent, or rembg calling sys.exit(1) (→
+                    # SystemExit, which is a BaseException and slips past a bare
+                    # `except Exception`) when onnxruntime can't load libcudart.
+                    # One broken optional package must not tear down the packages
+                    # panel — or, since SystemExit unwinds all the way to the
+                    # ASGI lifespan, the whole server. Report it as not usable.
                     pkg["installed"] = False
 
             # llama_cpp partial-state probe: when the package is installed
@@ -1502,6 +1511,7 @@ def setup_shell_routes() -> APIRouter:
             return {"ok": False, "error": "No package specified"}
         # Validate against known packages to prevent arbitrary pip install
         known = {
+            "rembg[cpu]",
             "rembg[gpu]",
             "hf_transfer",
             "llama-cpp-python[server]",

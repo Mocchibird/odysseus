@@ -25,7 +25,7 @@ def test_extras_and_version_markers_are_stripped():
     assert _pip_dist_name({"name": "diffusers", "pip": "diffusers[torch]"}) == "diffusers"
     assert _pip_dist_name({"name": "transformers", "pip": "transformers"}) == "transformers"
     assert _pip_dist_name({"name": "sglang", "pip": "sglang[all]"}) == "sglang"
-    assert _pip_dist_name({"name": "rembg", "pip": "rembg[gpu]"}) == "rembg"
+    assert _pip_dist_name({"name": "rembg", "pip": "rembg[cpu]"}) == "rembg"
     assert _pip_dist_name({"name": "x", "pip": "foo>=1.2,<2"}) == "foo"
     assert _pip_dist_name({"name": "y", "pip": "bar==1.0 ; python_version>='3.9'"}) == "bar"
 
@@ -49,6 +49,16 @@ def test_route_uses_dist_name_helper_not_munged_import_name():
     src = (Path(__file__).resolve().parents[1] / "routes" / "shell_routes.py").read_text(encoding="utf-8")
     assert "importlib_metadata.version(_pip_dist_name(pkg))" in src
     assert 'importlib_metadata.version(pkg["name"].replace("_", "-"))' not in src
+
+
+def test_local_probe_catches_systemexit_on_import():
+    """A package that calls sys.exit() on import (e.g. rembg when onnxruntime
+    can't load libcudart) raises SystemExit, which is a BaseException and slips
+    past a bare `except Exception`. Uncaught, it unwinds all the way to the ASGI
+    lifespan and kills the server — leaving the Dependencies tab stuck on
+    "Loading packages…". The probe loop must catch SystemExit too."""
+    src = (Path(__file__).resolve().parents[1] / "routes" / "shell_routes.py").read_text(encoding="utf-8")
+    assert "except (Exception, SystemExit):" in src
 
 
 def test_transformers_is_listed_as_image_dependency():
