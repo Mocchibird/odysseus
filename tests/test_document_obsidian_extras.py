@@ -177,6 +177,35 @@ async def test_related_surfaces_title_series_without_rag(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_related_ranks_adjacent_lessons_first(monkeypatch):
+    """Numbered series: for Lesson 23 the nearest lessons (22, 24) must rank above
+    distant ones (20). Token-Jaccard + common-prefix tie every '... Lesson NN'
+    sibling, so the numeric-proximity bonus is what breaks the tie."""
+    previous = _bind_test_db()
+    try:
+        related_ep = _endpoint("GET", "/api/document/{doc_id}/related")
+        ids = {n: str(uuid.uuid4()) for n in (20, 21, 22, 23, 24, 25, 26)}
+        db = _TS()
+        try:
+            db.query(Document).delete()
+            for n, did in ids.items():
+                db.add(_doc(did, f"Japanese A1.2 Lesson {n}", "alice"))
+            db.commit()
+        finally:
+            db.close()
+        monkeypatch.setattr(content_rag, "semantic_search", lambda *a, **k: [])
+        res = await related_ep(_req("alice"), ids[23], k=6)
+        ranked = [r["id"] for r in res["related"]]
+        # the two adjacent lessons take the top two slots...
+        assert set(ranked[:2]) == {ids[22], ids[24]}
+        # ...and both outrank the more distant Lesson 20.
+        assert ranked.index(ids[22]) < ranked.index(ids[20])
+        assert ranked.index(ids[24]) < ranked.index(ids[20])
+    finally:
+        droutes.SessionLocal = previous
+
+
+@pytest.mark.asyncio
 async def test_related_includes_wikilinks_and_backlinks(monkeypatch):
     """Manual override: outgoing ``[[links]]`` and backlinks rank at the top,
     independent of RAG."""

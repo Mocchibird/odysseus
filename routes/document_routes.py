@@ -31,10 +31,23 @@ def _wikilink_titles(body: str) -> set:
     return {m.strip().lower() for m in _WIKILINK_RE.findall(body or "") if m.strip()}
 
 
+def _trailing_number(s: str):
+    """A title's trailing integer + the stem before it, e.g.
+    'Japanese A1.2 Lesson 23' -> (23, 'japanese a1.2 lesson'); (None, '') when the
+    title doesn't end in a number. Lets a numbered SERIES rank by numeric
+    proximity instead of every sibling tying on token-Jaccard + common-prefix."""
+    s = (s or "").strip()
+    m = re.search(r"(\d+)\s*$", s)
+    if not m:
+        return None, ""
+    return int(m.group(1)), s[: m.start()].strip().lower()
+
+
 def _title_similarity(a: str, b: str) -> float:
     """0..1 similarity of two titles — token-Jaccard blended with a common-prefix
-    bonus. Rewards a lesson SERIES (``Japanese A1.2 Lesson 0X``) and same-topic
-    notes, which pure embeddings of mixed-language grammar tables miss."""
+    bonus, plus a numeric-proximity bonus for a numbered series. Rewards a lesson
+    SERIES (``Japanese A1.2 Lesson 0X``) and same-topic notes, which pure
+    embeddings of mixed-language grammar tables miss."""
     a, b = a or "", b or ""
     ta = {t.lower() for t in _TITLE_WORD_RE.findall(a)}
     tb = {t.lower() for t in _TITLE_WORD_RE.findall(b)}
@@ -48,7 +61,16 @@ def _title_similarity(a: str, b: str) -> float:
             break
         pre += 1
     pref = pre / max(len(la), len(lb), 1)
-    return 0.6 * jac + 0.4 * pref
+    base = 0.6 * jac + 0.4 * pref
+    # Numbered series: when two titles are identical except for a trailing number
+    # (Lesson 22 vs 23), reward numeric proximity so adjacent lessons rank above
+    # distant ones — otherwise every "... Lesson NN" sibling ties on jac+prefix
+    # and the panel surfaces arbitrary ones (e.g. 20 instead of 22/24).
+    na, sa = _trailing_number(a)
+    nb, sb = _trailing_number(b)
+    if na is not None and nb is not None and sa and sa == sb and na != nb:
+        base += 0.3 / abs(na - nb)
+    return min(base, 1.0)
 
 
 def _like_escape(s: str) -> str:
