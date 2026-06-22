@@ -442,9 +442,22 @@ def _envelope_recipients(*fields: str) -> list:
     strings. A naive `field.split(",")` corrupts display names that contain a
     comma (e.g. `"Smith, John" <john@corp.com>`, the canonical Outlook form):
     it splits into `"Smith` and `John" <john@corp.com>`, breaking delivery.
-    email.utils.getaddresses parses the address grammar correctly."""
+    email.utils.getaddresses parses the address grammar correctly.
+
+    Python 3.13+ made getaddresses() strict-by-default (CVE-2023-27043): a
+    field with a trailing comma (e.g. "addr," — exactly what the compose chip
+    emits for a single recipient) parses to NO addresses, so the envelope is
+    empty and smtplib raises SMTPRecipientsRefused({}) — the send fails with a
+    bare "{}". These are the user's OWN outbound addresses, not untrusted input
+    being authenticated, so parse leniently; fall back for older Pythons that
+    lack the strict kwarg."""
+    nonempty = [f for f in fields if f]
+    try:
+        pairs = email.utils.getaddresses(nonempty, strict=False)
+    except TypeError:
+        pairs = email.utils.getaddresses(nonempty)
     out = []
-    for _name, addr in email.utils.getaddresses([f for f in fields if f]):
+    for _name, addr in pairs:
         addr = (addr or "").strip()
         if addr:
             out.append(addr)
