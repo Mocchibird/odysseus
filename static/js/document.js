@@ -2873,6 +2873,16 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
     try { input.setSelectionRange(end, end); } catch (_) {}
   }
 
+  // Strip the trailing (or leading) comma the recipient autocomplete leaves
+  // behind: after each pick _commitRecipient appends ", " so you can keep
+  // adding people, which for the last/only recipient yields "felix@x.com,".
+  // Some MTAs reject that as a malformed To/Cc/Bcc header, so normalize the
+  // field at send time. Real separators between recipients — and commas
+  // inside a quoted "Last, First" display name — are left untouched.
+  function _normalizeRecipientField(value) {
+    return (value || '').replace(/^[\s,]+|[\s,]+$/g, '');
+  }
+
   // Search contacts for an autocomplete dropdown. `input` is the To/Cc/Bcc
   // text field, `sugg` is its sibling .email-autocomplete div. Suggestions
   // are scoped to the LAST comma-separated fragment so already-entered
@@ -3053,9 +3063,9 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
 
   async function _sendEmail() {
     const sendDocId = activeDocId;
-    const to = document.getElementById('doc-email-to')?.value?.trim();
-    const cc = document.getElementById('doc-email-cc')?.value?.trim() || '';
-    const bcc = document.getElementById('doc-email-bcc')?.value?.trim() || '';
+    const to = _normalizeRecipientField(document.getElementById('doc-email-to')?.value);
+    const cc = _normalizeRecipientField(document.getElementById('doc-email-cc')?.value);
+    const bcc = _normalizeRecipientField(document.getElementById('doc-email-bcc')?.value);
     const subject = document.getElementById('doc-email-subject')?.value?.trim();
     const inReplyTo = document.getElementById('doc-email-in-reply-to')?.value?.trim();
     const references = document.getElementById('doc-email-references')?.value?.trim();
@@ -3513,9 +3523,9 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
   }
 
   async function _scheduleSend(anchorEl = null) {
-    const to = document.getElementById('doc-email-to')?.value?.trim();
-    const cc = document.getElementById('doc-email-cc')?.value?.trim() || '';
-    const bcc = document.getElementById('doc-email-bcc')?.value?.trim() || '';
+    const to = _normalizeRecipientField(document.getElementById('doc-email-to')?.value);
+    const cc = _normalizeRecipientField(document.getElementById('doc-email-cc')?.value);
+    const bcc = _normalizeRecipientField(document.getElementById('doc-email-bcc')?.value);
     const subject = document.getElementById('doc-email-subject')?.value?.trim();
     const inReplyTo = document.getElementById('doc-email-in-reply-to')?.value?.trim();
     const references = document.getElementById('doc-email-references')?.value?.trim();
