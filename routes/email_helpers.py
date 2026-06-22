@@ -1435,7 +1435,16 @@ def _extract_text(msg):
         payload = msg.get_payload(decode=True)
         if payload:
             charset = msg.get_content_charset() or "utf-8"
-            return payload.decode(charset, errors="replace")
+            decoded = payload.decode(charset, errors="replace")
+            # A non-multipart text/html message has no text/plain alternative to
+            # prefer, so strip its tags here the same way the multipart text/html
+            # fallback (above) does — otherwise the raw HTML source leaks into
+            # `body` and the reader renders it as literal `<html>...</html>` text.
+            if msg.get_content_type() == "text/html":
+                decoded = re.sub(r"<br\s*/?>", "\n", decoded, flags=re.I)
+                decoded = re.sub(r"<[^>]+>", "", decoded)
+                decoded = html.unescape(decoded).strip()
+            return decoded
     return ""
 
 
