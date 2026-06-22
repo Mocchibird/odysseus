@@ -170,7 +170,7 @@ export function handleUIControl(uiData) {
           if (fn) fn();
         }).catch(function(){});
       } else if (panel === 'notes') {
-        import('./notes.js?v=464').then(function(mod) {
+        import('./notes.js?v=465').then(function(mod) {
           var fn = mod.openPanel || mod.openNotes || (mod.default && (mod.default.openPanel || mod.default.openNotes));
           if (fn) fn();
         }).catch(function(){});

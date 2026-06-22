@@ -665,6 +665,16 @@ function _toLocalDatetimeStr(d) {
   const pad = n => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
+// Normalize a stored ISO value (which may carry seconds or a trailing 'Z', e.g.
+// calendar-generated '2026-02-26T00:00:00') into the strict YYYY-MM-DDTHH:MM a
+// datetime-local input accepts; '' if unset/unparseable. Without this the input
+// renders an empty "--.--.----" even though the note has a date — and any save
+// would then null the field.
+function _toDatetimeLocalInput(s) {
+  if (!s) return '';
+  const d = new Date(s);
+  return isNaN(d.getTime()) ? '' : _toLocalDatetimeStr(d);
+}
 function _formatReminderTag(dateStr) {
   if (!dateStr) return '';
   const d = new Date(dateStr);
@@ -2867,7 +2877,7 @@ function _buildForm(note = null) {
       <button type="button" class="note-form-icon-btn note-form-remind-btn${note?.reminder_at ? ' has-date' : ''}" title="Remind me">
         <svg width="31" height="31" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
       </button>
-      <input type="hidden" class="note-form-reminder" value="${note?.reminder_at || ''}" />
+      <input type="hidden" class="note-form-reminder" value="${_esc(_toDatetimeLocalInput(note?.reminder_at))}" />
       <input type="hidden" class="note-form-repeat" value="${note?.repeat || 'none'}" />
     </div>
     ${currentImageUrl && type !== 'draw' ? `<div class="note-form-image-wrap"><img class="note-form-image" src="${_esc(currentImageUrl)}" draggable="false" /><button class="note-form-image-rm" title="Remove">&times;</button></div>` : ''}
@@ -2883,7 +2893,7 @@ function _buildForm(note = null) {
     <div class="note-form-reminder-tags"></div>
     <div class="note-form-dueby-row">
       <label class="note-form-dueby-label">Due by</label>
-      <input type="datetime-local" class="note-reminder-date-input note-form-dueby" value="${_esc(note?.due_date || '')}" />
+      <input type="datetime-local" class="note-reminder-date-input note-form-dueby" value="${_esc(_toDatetimeLocalInput(note?.due_date))}" />
     </div>
     <div class="note-form-meta">
       <div class="note-form-type-seg${type === 'todo' ? ' is-todo' : type === 'draw' ? ' is-draw' : ''}" role="group">

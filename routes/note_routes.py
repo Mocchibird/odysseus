@@ -803,9 +803,14 @@ def setup_note_routes(task_scheduler=None):
                 note.pinned = body.pinned
             if body.archived is not None:
                 note.archived = body.archived
-            if body.due_date is not None:
+            # due_date and reminder_at are user-clearable. The editor sends the
+            # field (possibly null) on every save, so apply it whenever it was
+            # PROVIDED rather than only when non-None — keying on is-not-None
+            # silently dropped a clear (null), so the value reappeared on reload.
+            _sent = getattr(body, "model_fields_set", None) or set()
+            if "due_date" in _sent:
                 note.due_date = body.due_date
-            if body.reminder_at is not None:
+            if "reminder_at" in _sent:
                 note.reminder_at = body.reminder_at
             if body.image_url is not None:
                 note.image_url = body.image_url
