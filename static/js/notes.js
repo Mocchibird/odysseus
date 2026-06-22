@@ -2808,8 +2808,8 @@ function _collectFormDraft(form) {
     note_type: type,
     title: form.querySelector('.note-form-title')?.value || '',
     label: form.querySelector('.note-form-label')?.value || '',
-    reminder_at: form.querySelector('.note-form-reminder')?.value || null,
-    due_date: form.querySelector('.note-form-dueby')?.value || null,
+    reminder_at: (form.querySelector('.note-form-mode-pill.active')?.dataset.mode === 'remind') ? (form.querySelector('.note-form-reminder')?.value || null) : null,
+    due_date: (form.querySelector('.note-form-mode-pill.active')?.dataset.mode === 'due') ? (form.querySelector('.note-form-reminder')?.value || null) : null,
     repeat: form.querySelector('.note-form-repeat')?.value || 'none',
   };
   if (type === 'note') d.content = form.querySelector('.note-form-content')?.value || '';
@@ -2871,13 +2871,21 @@ function _buildForm(note = null) {
   if (color && !_isBgImage(color)) form.classList.add('note-color-' + color);
   if (_isBgImage(color)) form.setAttribute('style', _customColorStyle(color));
   let currentImageUrl = _safeImgSrc(note?.image_url || '');
+  // One date, three modes: due_date -> "Due by" (one-shot ping), reminder_at ->
+  // "Remind me" (daily nudge), neither -> "None". The single date lives in the
+  // hidden .note-form-reminder input; the toggle decides which column it saves to.
+  // Prefer reminder_at for BOTH so mode and date never disagree (and a legacy
+  // note that somehow carries both opens as the reminder, then collapses to one
+  // field on the next save).
+  const _schedDate = note?.reminder_at || note?.due_date || '';
+  const _schedMode = note?.reminder_at ? 'remind' : (note?.due_date ? 'due' : 'none');
   form.innerHTML = `
     <div class="note-form-header">
       <input type="text" class="note-form-title" placeholder="Title" value="${_esc(note?.title || '')}" />
-      <button type="button" class="note-form-icon-btn note-form-remind-btn${note?.reminder_at ? ' has-date' : ''}" title="Remind me">
+      <button type="button" class="note-form-icon-btn note-form-remind-btn${_schedDate ? ' has-date' : ''}" title="Set date">
         <svg width="31" height="31" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
       </button>
-      <input type="hidden" class="note-form-reminder" value="${_esc(_toDatetimeLocalInput(note?.reminder_at))}" />
+      <input type="hidden" class="note-form-reminder" value="${_esc(_toDatetimeLocalInput(_schedDate))}" />
       <input type="hidden" class="note-form-repeat" value="${note?.repeat || 'none'}" />
     </div>
     ${currentImageUrl && type !== 'draw' ? `<div class="note-form-image-wrap"><img class="note-form-image" src="${_esc(currentImageUrl)}" draggable="false" /><button class="note-form-image-rm" title="Remove">&times;</button></div>` : ''}
@@ -2890,10 +2898,13 @@ function _buildForm(note = null) {
         ? _buildGoalHtml(note, items)
         : _buildChecklistHtml(items)}
     </div>
-    <div class="note-form-reminder-tags"></div>
-    <div class="note-form-dueby-row">
-      <label class="note-form-dueby-label">Due by</label>
-      <input type="datetime-local" class="note-reminder-date-input note-form-dueby" value="${_esc(_toDatetimeLocalInput(note?.due_date))}" />
+    <div class="note-form-sched-row">
+      <div class="note-form-mode-seg" role="group" aria-label="Date type">
+        <button type="button" class="note-form-mode-pill${_schedMode === 'none' ? ' active' : ''}" data-mode="none">None</button>
+        <button type="button" class="note-form-mode-pill${_schedMode === 'remind' ? ' active' : ''}" data-mode="remind">Remind me</button>
+        <button type="button" class="note-form-mode-pill${_schedMode === 'due' ? ' active' : ''}" data-mode="due">Due by</button>
+      </div>
+      <div class="note-form-reminder-tags"></div>
     </div>
     <div class="note-form-meta">
       <div class="note-form-type-seg${type === 'todo' ? ' is-todo' : type === 'draw' ? ' is-draw' : ''}" role="group">
@@ -3134,6 +3145,17 @@ function _buildForm(note = null) {
   const dueInput = form.querySelector('.note-form-reminder');
   const repeatInput = form.querySelector('.note-form-repeat');
   const tagsEl = form.querySelector('.note-form-reminder-tags');
+  // Date-type toggle (None / Remind me / Due by) — one date, routed to
+  // reminder_at or due_date on save based on the active mode.
+  const _modePills = form.querySelectorAll('.note-form-mode-pill');
+  const _activeMode = () => form.querySelector('.note-form-mode-pill.active')?.dataset.mode || 'none';
+  const _setMode = (m) => {
+    _modePills.forEach((x) => x.classList.toggle('active', x.dataset.mode === m));
+    // Fire 'change' so the mobile Save button flips out of archive-mode and the
+    // draft snapshot captures it — mode pills are buttons, so they don't emit
+    // input/change on their own.
+    form.dispatchEvent(new Event('change', { bubbles: true }));
+  };
 
   function _renderReminderTag() {
     if (!tagsEl) return;
@@ -3151,6 +3173,8 @@ function _buildForm(note = null) {
       if (e.target.classList.contains('note-reminder-tag-x')) {
         dueInput.value = '';
         repeatInput.value = 'none';
+        _setMode('none');
+        remindBtn?.classList.remove('has-date');
         _renderReminderTag();
         return;
       }
@@ -3382,6 +3406,8 @@ function _buildForm(note = null) {
 
   function _setReminder(datetimeLocalStr) {
     dueInput.value = datetimeLocalStr;
+    if (_activeMode() === 'none') _setMode('remind');  // picking a date implies a mode
+    form.dispatchEvent(new Event('change', { bubbles: true }));  // un-morph mobile Save on a date-only change
     if (remindBtn) {
       remindBtn.classList.add('has-date');
       // Jingle the bell. CSS handles the animation; remove + reflow + re-add
@@ -3446,6 +3472,18 @@ function _buildForm(note = null) {
   }
 
   if (remindBtn) remindBtn.addEventListener('click', (e) => { e.stopPropagation(); _openReminderMenu(remindBtn, !!dueInput.value); });
+  _modePills.forEach((p) => p.addEventListener('click', () => {
+    const m = p.dataset.mode;
+    _setMode(m);
+    if (m === 'none') {
+      dueInput.value = '';
+      repeatInput.value = 'none';
+      remindBtn?.classList.remove('has-date');
+      _renderReminderTag();
+    } else if (!dueInput.value) {
+      _openReminderMenu(remindBtn, false);  // no date yet — open the picker
+    }
+  }));
   _renderReminderTag();
 
   // Photo upload
@@ -3585,15 +3623,15 @@ function _buildForm(note = null) {
     // re-join with single spaces. Empty → null.
     const _rawLabel = form.querySelector('.note-form-label')?.value || '';
     const _tags = [...new Set(_rawLabel.split(/\s+/).map(t => t.replace(/^#+/, '').trim()).filter(Boolean))];
-    if (form.querySelector('.note-form-reminder').value && !_tags.includes('reminder')) _tags.push('reminder');
+    if (_activeMode() === 'remind' && form.querySelector('.note-form-reminder').value && !_tags.includes('reminder')) _tags.push('reminder');
     const labelVal = _tags.length ? _tags.join(' ') : null;
     const payload = {
       title,
       note_type: currentType,
       color: currentColor,
       label: labelVal,
-      reminder_at: form.querySelector('.note-form-reminder').value || null,
-      due_date: form.querySelector('.note-form-dueby')?.value || null,
+      reminder_at: _activeMode() === 'remind' ? (form.querySelector('.note-form-reminder').value || null) : null,
+      due_date: _activeMode() === 'due' ? (form.querySelector('.note-form-reminder').value || null) : null,
       repeat: form.querySelector('.note-form-repeat')?.value || 'none',
       image_url: currentImageUrl || null,
     };

@@ -32502,19 +32502,39 @@ body.notes-mobile-mode.notes-drag-mode .note-card-pin.active {
   gap: 4px;
 }
 .note-form-reminder-tags:empty { display: none; }
-/* "Due by" deadline control (separate from the timed reminder bell) */
-.note-form-dueby-row {
+/* Date-type toggle: one date, mode = None / Remind me / Due by. */
+.note-form-sched-row {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
+  flex-wrap: wrap;
 }
-.note-form-dueby-label {
-  font-size: 10px;
-  opacity: 0.5;
-  letter-spacing: 0.3px;
+.note-form-mode-seg {
+  display: inline-flex;
+  height: 32px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
   flex-shrink: 0;
 }
-.note-form-dueby-row .note-form-dueby { width: auto; flex: 1; }
+.note-form-mode-pill {
+  background: none;
+  border: none;
+  color: color-mix(in srgb, var(--fg) 40%, transparent);
+  cursor: pointer;
+  padding: 0 12px;
+  font-size: 13px;
+  font-weight: 500;
+  font-family: inherit;
+  transition: color 0.2s, background 0.2s;
+  white-space: nowrap;
+  height: 100%;
+}
+.note-form-mode-pill:not(.active):hover { color: color-mix(in srgb, var(--fg) 60%, transparent); }
+.note-form-mode-pill.active {
+  color: var(--fg);
+  background: color-mix(in srgb, var(--fg) 10%, transparent);
+}
 .note-reminder-tag {
   display: inline-flex;
   align-items: center;
