@@ -483,11 +483,15 @@ async function loadEndpoints() {
       // empty, but we still need to render the expand panel so the user can
       // un-hide them. Gate on the total instead.
       const hasModels = ep.online && totalCount > 0;
+      // .adm-ep-status marks THIS as the models-count badge so a model toggle
+      // updates it specifically — not the model_type / kindLabel badges that
+      // render before it (querySelector('.admin-badge') would grab those, leave
+      // this one stale, and clobber the kind label). See _saveEpModelState.
       const statusBadge = ep.status === 'empty'
-        ? '<span class="admin-badge">no models</span>'
+        ? '<span class="admin-badge adm-ep-status">no models</span>'
         : ep.online
-          ? `<span class="admin-badge">${visibleCount}/${totalCount} models enabled</span>`
-          : '<span class="admin-badge admin-badge-off">offline</span>';
+          ? `<span class="admin-badge adm-ep-status">${visibleCount}/${totalCount} models enabled</span>`
+          : '<span class="admin-badge admin-badge-off adm-ep-status">offline</span>';
       const justAddedClass = (_recentlyAddedEpId && String(ep.id) === _recentlyAddedEpId) ? ' adm-ep-just-added' : '';
       const category = ep.category || (_isLocalEndpoint(ep.base_url) ? 'local' : 'api');
       const kindLabel = ep.endpoint_kind && ep.endpoint_kind !== 'auto' ? ep.endpoint_kind.toUpperCase() : '';
@@ -744,7 +748,7 @@ async function _saveEpModelState(epId, panel) {
     if (countLabel) countLabel.textContent = `${total - hidden.length}/${total} enabled`;
     const row = panel.closest('[data-adm-ep-id]');
     if (row) {
-      const badge = row.querySelector('.admin-badge');
+      const badge = row.querySelector('.adm-ep-status');
       if (badge && !badge.classList.contains('admin-badge-off')) badge.textContent = `${total - hidden.length}/${total} models enabled`;
     }
     if (settingsModule && typeof settingsModule.refreshAiModelEndpoints === 'function') {

@@ -493,15 +493,25 @@ async function initChatAllowlist() {
       head.textContent = ep.name + (ep.online ? '' : ' (offline)');
       group.appendChild(head);
       models.forEach(function(mid) {
+        // Reuse the admin "manage models" dot-checkbox widget so this list
+        // matches that UI. The native checkbox is kept (hidden, via
+        // .adm-cb-hidden) for state/click handling; .adm-check-dot is the
+        // visible control. _domChecked() still reads input[type=checkbox].
         var lbl = document.createElement('label');
-        lbl.className = 'settings-allowlist-item';
+        lbl.className = 'settings-allowlist-item adm-model-row';
+        lbl.title = mid;
         var cb = document.createElement('input');
         cb.type = 'checkbox';
+        cb.className = 'adm-cb-hidden';
         cb.value = mid;
         cb.checked = checkedSet.has(mid);
+        var dot = document.createElement('span');
+        dot.className = 'adm-check-dot';
+        dot.setAttribute('aria-hidden', 'true');
         var span = document.createElement('span');
         span.textContent = mid.split('/').pop();
         lbl.appendChild(cb);
+        lbl.appendChild(dot);
         lbl.appendChild(span);
         group.appendChild(lbl);
         rendered++;

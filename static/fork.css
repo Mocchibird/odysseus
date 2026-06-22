@@ -119,6 +119,12 @@ details.md-callout[open] > summary::after { transform: rotate(-135deg); }
 }
 .settings-allowlist-item:hover { background: color-mix(in srgb, var(--fg) 6%, transparent); }
 .settings-allowlist-item input { cursor: pointer; flex: 0 0 auto; }
+/* This list reuses the admin model-picker's dot widget (.adm-model-row /
+   .adm-check-dot) for visual parity. That widget grows the dot on hover
+   (.adm-model-row:hover .adm-check-dot { transform: scale(1.15) }); the
+   allowlist should stay a fixed size, so neutralize the scale here. */
+.settings-allowlist-item.adm-model-row:hover .adm-check-dot,
+.settings-allowlist-item.adm-model-row:active .adm-check-dot { transform: none; }
 /* Books list shares the same drop-to-upload affordance. */
 .books-list-view.gallery-dragover {
   border-color: var(--red);
