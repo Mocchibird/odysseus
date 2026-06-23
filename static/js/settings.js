@@ -4310,6 +4310,9 @@ async function initUnifiedIntegrations() {
         if (lbl) lbl.textContent = text;
         if (ico) ico.innerHTML = _apiIconFor(k);
       };
+      // Menu is reused (hidden, not recreated). close() hides it and tears down
+      // its outside-click listener + Escape-stack entry; bindMenuDismiss is
+      // re-registered fresh on each open (see _open).
       let _close = () => { menu.style.display = 'none'; };
       const _open = () => {
         menu.style.display = 'block';
@@ -5107,6 +5110,9 @@ async function initUnifiedIntegrations() {
         if (labelEl) labelEl.textContent = lbl;
         if (iconEl) iconEl.innerHTML = PROV_LOGO[k] || _customLogo;
       };
+      // Menu is reused (hidden, not recreated). _closeMenu hides it and tears
+      // down its outside-click listener + Escape-stack entry; bindMenuDismiss is
+      // re-registered fresh on each open (see _openMenu).
       let _closeMenu = () => { menu.style.display = 'none'; };
       const _openMenu = () => {
         menu.style.display = 'block';
@@ -6173,8 +6179,11 @@ async function initUnifiedIntegrations() {
       addBtn.parentElement.style.position = 'relative';
       addBtn.parentElement.classList.add('uf-add-anchor');
     }
+    // Menu is created per open and removed on close. _closeMenu routes through
+    // the bindMenuDismiss close() bound when the menu opens, so the outside-click
+    // listener + Escape-stack entry are torn down alongside the node removal.
     let _menuEl = null;
-    let _closeMenu = () => { if (_menuEl) { _menuEl.remove(); _menuEl = null; } };
+    let _closeMenu = () => {};
     addBtn.addEventListener('click', (e) => {
       e.stopPropagation();
       if (_menuEl) { _closeMenu(); return; }
@@ -6206,7 +6215,7 @@ async function initUnifiedIntegrations() {
           showForm(k, 'new');
         });
       });
-      _closeMenu = bindMenuDismiss(menu, () => { if (_menuEl) { _menuEl.remove(); _menuEl = null; } }, (ev) => !menu.contains(ev.target) && ev.target !== addBtn);
+      _closeMenu = bindMenuDismiss(menu, () => { menu.remove(); _menuEl = null; }, (ev) => !menu.contains(ev.target) && ev.target !== addBtn);
     });
   }
 

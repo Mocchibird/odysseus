@@ -639,9 +639,14 @@ export function mdToHtml(src, opts) {
     (match, prefix, answer) => `${prefix}${pushReveal(answer, { kind: 'hidden', label: 'Answer' }) || match}`,
   );
 
-  // Protect inline code before spoiler/quiz/link passes. Otherwise examples
-  // like `||spoiler||` get converted instead of rendered literally.
-  s = s.replace(/`([^`\n]+?)`/g, (_match, code) => {
+  // Extract inline code spans before the link/autolink/HTML passes, mirroring
+  // the fenced-block handling above. A URL inside `inline code` (e.g.
+  // `irm http://127.0.0.1:3000/x`) is preceded by a space, so the bare-URL
+  // autolink matches it, wraps it in an <a> tag, and swaps that for an
+  // ___ALLOWED_HTML_ placeholder — corrupting the command. The old inline-code
+  // pass ran after those passes, too late to protect it.
+  s = s.replace(/`([^`]+?)`/g, (match, code) => {
+    if (code.startsWith('___CODE_BLOCK_') || code.startsWith('___MERMAID_BLOCK_')) return match;
     const placeholder = `___INLINE_CODE_${inlineCodeBlocks.length}___`;
     inlineCodeBlocks.push(`<code>${escapeHtml(code)}</code>`);
     return placeholder;
@@ -1042,6 +1047,14 @@ export function mdToHtml(src, opts) {
   // CRITICAL: Restore code blocks at the end
   codeBlocks.forEach((block, index) => {
     s = s.replace(`___CODE_BLOCK_${index}___`, block);
+  });
+
+  // Restore inline code spans last, so placeholders carried inside restored
+  // <a>/allowed-HTML blocks are resolved too. The function replacer keeps the
+  // escaped code literal — e.g. a shell snippet like `echo $1` is not treated
+  // as a regex back-reference.
+  inlineCodeBlocks.forEach((block, index) => {
+    s = s.replace(`___INLINE_CODE_${index}___`, () => block);
   });
 
   return _useSvgEmoji() ? svgifyEmoji(s, opts) : s;

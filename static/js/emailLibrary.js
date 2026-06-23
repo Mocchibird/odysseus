@@ -8,6 +8,7 @@ import { styledConfirm, showToast, emptyStateIcon } from './ui.js';
 import { folderDisplayName, sortedFolders } from './emailInbox.js';
 import settingsModule from './settings.js?v=457';
 import * as Modals from './modalManager.js';
+import { topPortalZ } from './toolWindowZOrder.js';
 import { makeWindowDraggable } from './windowDrag.js';
 import {
   _esc, _escLinkify, _extractName, _parseTurnMeta,
@@ -5643,7 +5644,7 @@ function _showReaderMoreMenu(em, card, reader, anchor) {
   dropdown._anchor = anchor;
   anchor.classList.add('reader-more-active');
   const rect = anchor.getBoundingClientRect();
-  dropdown.style.cssText = `position:fixed;z-index:10001;min-width:180px;background:var(--panel,var(--bg));border:1px solid var(--border);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,0.3);padding:4px;font-size:12px;top:${rect.bottom + 4}px;right:${window.innerWidth - rect.right}px;`;
+  dropdown.style.cssText = `position:fixed;z-index:${topPortalZ()};min-width:180px;background:var(--panel,var(--bg));border:1px solid var(--border);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,0.3);padding:4px;font-size:12px;top:${rect.bottom + 4}px;right:${window.innerWidth - rect.right}px;`;
 
   const ac = new AbortController();
   dropdown._menuAbort = ac;
@@ -5888,7 +5889,7 @@ function _showCardMenu(em, anchor) {
   const dropdown = document.createElement('div');
   dropdown.className = 'email-card-dropdown';
   const rect = anchor.getBoundingClientRect();
-  dropdown.style.cssText = `position:fixed;z-index:10001;min-width:140px;background:var(--panel,var(--bg));border:1px solid var(--border);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,0.3);padding:4px;font-size:12px;top:${rect.bottom + 4}px;right:${window.innerWidth - rect.right}px;`;
+  dropdown.style.cssText = `position:fixed;z-index:${topPortalZ()};min-width:140px;background:var(--panel,var(--bg));border:1px solid var(--border);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,0.3);padding:4px;font-size:12px;top:${rect.bottom + 4}px;right:${window.innerWidth - rect.right}px;`;
 
   // Lifecycle-scoped teardown: EVERY dismissal path (item click, Cancel,
   // outside click, or another menu opening) calls closeMenu(), which aborts
@@ -6413,7 +6414,7 @@ function _showAiReplyChoice(btn, em, data) {
     `max-height:${window.innerHeight - 16}px`,
     'overflow:auto',
     'box-sizing:border-box',
-    'z-index:10060',
+    `z-index:${topPortalZ()}`,
     'display:flex',
     'gap:6px',
     'padding:6px',

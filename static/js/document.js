@@ -3353,10 +3353,10 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
   let _docAiReplyChoiceMenu = null;
   function _closeDocAiReplyChoice() {
     if (_docAiReplyChoiceMenu) {
-      // Tear down through the menu's registered dismiss (releasing its
-      // outside-click listener and Escape-stack entry) rather than a bare
-      // remove() that would strand them.
-      dismissOrRemove(_docAiReplyChoiceMenu);
+      // Tear down through the menu's registered dismiss (drops its outside-click
+      // listener + Escape-stack entry) rather than orphaning them with a raw
+      // remove(); the onClose below nulls the ref.
+      try { dismissOrRemove(_docAiReplyChoiceMenu); } catch (_) {}
       _docAiReplyChoiceMenu = null;
     }
   }
@@ -3407,6 +3407,14 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
     const noteInput = menu.querySelector('[data-note-input]');
     setTimeout(() => noteInput?.focus(), 0);
     menu.addEventListener('mousedown', (ev) => ev.stopPropagation());
+    document.body.appendChild(menu);
+    _docAiReplyChoiceMenu = menu;
+    // Outside-click AND Escape both route through the central esc-stack via
+    // bindMenuDismiss; onClose owns the actual teardown (node removal + state).
+    const close = bindMenuDismiss(menu, () => {
+      try { menu.remove(); } catch (_) {}
+      if (_docAiReplyChoiceMenu === menu) _docAiReplyChoiceMenu = null;
+    });
     menu.addEventListener('click', async (ev) => {
       const choice = ev.target.closest('[data-mode]');
       if (!choice) return;
@@ -3416,14 +3424,6 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
       const noteHint = (noteInput?.value || '').trim();
       close();
       await _aiReply({ mode, noteHint });
-    });
-    document.body.appendChild(menu);
-    _docAiReplyChoiceMenu = menu;
-    // Outside-click AND Escape both route through bindMenuDismiss (Escape via
-    // the central esc-stack), so every path releases the listener + stack entry.
-    const close = bindMenuDismiss(menu, () => {
-      try { menu.remove(); } catch (_) {}
-      if (_docAiReplyChoiceMenu === menu) _docAiReplyChoiceMenu = null;
     });
   }
 
@@ -8645,7 +8645,8 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
 
   function showExportMenu(e, anchorRect) {
     if (e) e.stopPropagation();
-    // Remove existing menu if any
+    // Remove existing menu if any (toggle off) — tear it down through its
+    // registered dismiss so the outside-click listener + Escape-stack entry go.
     const existing = document.getElementById('doc-export-menu');
     if (existing) { dismissOrRemove(existing); return; }
 

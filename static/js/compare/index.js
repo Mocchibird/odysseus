@@ -1063,6 +1063,7 @@ function _buildComparisonMarkdown() {
 }
 
 let _exportMenuEl = null;
+let _closeExportMenu = () => {};
 function _toggleExportMenu(btn) {
   if (_exportMenuEl) { _closeExportMenu(); return; }
   const r = btn.getBoundingClientRect();
@@ -1088,9 +1089,9 @@ function _toggleExportMenu(btn) {
   _exportMenuEl = m;
   _closeExportMenu = bindMenuDismiss(m, () => {
     if (_exportMenuEl) { _exportMenuEl.remove(); _exportMenuEl = null; }
-  });
+  }, (ev) => !m.contains(ev.target));
 }
-let _closeExportMenu = () => {
+_closeExportMenu = () => {
   if (_exportMenuEl) { dismissOrRemove(_exportMenuEl); _exportMenuEl = null; }
 };
 

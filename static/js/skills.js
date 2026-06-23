@@ -455,7 +455,7 @@ function _openSkillMenu(btn, card, sk, name, isPublished) {
     menu.style.overflowY = 'auto';
   }
   menu.style.zIndex = String(topPopupZ());
-  const close = bindMenuDismiss(menu, () => { menu.remove(); });
+  const close = bindMenuDismiss(menu, () => { menu.remove(); }, (ev) => !menu.contains(ev.target));
 }
 
 // Cards for the agent's built-in tool capabilities (from
