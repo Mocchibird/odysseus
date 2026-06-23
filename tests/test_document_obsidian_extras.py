@@ -245,6 +245,32 @@ async def test_related_orders_series_siblings_by_numeric_proximity(monkeypatch):
         droutes.SessionLocal = previous
 
 
+@pytest.mark.asyncio
+async def test_related_displays_selected_siblings_ascending(monkeypatch):
+    """Proximity SELECTS the nearest siblings, but they're DISPLAYED ascending.
+    Real-data case: Lesson 22 with only 20 and 23 present (no 21) shows
+    20 then 23 — not closest-first 23, 20."""
+    previous = _bind_test_db()
+    try:
+        related_ep = _endpoint("GET", "/api/document/{doc_id}/related")
+        l20, l22, l23 = (str(uuid.uuid4()) for _ in range(3))
+        db = _TS()
+        try:
+            db.query(Document).delete()
+            db.add(_doc(l23, "Japanese A1.2 Lesson 23", "alice"))
+            db.add(_doc(l20, "Japanese A1.2 Lesson 20", "alice"))
+            db.add(_doc(l22, "Japanese A1.2 Lesson 22", "alice"))
+            db.commit()
+        finally:
+            db.close()
+        monkeypatch.setattr(content_rag, "semantic_search", lambda *a, **k: [])
+        res = await related_ep(_req("alice"), l22, k=6)
+        ids = [r["id"] for r in res["related"]]
+        assert ids == [l20, l23]   # ascending display, not proximity-order 23, 20
+    finally:
+        droutes.SessionLocal = previous
+
+
 def test_obsidian_extras_frontend_wiring_present():
     """Guard the front-end hooks so a refactor can't silently drop them."""
     from pathlib import Path

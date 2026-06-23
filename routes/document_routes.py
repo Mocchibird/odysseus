@@ -623,7 +623,8 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
 
         # Primary: relevance score. Ties (notably a lesson series, where every
         # sibling scores identically) break by numeric proximity, then ascending
-        # number — so Lesson 22 surfaces 21 then 23, not insertion-order 20.
+        # number — so the NEAREST siblings are selected (Lesson 22 → 23 + 20, the
+        # two closest that exist; there's no 21).
         ranked = sorted(
             scored.values(),
             key=lambda d: (
@@ -632,6 +633,22 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
                 d.get("series_num", float("inf")),
             ),
         )[:k]
+
+        # Display order: proximity decided WHICH siblings are selected (above);
+        # now show a numbered series ascending so it reads naturally. The client
+        # renders ranked[:2] as "Most relevant" and ranked[2:] as "See also", so
+        # reorder per tier — and only the sibling slots, leaving links/topical
+        # hits in their relevance position. Lesson 22 → "20, 23" (not 23, 20);
+        # a See-also run reads low→high.
+        def _siblings_ascending(items):
+            slots = [i for i, d in enumerate(items) if d.get("series_num") is not None]
+            ordered = sorted((items[i] for i in slots), key=lambda d: d["series_num"])
+            out = list(items)
+            for slot, d in zip(slots, ordered):
+                out[slot] = d
+            return out
+
+        ranked = _siblings_ascending(ranked[:2]) + _siblings_ascending(ranked[2:])
 
         # Fill snippets for ranked entries that don't carry one (title/link/session).
         need = [d["id"] for d in ranked if not d.get("snippet")]
