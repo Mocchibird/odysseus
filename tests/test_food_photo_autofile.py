@@ -48,6 +48,20 @@ def test_link_meal_photo_autofiles_food_journal(monkeypatch):
     assert calls == {"owner": "alice", "uid": "u1", "album": "Food Journal"}
 
 
+def test_link_training_photo_autofiles_training_journal(monkeypatch):
+    """Logging a training session with one attached photo links it AND files it
+    into the Training Journal album — server-side, mirroring the meal path."""
+    calls = {}
+    monkeypatch.setattr(hs, "update_training", lambda owner, sid, **kw: True)
+    monkeypatch.setattr(
+        gi, "ingest_upload",
+        lambda owner, uid, **kw: calls.update(owner=owner, uid=uid, album=kw.get("album")) or {"id": "g2"},
+    )
+    res = cr._link_training_photo("alice", {"id": 9}, ["u9"], _FakeUploadHandler())
+    assert res == "u9"
+    assert calls == {"owner": "alice", "uid": "u9", "album": "Training Journal"}
+
+
 def test_link_meal_photo_skips_when_ambiguous(monkeypatch):
     """0 or >1 images → don't link or auto-file (avoid mis-attaching)."""
     called = {"ingest": False}

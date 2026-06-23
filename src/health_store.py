@@ -672,6 +672,7 @@ def _training_dict(t: TrainingSession) -> Dict[str, Any]:
         "rpe": t.rpe,
         "kcal_burned": t.kcal_burned,
         "summary": t.summary or "",
+        "photo_upload_id": t.photo_upload_id or None,
     }
 
 
@@ -686,6 +687,7 @@ def log_training(owner: str, kind: str, **fields) -> Dict[str, Any]:
             rpe=fields.get("rpe"),
             kcal_burned=fields.get("kcal_burned"),
             summary=(fields.get("summary") or "").strip(),
+            photo_upload_id=(fields.get("photo_upload_id") or None),
         )
         db.add(t)
         db.flush()
@@ -738,6 +740,9 @@ def update_training(owner: str, session_id: int, **fields) -> Optional[Dict[str,
             t.summary = str(fields["summary"]).strip()
         if fields.get("session_at"):
             t.session_at = fields["session_at"]
+        if "photo_upload_id" in fields:  # truthy sets it, "" / None clears it
+            pid = fields["photo_upload_id"]
+            t.photo_upload_id = (str(pid).strip() or None) if pid else None
         db.flush()
         return _training_dict(t)
 

@@ -960,6 +960,26 @@ def _migrate_add_training_kcal_burned_column():
         logging.getLogger(__name__).warning(f"training_sessions.kcal_burned migration failed: {e}")
 
 
+def _migrate_add_training_photo_column():
+    """Add `photo_upload_id` to training_sessions (attached workout photo).
+    Guarded + idempotent."""
+    import sqlite3
+    db_path = DATABASE_URL.replace("sqlite:///", "")
+    if not os.path.exists(db_path):
+        return
+    try:
+        conn = sqlite3.connect(db_path)
+        cursor = conn.execute("PRAGMA table_info(training_sessions)")
+        columns = [row[1] for row in cursor.fetchall()]
+        if columns and "photo_upload_id" not in columns:
+            conn.execute("ALTER TABLE training_sessions ADD COLUMN photo_upload_id VARCHAR")
+            conn.commit()
+            logging.getLogger(__name__).info("Migrated: added 'photo_upload_id' to training_sessions")
+        conn.close()
+    except Exception as e:
+        logging.getLogger(__name__).warning(f"training_sessions.photo_upload_id migration failed: {e}")
+
+
 def _migrate_add_document_archived_column():
     """Add `archived` to documents (soft-archive flag). Guarded + idempotent."""
     import sqlite3
@@ -2126,6 +2146,7 @@ class TrainingSession(TimestampMixin, Base):
     rpe          = Column(Integer, nullable=True)               # 1-10
     kcal_burned  = Column(Integer, nullable=True)               # estimated calories burned
     summary      = Column(Text, default="")
+    photo_upload_id = Column(String, nullable=True)             # upload id of an attached training photo
 
 
 class Ping(TimestampMixin, Base):
@@ -2230,6 +2251,7 @@ def init_db():
     _migrate_add_gallery_media_columns()
     _migrate_add_gallery_owner_index()
     _migrate_add_training_kcal_burned_column()
+    _migrate_add_training_photo_column()
     _migrate_add_caldav_sync_columns()
     _migrate_chat_messages_fts()
     _migrate_encrypt_email_passwords()

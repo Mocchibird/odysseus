@@ -378,6 +378,40 @@ def _link_meal_photo(owner, meal, att_ids, upload_handler):
         return None
 
 
+def _link_training_photo(owner, session, att_ids, upload_handler):
+    """Associate a just-logged training session with the attached photo AND file
+    it into the "Training Journal" album. Mirrors _link_meal_photo: link only
+    when EXACTLY ONE image is attached and the session has no photo yet."""
+    try:
+        if not session or not att_ids or session.get("photo_upload_id"):
+            return None
+        sid = session.get("id")
+        if not sid or upload_handler is None:
+            return None
+        image_ids = []
+        for att_id in att_ids:
+            try:
+                info = upload_handler.resolve_upload(att_id, owner=owner)
+            except Exception:
+                info = None
+            if info and upload_handler.is_image_file(info.get("name") or "", info.get("mime")):
+                image_ids.append(info.get("id") or att_id)
+        if len(image_ids) != 1:  # 0 or ambiguous → skip
+            return None
+        from src import health_store as hs
+        if not hs.update_training(owner, int(sid), photo_upload_id=image_ids[0]):
+            return None
+        try:
+            from src.gallery_ingest import ingest_upload
+            ingest_upload(owner, image_ids[0], album="Training Journal")
+        except Exception:
+            logger.debug("Training Journal auto-file skipped", exc_info=True)
+        return image_ids[0]
+    except Exception:
+        logger.exception("Failed to link training photo")
+        return None
+
+
 def setup_chat_routes(
     session_manager,
     chat_handler,
@@ -1334,6 +1368,7 @@ def setup_chat_routes(
                         _agent_fallbacks = _fallback_candidates
 
                     _meal_photo_linked = False  # link an attached food photo to the first meal Iris logs this turn
+                    _training_photo_linked = False  # ditto for the first training session logged this turn
 
                     _forced_tools = None
                     if allow_web_search is not None and str(allow_web_search).lower() == "true":
@@ -1389,9 +1424,15 @@ def setup_chat_routes(
                                     elif data.get("type") == "tool_start":
                                         _agent_tool_calls += 1
                                     elif (data.get("type") == "tool_output" and data.get("tool") == "manage_health"
-                                          and data.get("meal") and att_ids and not _meal_photo_linked):
-                                        if _link_meal_photo(_user, data["meal"], att_ids, upload_handler):
+                                          and att_ids):
+                                        # Auto-link + auto-file the attached photo to the meal/training
+                                        # logged this turn (→ Food Journal / Training Journal).
+                                        if (data.get("meal") and not _meal_photo_linked
+                                                and _link_meal_photo(_user, data["meal"], att_ids, upload_handler)):
                                             _meal_photo_linked = True
+                                        if (data.get("session") and not _training_photo_linked
+                                                and _link_training_photo(_user, data["session"], att_ids, upload_handler)):
+                                            _training_photo_linked = True
                                     yield chunk
                                 elif data.get("type") == "fallback":
                                     # Selected model failed; a fallback answered.
