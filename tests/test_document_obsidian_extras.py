@@ -272,11 +272,11 @@ async def test_related_displays_selected_siblings_ascending(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_set_document_folder_normalizes():
-    """Empty/whitespace/'Inbox' → '' (NULL, unsorted); a path is trimmed + kept."""
+async def test_set_document_tags_normalizes():
+    """Comma list → de-duped (case-insensitive) + trimmed; empty clears."""
     previous = _bind_test_db()
     try:
-        set_ep = _endpoint("POST", "/api/document/{doc_id}/folder")
+        set_ep = _endpoint("POST", "/api/document/{doc_id}/tags")
         did = str(uuid.uuid4())
         db = _TS()
         try:
@@ -285,17 +285,16 @@ async def test_set_document_folder_normalizes():
             db.commit()
         finally:
             db.close()
-        assert (await set_ep(_req("alice"), did, folder="/Tech/Kernel/"))["folder"] == "Tech/Kernel"
-        assert (await set_ep(_req("alice"), did, folder="Inbox"))["folder"] == ""
-        assert (await set_ep(_req("alice"), did, folder="   "))["folder"] == ""
+        assert (await set_ep(_req("alice"), did, tags=" Tech , Kernel ,tech"))["tags"] == ["Tech", "Kernel"]
+        assert (await set_ep(_req("alice"), did, tags=""))["tags"] == []
     finally:
         droutes.SessionLocal = previous
 
 
 @pytest.mark.asyncio
-async def test_documents_library_folder_facet_and_filter():
-    """Library lists each doc's folder, counts folders (NULL+'' bucket → Inbox),
-    and filters by folder (including the Inbox bucket)."""
+async def test_documents_library_tag_facet_and_filter():
+    """Library lists each doc's tags, counts them (multi-valued), and filters by
+    one tag with word-boundary matching (Kernel ≠ a doc tagged only Tech)."""
     previous = _bind_test_db()
     try:
         lib_ep = _endpoint("GET", "/api/documents/library")
@@ -303,48 +302,48 @@ async def test_documents_library_folder_facet_and_filter():
         db = _TS()
         try:
             db.query(Document).delete()
-            d1 = _doc(a, "K1", "alice"); d1.folder = "Tech/Kernel"
-            d2 = _doc(b, "K2", "alice"); d2.folder = "Tech/Kernel"
-            d3 = _doc(c, "Loose note", "alice")  # folder None → Inbox
+            d1 = _doc(a, "K1", "alice"); d1.tags = "Tech,Kernel"
+            d2 = _doc(b, "K2", "alice"); d2.tags = "Tech"
+            d3 = _doc(c, "Loose note", "alice")  # untagged
             db.add_all([d1, d2, d3]); db.commit()
         finally:
             db.close()
-        # Direct calls must pass every Query param (defaults are Query sentinels).
-        full = await lib_ep(_req("alice"), search=None, language=None, folder=None,
+        full = await lib_ep(_req("alice"), search=None, language=None, tag=None,
                             sort="recent", offset=0, limit=20, archived=False)
-        assert full["folders"].get("Tech/Kernel") == 2
-        assert full["folders"].get("Inbox") == 1
+        assert full["tags"].get("Tech") == 2
+        assert full["tags"].get("Kernel") == 1
         by_id = {d["id"]: d for d in full["documents"]}
-        assert by_id[a]["folder"] == "Tech/Kernel"
-        assert by_id[c]["folder"] == ""
-        only_kernel = await lib_ep(_req("alice"), search=None, language=None,
-                                   folder="Tech/Kernel", sort="recent", offset=0,
-                                   limit=20, archived=False)
-        assert {d["id"] for d in only_kernel["documents"]} == {a, b}
-        only_inbox = await lib_ep(_req("alice"), search=None, language=None,
-                                  folder="Inbox", sort="recent", offset=0,
-                                  limit=20, archived=False)
-        assert {d["id"] for d in only_inbox["documents"]} == {c}
+        assert by_id[a]["tags"] == ["Tech", "Kernel"]
+        assert by_id[c]["tags"] == []
+        tech = await lib_ep(_req("alice"), search=None, language=None, tag="Tech",
+                            sort="recent", offset=0, limit=20, archived=False)
+        assert {d["id"] for d in tech["documents"]} == {a, b}
+        kernel = await lib_ep(_req("alice"), search=None, language=None, tag="Kernel",
+                              sort="recent", offset=0, limit=20, archived=False)
+        assert {d["id"] for d in kernel["documents"]} == {a}   # boundary match, not d2
+        untagged = await lib_ep(_req("alice"), search=None, language=None, tag="Untagged",
+                                sort="recent", offset=0, limit=20, archived=False)
+        assert {d["id"] for d in untagged["documents"]} == {c}
     finally:
         droutes.SessionLocal = previous
 
 
 @pytest.mark.asyncio
-async def test_suggest_folder_uses_model_and_neighbours(monkeypatch):
-    """The suggester feeds the model where related notes already live and returns
-    its pick. Two kernel notes in Tech/Kernel → a new kernel note → Tech/Kernel."""
+async def test_suggest_tags_uses_model_and_neighbours(monkeypatch):
+    """The suggester feeds the model the tags related notes already carry and
+    returns its picks (1-3)."""
     import src.task_endpoint as te
     import src.llm_core as llm
     previous = _bind_test_db()
     try:
-        ep = _endpoint("GET", "/api/document/{doc_id}/suggest-folder")
+        ep = _endpoint("GET", "/api/document/{doc_id}/suggest-tags")
         target, n1, n2 = (str(uuid.uuid4()) for _ in range(3))
         db = _TS()
         try:
             db.query(Document).delete()
             db.add(_doc(target, "Kernel scheduler notes", "alice", content="CFS scheduler"))
-            d1 = _doc(n1, "Kernel memory mgmt", "alice"); d1.folder = "Tech/Kernel"
-            d2 = _doc(n2, "Linux boot", "alice"); d2.folder = "Tech/Kernel"
+            d1 = _doc(n1, "Kernel memory mgmt", "alice"); d1.tags = "Tech,Kernel"
+            d2 = _doc(n2, "Linux boot", "alice"); d2.tags = "Tech"
             db.add_all([d1, d2]); db.commit()
         finally:
             db.close()
@@ -354,27 +353,25 @@ async def test_suggest_folder_uses_model_and_neighbours(monkeypatch):
 
         def _fake_llm(url, model, messages, **kw):
             captured["prompt"] = messages[0]["content"]
-            return '{"folder": "Tech/Kernel", "reason": "matches your kernel notes", "confidence": 0.92}'
+            return '{"tags": ["Tech", "Kernel"], "reason": "matches your kernel notes"}'
 
         monkeypatch.setattr(llm, "llm_call", _fake_llm)
         res = await ep(_req("alice"), target)
-        assert res["suggestion"] == "Tech/Kernel"
-        assert res["is_new"] is False                 # Tech/Kernel already exists
-        assert "Tech/Kernel" in res["neighbours"]
-        assert 0.9 <= res["confidence"] <= 1.0
-        assert "Tech/Kernel" in captured["prompt"]     # neighbour folder grounds the prompt
+        assert res["suggestions"] == ["Tech", "Kernel"]
+        assert "Kernel" in res["neighbours"]
+        assert "Tech" in captured["prompt"]            # neighbour tag grounds the prompt
     finally:
         droutes.SessionLocal = previous
 
 
 @pytest.mark.asyncio
-async def test_suggest_folder_fallback_without_model(monkeypatch):
-    """No utility model configured → graceful suggestion=None (UI falls back to
-    the manual picker), never an error."""
+async def test_suggest_tags_fallback_without_model(monkeypatch):
+    """No utility model configured → graceful suggestions=[] (UI falls back to
+    the manual tag editor), never an error."""
     import src.task_endpoint as te
     previous = _bind_test_db()
     try:
-        ep = _endpoint("GET", "/api/document/{doc_id}/suggest-folder")
+        ep = _endpoint("GET", "/api/document/{doc_id}/suggest-tags")
         did = str(uuid.uuid4())
         db = _TS()
         try:
@@ -386,30 +383,27 @@ async def test_suggest_folder_fallback_without_model(monkeypatch):
         monkeypatch.setattr(content_rag, "semantic_search", lambda *a, **k: [])
         monkeypatch.setattr(te, "resolve_task_endpoint", lambda owner=None: (None, None, None))
         res = await ep(_req("alice"), did)
-        assert res["suggestion"] is None
+        assert res["suggestions"] == []
         assert "model" in res["reason"].lower()
     finally:
         droutes.SessionLocal = previous
 
 
-def test_document_library_folder_ui_wiring_present():
-    """Guard the Phase 1 Library folder UI hooks so a refactor can't drop them."""
+def test_document_library_tag_ui_wiring_present():
+    """Guard the Library tag UI hooks so a refactor can't drop them."""
     from pathlib import Path
 
     root = Path(__file__).resolve().parents[1]
     lib = (root / "static" / "js" / "documentLibrary.js").read_text(encoding="utf-8")
-    assert "DOCLIB_SEED_FOLDERS" in lib
-    assert "'Inbox'" in lib and "'Transient'" in lib and "'Archive'" in lib
-    assert "doclib-folder-chips" in lib
-    assert "libraryRenderFolderChips" in lib
-    assert "libraryShowFolderPicker" in lib
-    assert "libraryMoveDocToFolder" in lib
-    assert "/api/document/${doc.id}/folder" in lib
-    assert "_libraryActiveFolder" in lib
-    # Phase 2: AI suggest-and-confirm "File this" action.
-    assert "librarySuggestFolder" in lib
-    assert "/api/document/${doc.id}/suggest-folder" in lib
-    assert "File this (AI)" in lib
+    assert "doclib-tag-chips" in lib
+    assert "libraryRenderTagChips" in lib
+    assert "librarySetDocTags" in lib
+    assert "/api/document/${doc.id}/tags" in lib
+    assert "_libraryActiveTag" in lib
+    # AI suggest-and-confirm tag action.
+    assert "librarySuggestTags" in lib
+    assert "/api/document/${doc.id}/suggest-tags" in lib
+    assert "Suggest tags" in lib
 
 
 def test_obsidian_extras_frontend_wiring_present():

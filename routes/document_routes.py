@@ -56,6 +56,38 @@ def _like_escape(s: str) -> str:
     return s.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
+def _parse_tags(raw) -> List[str]:
+    """Comma-separated tag string → ordered, de-duplicated (case-insensitive),
+    trimmed list. Accepts a list too (joined first)."""
+    if isinstance(raw, (list, tuple)):
+        raw = ",".join(str(x) for x in raw)
+    out, seen = [], set()
+    for t in (raw or "").split(","):
+        t = t.strip()
+        k = t.lower()
+        if t and k not in seen:
+            seen.add(k)
+            out.append(t)
+    return out
+
+
+def _serialize_tags(raw) -> str:
+    """Normalize tags to the stored comma-joined form (no surrounding spaces)."""
+    return ",".join(_parse_tags(raw))
+
+
+def _tag_match(col, tag: str):
+    """Boundary-aware, case-insensitive match for one tag inside the
+    comma-joined `tags` column (so "Tech" doesn't match "Technical")."""
+    esc = _like_escape(tag)
+    return or_(
+        func.lower(col) == tag.lower(),
+        col.ilike(esc + ",%", escape="\\"),
+        col.ilike("%," + esc, escape="\\"),
+        col.ilike("%," + esc + ",%", escape="\\"),
+    )
+
+
 _TRAILING_NUM_RE = re.compile(r"^(.*?)(\d+)\s*$")
 
 
@@ -377,7 +409,7 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
         request: Request,
         search: Optional[str] = Query(None),
         language: Optional[str] = Query(None),
-        folder: Optional[str] = Query(None),
+        tag: Optional[str] = Query(None),
         sort: str = Query("recent"),
         offset: int = Query(0, ge=0),
         limit: int = Query(20, ge=1, le=50),
@@ -412,18 +444,18 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
             lang_rows = lang_q.group_by(library_language_expr).all()
             languages = _aggregate_language_facets(lang_rows)
 
-            # Folder facet counts (owner-filtered). NULL/empty folder = Inbox
-            # (unsorted), bucketed in Python so both collapse to one count.
-            folder_q = (
-                db.query(Document.folder, func.count(Document.id))
+            # Tag facet counts (owner-filtered). Tags are multi-valued (stored
+            # comma-joined), so split + count in Python rather than GROUP BY.
+            tag_q = (
+                db.query(Document.tags)
                 .outerjoin(DbSession, Document.session_id == DbSession.id)
                 .filter(Document.is_active == True).filter(_arch_cond)
             )
-            folder_q = _owner_session_filter(folder_q, user)
-            folders: Dict[str, int] = {}
-            for fname, cnt in folder_q.group_by(Document.folder).all():
-                key = (fname or "").strip() or "Inbox"
-                folders[key] = folders.get(key, 0) + cnt
+            tag_q = _owner_session_filter(tag_q, user)
+            tag_facet: Dict[str, int] = {}
+            for (raw,) in tag_q.all():
+                for t in _parse_tags(raw):
+                    tag_facet[t] = tag_facet.get(t, 0) + 1
 
             # Session count (owner-filtered)
             sc_q = (
@@ -466,13 +498,13 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
                     if language == "markdown":
                         q = q.filter(~pdf_marker_cond)
 
-            # Folder filter. "Inbox" is the unsorted bucket (NULL/empty folder);
-            # any other value is an exact materialized-path match.
-            if folder:
-                if folder == "Inbox":
-                    q = q.filter(or_(Document.folder.is_(None), Document.folder == ""))
+            # Tag filter. "Untagged" is the bucket for docs with no tags; any
+            # other value is a boundary-aware match inside the comma-joined list.
+            if tag:
+                if tag == "Untagged":
+                    q = q.filter(or_(Document.tags.is_(None), Document.tags == ""))
                 else:
-                    q = q.filter(Document.folder == folder)
+                    q = q.filter(_tag_match(Document.tags, tag))
 
             # Total before pagination
             total = q.count()
@@ -499,7 +531,7 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
                     "language": _library_language_for_document(doc),
                     "preview": (doc.current_content or "")[:500],
                     "version_count": doc.version_count,
-                    "folder": (doc.folder or ""),   # "" = Inbox (unsorted)
+                    "tags": _parse_tags(doc.tags),
                     "created_at": (doc.created_at.isoformat() + "Z") if doc.created_at else None,
                     "updated_at": (doc.updated_at.isoformat() + "Z") if doc.updated_at else None,
                 })
@@ -508,7 +540,7 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
                 "documents": documents,
                 "total": total,
                 "languages": languages,
-                "folders": folders,
+                "tags": tag_facet,
                 "session_count": session_count,
             }
         except Exception as e:
@@ -754,14 +786,13 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
         finally:
             db.close()
 
-    # ---- POST /api/document/{doc_id}/folder ----
-    @router.post("/api/document/{doc_id}/folder")
-    async def set_document_folder(
-        request: Request, doc_id: str, folder: str = Query(None)
+    # ---- POST /api/document/{doc_id}/tags ----
+    @router.post("/api/document/{doc_id}/tags")
+    async def set_document_tags(
+        request: Request, doc_id: str, tags: str = Query(None)
     ) -> Dict[str, Any]:
-        """Move a document into a Library folder. Empty/whitespace or "Inbox"
-        normalizes to NULL (the unsorted Inbox bucket); any other value is stored
-        as a materialized path (e.g. "Tech/Kernel"), slashes trimmed."""
+        """Set a document's tags (comma-separated). Replaces the whole set;
+        empty clears all tags. Tags are de-duplicated + trimmed."""
         user = get_current_user(request)
         db = SessionLocal()
         try:
@@ -769,21 +800,21 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
             if not doc:
                 raise HTTPException(404, "Document not found")
             _verify_doc_owner(db, doc, user)
-            f = (folder or "").strip().strip("/").strip()
-            doc.folder = None if (not f or f.lower() == "inbox") else f
+            cleaned = _serialize_tags(tags)
+            doc.tags = cleaned or None
             db.commit()
-            return {"ok": True, "id": doc_id, "folder": doc.folder or ""}
+            return {"ok": True, "id": doc_id, "tags": _parse_tags(doc.tags)}
         finally:
             db.close()
 
-    # ---- GET /api/document/{doc_id}/suggest-folder — AI suggest-and-confirm ----
-    @router.get("/api/document/{doc_id}/suggest-folder")
-    async def suggest_document_folder(request: Request, doc_id: str) -> Dict[str, Any]:
-        """Suggest a Library folder for a document — suggest-and-confirm, it never
-        moves anything. Grounds the choice in where the note's nearest related
-        notes already live, plus the existing folder taxonomy. Best-effort:
-        returns suggestion=None (UI falls back to the manual picker) when no
-        utility model is configured or the output can't be parsed."""
+    # ---- GET /api/document/{doc_id}/suggest-tags — AI suggest-and-confirm ----
+    @router.get("/api/document/{doc_id}/suggest-tags")
+    async def suggest_document_tags(request: Request, doc_id: str) -> Dict[str, Any]:
+        """Suggest 1-3 Library tags for a document — suggest-and-confirm, it never
+        applies them. Grounds the choice in the tags the note's nearest related
+        notes already carry, plus the existing tag vocabulary. Best-effort:
+        suggestions=[] (UI falls back to the manual tag editor) when no utility
+        model is configured or the output can't be parsed."""
         import asyncio
         import json as _json
         user = get_current_user(request)
@@ -795,19 +826,22 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
             _verify_doc_owner(db, doc, user)
             title = doc.title or ""
             body = re.sub(r"<!--.*?-->", "", doc.current_content or "", flags=re.DOTALL)
-            fq = (db.query(Document.folder)
+            current = _parse_tags(doc.tags)
+            tq = (db.query(Document.tags)
                     .filter(Document.is_active == True)
-                    .filter(Document.folder.isnot(None))
-                    .filter(Document.folder != ""))
-            fq = _owner_session_filter(fq, user)
-            existing = sorted({(r[0] or "").strip() for r in fq.distinct().all() if (r[0] or "").strip()})
+                    .filter(Document.tags.isnot(None)).filter(Document.tags != ""))
+            tq = _owner_session_filter(tq, user)
+            vocab, _seen = [], set()
+            for (raw,) in tq.all():
+                for t in _parse_tags(raw):
+                    if t.lower() not in _seen:
+                        _seen.add(t.lower()); vocab.append(t)
+            vocab.sort(key=str.lower)
         finally:
             db.close()
 
-        SEED_TOP = ["Personal", "Learning", "Tech", "Transient"]
-
-        # Where do the note's nearest neighbours already live? (the strong signal)
-        neighbours = []  # [(folder, title)]
+        # Tags the note's nearest neighbours already carry (the strong signal).
+        neighbour_tags, _nseen = [], set()
         query = (title + "\n" + body).strip()[:2000]
         if query:
             try:
@@ -817,44 +851,38 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
                 if nb_ids:
                     db2 = SessionLocal()
                     try:
-                        rows = (db2.query(Document.title, Document.folder)
+                        rows = (db2.query(Document.tags)
                                    .filter(Document.id.in_(nb_ids[:12]))
-                                   .filter(Document.folder.isnot(None))
-                                   .filter(Document.folder != "")).all()
+                                   .filter(Document.tags.isnot(None)).filter(Document.tags != "")).all()
                     finally:
                         db2.close()
-                    seen = set()
-                    for t, f in rows:
-                        f = (f or "").strip()
-                        if f and f not in seen:
-                            seen.add(f)
-                            neighbours.append((f, t or "Untitled"))
+                    for (raw,) in rows:
+                        for t in _parse_tags(raw):
+                            if t.lower() not in _nseen:
+                                _nseen.add(t.lower()); neighbour_tags.append(t)
             except Exception:
-                logger.debug("suggest-folder neighbour lookup failed", exc_info=True)
+                logger.debug("suggest-tags neighbour lookup failed", exc_info=True)
 
         def _fallback(reason):
-            return {"suggestion": None, "reason": reason, "confidence": 0.0,
-                    "is_new": False, "candidates": existing,
-                    "neighbours": [f for f, _ in neighbours]}
+            return {"suggestions": [], "reason": reason, "candidates": vocab,
+                    "neighbours": neighbour_tags, "current": current}
 
         from src.task_endpoint import resolve_task_endpoint
         url, model, headers = resolve_task_endpoint(owner=user)
         if not url:
             return _fallback("No utility model configured")
 
-        nb_text = "\n".join(f'  - "{t[:50]}" -> {f}' for f, t in neighbours[:8]) or "  (none filed yet)"
         prompt = (
-            "You file a personal note into ONE folder. Choose the single best folder.\n\n"
+            "Tag a personal note with 1-3 short tags for a knowledge base.\n\n"
             "Rules:\n"
-            "- STRONGLY prefer an existing folder, especially one where closely-related notes already live.\n"
-            f"- You may propose a NEW folder ONLY as \"Top/Sub\" under one of: {', '.join(SEED_TOP)} (e.g. \"Tech/Kernel\").\n"
-            "- Use \"Inbox\" only if the note is truly uncategorizable.\n"
-            "- Output ONLY raw JSON, no markdown, no explanation.\n\n"
-            f"Existing folders: {', '.join(existing) if existing else '(none yet)'}\n"
-            f"Closely-related notes already filed:\n{nb_text}\n\n"
+            "- STRONGLY prefer tags from the existing vocabulary, especially ones closely-related notes already use.\n"
+            "- Only invent a new tag when nothing fits; keep it short (1-2 words), Capitalized.\n"
+            "- 1-3 tags total. Output ONLY raw JSON, no markdown.\n\n"
+            f"Existing tags: {', '.join(vocab) if vocab else '(none yet)'}\n"
+            f"Tags on closely-related notes: {', '.join(neighbour_tags) if neighbour_tags else '(none yet)'}\n\n"
             f"Note title: {title}\n"
             f"Note excerpt: {body[:1200]}\n\n"
-            'JSON format: {"folder": "Tech/Kernel", "reason": "short why", "confidence": 0.0}'
+            'JSON format: {"tags": ["Tech", "Kernel"], "reason": "short why"}'
         )
 
         try:
@@ -864,15 +892,15 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
                 temperature=0.2, max_tokens=1024, headers=headers, timeout=60,
             )
         except Exception as e:
-            logger.warning("suggest-folder LLM call failed: %s", e)
+            logger.warning("suggest-tags LLM call failed: %s", e)
             return _fallback("Model call failed")
 
         text = re.sub(r'<think(?:ing)?>[\s\S]*?</think(?:ing)?>', '', (raw or "").strip(), flags=re.I).strip()
         fence = re.search(r'```(?:json)?\s*\n?([\s\S]*?)```', text)
-        candidates = [text, fence.group(1) if fence else None,
-                      text[text.find('{'): text.rfind('}') + 1] if ('{' in text and '}' in text) else None]
+        cands = [text, fence.group(1) if fence else None,
+                 text[text.find('{'): text.rfind('}') + 1] if ('{' in text and '}' in text) else None]
         parsed = None
-        for cand in candidates:
+        for cand in cands:
             if not cand:
                 continue
             try:
@@ -880,23 +908,16 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
                 break
             except Exception:
                 continue
-        if not isinstance(parsed, dict) or not str(parsed.get("folder") or "").strip():
+        raw_tags = (parsed or {}).get("tags") if isinstance(parsed, dict) else None
+        suggestions = _parse_tags(raw_tags if isinstance(raw_tags, (list, str)) else "")[:3]
+        if not suggestions:
             return _fallback("Could not parse model output")
-
-        folder = str(parsed.get("folder") or "").strip().strip("/").strip()
-        if folder.lower() == "inbox":
-            folder = ""  # Inbox = unsorted
-        try:
-            confidence = max(0.0, min(1.0, float(parsed.get("confidence") or 0.0)))
-        except (TypeError, ValueError):
-            confidence = 0.0
         return {
-            "suggestion": folder,                       # "" = Inbox / leave unsorted
-            "reason": str(parsed.get("reason") or "").strip()[:200],
-            "confidence": confidence,
-            "is_new": bool(folder) and folder not in existing,
-            "candidates": existing,
-            "neighbours": [f for f, _ in neighbours],
+            "suggestions": suggestions,
+            "reason": str((parsed or {}).get("reason") or "").strip()[:200],
+            "candidates": vocab,
+            "neighbours": neighbour_tags,
+            "current": current,
         }
 
     # ---- POST /api/document/{doc_id}/extract-pdf-text ----

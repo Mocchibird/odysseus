@@ -60,11 +60,8 @@ let _docsVisibleLimit = 20;  // chunked reveal (matches the Chats tab's 20)
 let _libraryLanguages = {};
 let _librarySessionCount = 0;
 let _libraryActiveLanguage = null;
-let _libraryActiveFolder = null;
-let _libraryFolders = {};
-// Seeded top-level taxonomy (always shown as chips / move targets even at 0).
-// Inbox = unsorted (NULL folder). Topic buckets + lifecycle (Transient/Archive).
-const DOCLIB_SEED_FOLDERS = ['Inbox', 'Personal', 'Learning', 'Tech', 'Transient', 'Archive'];
+let _libraryActiveTag = null;     // active tag filter (null = all)
+let _libraryTags = {};            // tag → count facet from the library response
 let _librarySort = 'recent';
 let _librarySearch = '';
 let _librarySearchDebounce = null;
@@ -333,7 +330,7 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
     });
     if (_librarySearch) params.set('search', _librarySearch);
     if (_libraryActiveLanguage) params.set('language', _libraryActiveLanguage);
-    if (_libraryActiveFolder) params.set('folder', _libraryActiveFolder);
+    if (_libraryActiveTag) params.set('tag', _libraryActiveTag);
     if (_libraryArchivedView) params.set('archived', 'true');
 
     try {
@@ -350,11 +347,11 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
       }
       _libraryTotal = data.total;
       _libraryLanguages = data.languages;
-      _libraryFolders = data.folders || {};
+      _libraryTags = data.tags || {};
       _librarySessionCount = data.session_count;
 
       libraryRenderStats();
-      libraryRenderFolderChips();
+      libraryRenderTagChips();
       libraryRenderLangChips();
       libraryRenderGrid();
       libraryRenderLoadMore();
@@ -374,109 +371,76 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
     }
   }
 
-  // Folder picker for "Move to folder": seed buckets + folders already in use,
-  // marking the doc's current home, plus a "New folder…" prompt (supports
-  // nesting like Tech/Kernel). Reuses the shared _showLibDropdown (adds Cancel).
-  function libraryShowFolderPicker(anchor, doc) {
-    const cur = (doc.folder || '').trim();
-    const names = [...DOCLIB_SEED_FOLDERS];
-    for (const f of Object.keys(_libraryFolders || {})) {
-      if (f && !names.includes(f)) names.push(f);
-    }
-    const items = names.map(name => {
-      const isCur = name === cur || (name === 'Inbox' && !cur);
-      return {
-        label: isCur ? `${name} ✓` : name,
-        action: () => libraryMoveDocToFolder(doc, name === 'Inbox' ? '' : name),
-      };
-    });
-    items.push({
-      label: 'New folder…',
-      action: () => {
-        const sub = prompt('Move to folder (use / for nesting, e.g. Tech/Kernel):', cur);
-        if (sub !== null) libraryMoveDocToFolder(doc, sub.trim());
-      },
-    });
-    _showLibDropdown(anchor, items);
+  // Tag editor: a comma-separated prompt pre-filled with the doc's current tags.
+  // Multi-tag; replaces the whole set via POST /tags.
+  function libraryEditTags(doc) {
+    const next = prompt('Tags (comma-separated):', (doc.tags || []).join(', '));
+    if (next !== null) librarySetDocTags(doc, next);
   }
 
-  async function libraryMoveDocToFolder(doc, folder) {
+  async function librarySetDocTags(doc, tagsStr) {
     try {
-      const res = await fetch(`${API_BASE}/api/document/${doc.id}/folder?folder=${encodeURIComponent(folder || '')}`, { method: 'POST', credentials: 'same-origin' });
+      const res = await fetch(`${API_BASE}/api/document/${doc.id}/tags?tags=${encodeURIComponent(tagsStr || '')}`, { method: 'POST', credentials: 'same-origin' });
       if (!res.ok) throw new Error('failed');
       const data = await res.json();
-      doc.folder = data.folder || '';
-      if (uiModule) uiModule.showToast(`Moved to ${doc.folder || 'Inbox'}`);
-      libraryFetch(false);   // refresh folder counts + the active filter view
-    } catch { if (uiModule) uiModule.showError('Failed to move document'); }
+      doc.tags = Array.isArray(data.tags) ? data.tags : [];
+      if (uiModule) uiModule.showToast(doc.tags.length ? `Tagged: ${doc.tags.join(', ')}` : 'Tags cleared');
+      libraryFetch(false);   // refresh tag facet + the active filter view
+    } catch { if (uiModule) uiModule.showError('Failed to set tags'); }
   }
 
-  // AI suggest-and-confirm: ask the backend for the best folder, then open the
-  // picker with that suggestion pinned on top (with its reason). Falls back to
-  // the plain picker if no suggestion (no model / unparseable). Never auto-moves.
-  async function librarySuggestFolder(anchor, doc) {
-    if (uiModule) uiModule.showToast('Finding a folder…');
+  // AI suggest-and-confirm: ask for 1-3 tags, then pre-fill the tag prompt with
+  // the doc's current tags + suggestions merged, so the user confirms/edits
+  // before anything is applied. Falls back to manual editing if no suggestion.
+  async function librarySuggestTags(doc) {
+    if (uiModule) uiModule.showToast('Suggesting tags…');
     let data = null;
     try {
-      const res = await fetch(`${API_BASE}/api/document/${doc.id}/suggest-folder`, { credentials: 'same-origin' });
+      const res = await fetch(`${API_BASE}/api/document/${doc.id}/suggest-tags`, { credentials: 'same-origin' });
       if (res.ok) data = await res.json();
     } catch { /* fall through to manual */ }
 
-    const sugg = data && typeof data.suggestion === 'string' ? data.suggestion : null;
-    if (sugg === null) {
-      if (uiModule) uiModule.showToast(data && data.reason ? `No suggestion: ${data.reason}` : 'No suggestion — pick a folder');
-      libraryShowFolderPicker(anchor, doc);
+    const sugg = data && Array.isArray(data.suggestions) ? data.suggestions : [];
+    if (!sugg.length) {
+      if (uiModule) uiModule.showToast(data && data.reason ? `No suggestion: ${data.reason}` : 'No suggestion — add tags manually');
+      libraryEditTags(doc);
       return;
     }
-
-    const cur = (doc.folder || '').trim();
-    const names = [...DOCLIB_SEED_FOLDERS];
-    for (const f of Object.keys(_libraryFolders || {})) { if (f && !names.includes(f)) names.push(f); }
-    const reason = (data.reason || '').slice(0, 80);
-    const items = [{
-      label: `✨ ${sugg || 'Inbox'}${reason ? ' — ' + reason : ''}`,
-      action: () => libraryMoveDocToFolder(doc, sugg),
-    }];
-    for (const name of names) {
-      if ((name === 'Inbox' ? '' : name) === sugg) continue;   // already pinned on top
-      const isCur = name === cur || (name === 'Inbox' && !cur);
-      items.push({ label: isCur ? `${name} ✓` : name, action: () => libraryMoveDocToFolder(doc, name === 'Inbox' ? '' : name) });
+    const seen = new Set(), merged = [];
+    for (const t of [...(doc.tags || []), ...sugg]) {
+      const k = String(t).toLowerCase();
+      if (t && !seen.has(k)) { seen.add(k); merged.push(t); }
     }
-    items.push({
-      label: 'New folder…',
-      action: () => { const sub = prompt('Move to folder (use / for nesting):', sugg || cur); if (sub !== null) libraryMoveDocToFolder(doc, sub.trim()); },
-    });
-    _showLibDropdown(anchor, items);
+    const reason = (data.reason || '').slice(0, 80);
+    const next = prompt(`Suggested: ${sugg.join(', ')}${reason ? '\n(' + reason + ')' : ''}\n\nTags (comma-separated):`, merged.join(', '));
+    if (next !== null) librarySetDocTags(doc, next);
   }
 
-  function libraryRenderFolderChips() {
-    const wrap = document.getElementById('doclib-folder-chips');
+  function libraryRenderTagChips() {
+    const wrap = document.getElementById('doclib-tag-chips');
     if (!wrap) return;
     wrap.querySelectorAll('.memory-cat-chip').forEach(c => c.remove());
-    // The Archived view is its own axis — don't also show folders there.
+    // Tags are their own axis; don't show them in the Archived view.
     if (_libraryArchivedView) return;
 
-    const counts = _libraryFolders || {};
-    // Seed buckets always shown (even at 0) so the taxonomy is visible, then any
-    // extra folders that exist in the data but aren't part of the seed set.
-    const names = [...DOCLIB_SEED_FOLDERS];
-    for (const f of Object.keys(counts)) {
-      if (f && !names.includes(f)) names.push(f);
-    }
+    const counts = _libraryTags || {};
+    // Only tags that actually exist, most-used first — no forced seeds, so the
+    // chip row stays short (and absent until you've tagged something).
+    const names = Object.keys(counts).sort((a, b) => (counts[b] - counts[a]) || a.localeCompare(b));
+    if (!names.length) return;
     const totalAll = Object.values(counts).reduce((a, b) => a + b, 0);
 
     const allChip = document.createElement('button');
-    allChip.className = 'memory-cat-chip' + (!_libraryActiveFolder ? ' active' : '');
-    allChip.textContent = `all folders (${totalAll})`;
-    allChip.addEventListener('click', () => { _libraryActiveFolder = null; libraryFetch(false); });
+    allChip.className = 'memory-cat-chip' + (!_libraryActiveTag ? ' active' : '');
+    allChip.textContent = `all (${totalAll})`;
+    allChip.addEventListener('click', () => { _libraryActiveTag = null; libraryFetch(false); });
     wrap.appendChild(allChip);
 
     for (const name of names) {
-      const count = counts[name] || 0;
       const chip = document.createElement('button');
-      chip.className = 'memory-cat-chip' + (_libraryActiveFolder === name ? ' active' : '');
-      chip.textContent = `${name} (${count})`;
-      chip.addEventListener('click', () => { _libraryActiveFolder = name; libraryFetch(false); });
+      chip.className = 'memory-cat-chip' + (_libraryActiveTag === name ? ' active' : '');
+      chip.textContent = `${name} (${counts[name]})`;
+      chip.addEventListener('click', () => { _libraryActiveTag = name; libraryFetch(false); });
       wrap.appendChild(chip);
     }
   }
@@ -866,28 +830,28 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
     });
     dropdown.appendChild(archiveItem);
 
-    // Move to folder — opens a picker (seed buckets + existing folders + new).
+    // Edit tags — comma-separated prompt pre-filled with the doc's current tags.
     if (!_libraryArchivedView) {
-      const _moveIco = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>';
-      const moveItem = document.createElement('button');
-      moveItem.className = 'dropdown-item-compact';
-      moveItem.style.cssText = 'background:none;border:none;width:100%;';
-      moveItem.innerHTML = _di(_moveIco) + '<span>Move to folder</span>';
-      moveItem.addEventListener('click', (e) => {
+      const _tagIco = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>';
+      const tagItem = document.createElement('button');
+      tagItem.className = 'dropdown-item-compact';
+      tagItem.style.cssText = 'background:none;border:none;width:100%;';
+      tagItem.innerHTML = _di(_tagIco) + '<span>Edit tags</span>';
+      tagItem.addEventListener('click', (e) => {
         e.stopPropagation();
         hideCardDropdown();
-        libraryShowFolderPicker(menuBtn, doc);
+        libraryEditTags(doc);
       });
-      dropdown.appendChild(moveItem);
+      dropdown.appendChild(tagItem);
 
-      // File this (AI) — suggest-and-confirm: asks the model for the best folder,
-      // then opens the picker with that pick pinned on top. Never auto-moves.
+      // Suggest tags (AI) — suggest-and-confirm: asks the model for 1-3 tags,
+      // then pre-fills the tag prompt with current + suggested. Never auto-applies.
       const _aiIco = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0l2.6 8.4L23 11l-8.4 2.6L12 22l-2.6-8.4L1 11l8.4-2.6z"/></svg>';
       const aiItem = document.createElement('button');
       aiItem.className = 'dropdown-item-compact';
       aiItem.style.cssText = 'background:none;border:none;width:100%;';
-      aiItem.innerHTML = _di(_aiIco) + '<span>File this (AI)</span>';
-      aiItem.addEventListener('click', (e) => { e.stopPropagation(); hideCardDropdown(); librarySuggestFolder(menuBtn, doc); });
+      aiItem.innerHTML = _di(_aiIco) + '<span>Suggest tags (AI)</span>';
+      aiItem.addEventListener('click', (e) => { e.stopPropagation(); hideCardDropdown(); librarySuggestTags(doc); });
       dropdown.appendChild(aiItem);
     }
 
@@ -1760,7 +1724,7 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
     _librarySelectedIds.clear();
     _librarySearch = '';
     _libraryActiveLanguage = null;
-    _libraryActiveFolder = null;
+    _libraryActiveTag = null;
     _librarySort = 'recent';
     _libraryOffset = 0;
     _libraryDocs = [];
@@ -1915,7 +1879,7 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
                 <button class="memory-toolbar-btn" id="doclib-tidy-btn" title="Tidy: remove empty / junk / duplicate documents">Tidy</button>
               </div>
               <input type="text" id="doclib-search" placeholder="Search titles &amp; content\u2026" class="memory-search-input" />
-              <div id="doclib-folder-chips" class="doclib-lang-chips"></div>
+              <div id="doclib-tag-chips" class="doclib-lang-chips"></div>
               <div id="doclib-chips" class="doclib-lang-chips"></div>
             </div>
             <input type="file" id="doclib-file-input" multiple style="display:none" />
