@@ -60,6 +60,11 @@ let _docsVisibleLimit = 20;  // chunked reveal (matches the Chats tab's 20)
 let _libraryLanguages = {};
 let _librarySessionCount = 0;
 let _libraryActiveLanguage = null;
+let _libraryActiveFolder = null;
+let _libraryFolders = {};
+// Seeded top-level taxonomy (always shown as chips / move targets even at 0).
+// Inbox = unsorted (NULL folder). Topic buckets + lifecycle (Transient/Archive).
+const DOCLIB_SEED_FOLDERS = ['Inbox', 'Personal', 'Learning', 'Tech', 'Transient', 'Archive'];
 let _librarySort = 'recent';
 let _librarySearch = '';
 let _librarySearchDebounce = null;
@@ -328,6 +333,7 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
     });
     if (_librarySearch) params.set('search', _librarySearch);
     if (_libraryActiveLanguage) params.set('language', _libraryActiveLanguage);
+    if (_libraryActiveFolder) params.set('folder', _libraryActiveFolder);
     if (_libraryArchivedView) params.set('archived', 'true');
 
     try {
@@ -344,9 +350,11 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
       }
       _libraryTotal = data.total;
       _libraryLanguages = data.languages;
+      _libraryFolders = data.folders || {};
       _librarySessionCount = data.session_count;
 
       libraryRenderStats();
+      libraryRenderFolderChips();
       libraryRenderLangChips();
       libraryRenderGrid();
       libraryRenderLoadMore();
@@ -363,6 +371,75 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
       el.textContent = `${_libraryTotal} of ${totalAll} document${totalAll !== 1 ? 's' : ''}`;
     } else {
       el.textContent = `${totalAll} document${totalAll !== 1 ? 's' : ''}`;
+    }
+  }
+
+  // Folder picker for "Move to folder": seed buckets + folders already in use,
+  // marking the doc's current home, plus a "New folder…" prompt (supports
+  // nesting like Tech/Kernel). Reuses the shared _showLibDropdown (adds Cancel).
+  function libraryShowFolderPicker(anchor, doc) {
+    const cur = (doc.folder || '').trim();
+    const names = [...DOCLIB_SEED_FOLDERS];
+    for (const f of Object.keys(_libraryFolders || {})) {
+      if (f && !names.includes(f)) names.push(f);
+    }
+    const items = names.map(name => {
+      const isCur = name === cur || (name === 'Inbox' && !cur);
+      return {
+        label: isCur ? `${name} ✓` : name,
+        action: () => libraryMoveDocToFolder(doc, name === 'Inbox' ? '' : name),
+      };
+    });
+    items.push({
+      label: 'New folder…',
+      action: () => {
+        const sub = prompt('Move to folder (use / for nesting, e.g. Tech/Kernel):', cur);
+        if (sub !== null) libraryMoveDocToFolder(doc, sub.trim());
+      },
+    });
+    _showLibDropdown(anchor, items);
+  }
+
+  async function libraryMoveDocToFolder(doc, folder) {
+    try {
+      const res = await fetch(`${API_BASE}/api/document/${doc.id}/folder?folder=${encodeURIComponent(folder || '')}`, { method: 'POST', credentials: 'same-origin' });
+      if (!res.ok) throw new Error('failed');
+      const data = await res.json();
+      doc.folder = data.folder || '';
+      if (uiModule) uiModule.showToast(`Moved to ${doc.folder || 'Inbox'}`);
+      libraryFetch(false);   // refresh folder counts + the active filter view
+    } catch { if (uiModule) uiModule.showError('Failed to move document'); }
+  }
+
+  function libraryRenderFolderChips() {
+    const wrap = document.getElementById('doclib-folder-chips');
+    if (!wrap) return;
+    wrap.querySelectorAll('.memory-cat-chip').forEach(c => c.remove());
+    // The Archived view is its own axis — don't also show folders there.
+    if (_libraryArchivedView) return;
+
+    const counts = _libraryFolders || {};
+    // Seed buckets always shown (even at 0) so the taxonomy is visible, then any
+    // extra folders that exist in the data but aren't part of the seed set.
+    const names = [...DOCLIB_SEED_FOLDERS];
+    for (const f of Object.keys(counts)) {
+      if (f && !names.includes(f)) names.push(f);
+    }
+    const totalAll = Object.values(counts).reduce((a, b) => a + b, 0);
+
+    const allChip = document.createElement('button');
+    allChip.className = 'memory-cat-chip' + (!_libraryActiveFolder ? ' active' : '');
+    allChip.textContent = `all folders (${totalAll})`;
+    allChip.addEventListener('click', () => { _libraryActiveFolder = null; libraryFetch(false); });
+    wrap.appendChild(allChip);
+
+    for (const name of names) {
+      const count = counts[name] || 0;
+      const chip = document.createElement('button');
+      chip.className = 'memory-cat-chip' + (_libraryActiveFolder === name ? ' active' : '');
+      chip.textContent = `${name} (${count})`;
+      chip.addEventListener('click', () => { _libraryActiveFolder = name; libraryFetch(false); });
+      wrap.appendChild(chip);
     }
   }
 
@@ -750,6 +827,21 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
       } catch { if (uiModule) uiModule.showError('Failed to ' + (toArchived ? 'archive' : 'restore')); }
     });
     dropdown.appendChild(archiveItem);
+
+    // Move to folder — opens a picker (seed buckets + existing folders + new).
+    if (!_libraryArchivedView) {
+      const _moveIco = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>';
+      const moveItem = document.createElement('button');
+      moveItem.className = 'dropdown-item-compact';
+      moveItem.style.cssText = 'background:none;border:none;width:100%;';
+      moveItem.innerHTML = _di(_moveIco) + '<span>Move to folder</span>';
+      moveItem.addEventListener('click', (e) => {
+        e.stopPropagation();
+        hideCardDropdown();
+        libraryShowFolderPicker(menuBtn, doc);
+      });
+      dropdown.appendChild(moveItem);
+    }
 
     // Delete
     const _deleteIco = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>';
@@ -1620,6 +1712,7 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
     _librarySelectedIds.clear();
     _librarySearch = '';
     _libraryActiveLanguage = null;
+    _libraryActiveFolder = null;
     _librarySort = 'recent';
     _libraryOffset = 0;
     _libraryDocs = [];
@@ -1774,6 +1867,7 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
                 <button class="memory-toolbar-btn" id="doclib-tidy-btn" title="Tidy: remove empty / junk / duplicate documents">Tidy</button>
               </div>
               <input type="text" id="doclib-search" placeholder="Search titles &amp; content\u2026" class="memory-search-input" />
+              <div id="doclib-folder-chips" class="doclib-lang-chips"></div>
               <div id="doclib-chips" class="doclib-lang-chips"></div>
             </div>
             <input type="file" id="doclib-file-input" multiple style="display:none" />

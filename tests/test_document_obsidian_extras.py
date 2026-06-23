@@ -329,6 +329,22 @@ async def test_documents_library_folder_facet_and_filter():
         droutes.SessionLocal = previous
 
 
+def test_document_library_folder_ui_wiring_present():
+    """Guard the Phase 1 Library folder UI hooks so a refactor can't drop them."""
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    lib = (root / "static" / "js" / "documentLibrary.js").read_text(encoding="utf-8")
+    assert "DOCLIB_SEED_FOLDERS" in lib
+    assert "'Inbox'" in lib and "'Transient'" in lib and "'Archive'" in lib
+    assert "doclib-folder-chips" in lib
+    assert "libraryRenderFolderChips" in lib
+    assert "libraryShowFolderPicker" in lib
+    assert "libraryMoveDocToFolder" in lib
+    assert "/api/document/${doc.id}/folder" in lib
+    assert "_libraryActiveFolder" in lib
+
+
 def test_obsidian_extras_frontend_wiring_present():
     """Guard the front-end hooks so a refactor can't silently drop them."""
     from pathlib import Path
