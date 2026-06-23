@@ -377,6 +377,7 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
         request: Request,
         search: Optional[str] = Query(None),
         language: Optional[str] = Query(None),
+        folder: Optional[str] = Query(None),
         sort: str = Query("recent"),
         offset: int = Query(0, ge=0),
         limit: int = Query(20, ge=1, le=50),
@@ -410,6 +411,19 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
             lang_q = _owner_session_filter(lang_q, user)
             lang_rows = lang_q.group_by(library_language_expr).all()
             languages = _aggregate_language_facets(lang_rows)
+
+            # Folder facet counts (owner-filtered). NULL/empty folder = Inbox
+            # (unsorted), bucketed in Python so both collapse to one count.
+            folder_q = (
+                db.query(Document.folder, func.count(Document.id))
+                .outerjoin(DbSession, Document.session_id == DbSession.id)
+                .filter(Document.is_active == True).filter(_arch_cond)
+            )
+            folder_q = _owner_session_filter(folder_q, user)
+            folders: Dict[str, int] = {}
+            for fname, cnt in folder_q.group_by(Document.folder).all():
+                key = (fname or "").strip() or "Inbox"
+                folders[key] = folders.get(key, 0) + cnt
 
             # Session count (owner-filtered)
             sc_q = (
@@ -452,6 +466,14 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
                     if language == "markdown":
                         q = q.filter(~pdf_marker_cond)
 
+            # Folder filter. "Inbox" is the unsorted bucket (NULL/empty folder);
+            # any other value is an exact materialized-path match.
+            if folder:
+                if folder == "Inbox":
+                    q = q.filter(or_(Document.folder.is_(None), Document.folder == ""))
+                else:
+                    q = q.filter(Document.folder == folder)
+
             # Total before pagination
             total = q.count()
 
@@ -477,6 +499,7 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
                     "language": _library_language_for_document(doc),
                     "preview": (doc.current_content or "")[:500],
                     "version_count": doc.version_count,
+                    "folder": (doc.folder or ""),   # "" = Inbox (unsorted)
                     "created_at": (doc.created_at.isoformat() + "Z") if doc.created_at else None,
                     "updated_at": (doc.updated_at.isoformat() + "Z") if doc.updated_at else None,
                 })
@@ -485,6 +508,7 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
                 "documents": documents,
                 "total": total,
                 "languages": languages,
+                "folders": folders,
                 "session_count": session_count,
             }
         except Exception as e:
@@ -727,6 +751,28 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
             else:
                 _index_document_rag(doc.owner or user, doc)   # un-archived → re-index
             return {"ok": True, "id": doc_id, "archived": doc.archived}
+        finally:
+            db.close()
+
+    # ---- POST /api/document/{doc_id}/folder ----
+    @router.post("/api/document/{doc_id}/folder")
+    async def set_document_folder(
+        request: Request, doc_id: str, folder: str = Query(None)
+    ) -> Dict[str, Any]:
+        """Move a document into a Library folder. Empty/whitespace or "Inbox"
+        normalizes to NULL (the unsorted Inbox bucket); any other value is stored
+        as a materialized path (e.g. "Tech/Kernel"), slashes trimmed."""
+        user = get_current_user(request)
+        db = SessionLocal()
+        try:
+            doc = db.query(Document).filter(Document.id == doc_id).first()
+            if not doc:
+                raise HTTPException(404, "Document not found")
+            _verify_doc_owner(db, doc, user)
+            f = (folder or "").strip().strip("/").strip()
+            doc.folder = None if (not f or f.lower() == "inbox") else f
+            db.commit()
+            return {"ok": True, "id": doc_id, "folder": doc.folder or ""}
         finally:
             db.close()
 

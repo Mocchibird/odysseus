@@ -271,6 +271,64 @@ async def test_related_displays_selected_siblings_ascending(monkeypatch):
         droutes.SessionLocal = previous
 
 
+@pytest.mark.asyncio
+async def test_set_document_folder_normalizes():
+    """Empty/whitespace/'Inbox' → '' (NULL, unsorted); a path is trimmed + kept."""
+    previous = _bind_test_db()
+    try:
+        set_ep = _endpoint("POST", "/api/document/{doc_id}/folder")
+        did = str(uuid.uuid4())
+        db = _TS()
+        try:
+            db.query(Document).delete()
+            db.add(_doc(did, "Kernel notes", "alice"))
+            db.commit()
+        finally:
+            db.close()
+        assert (await set_ep(_req("alice"), did, folder="/Tech/Kernel/"))["folder"] == "Tech/Kernel"
+        assert (await set_ep(_req("alice"), did, folder="Inbox"))["folder"] == ""
+        assert (await set_ep(_req("alice"), did, folder="   "))["folder"] == ""
+    finally:
+        droutes.SessionLocal = previous
+
+
+@pytest.mark.asyncio
+async def test_documents_library_folder_facet_and_filter():
+    """Library lists each doc's folder, counts folders (NULL+'' bucket → Inbox),
+    and filters by folder (including the Inbox bucket)."""
+    previous = _bind_test_db()
+    try:
+        lib_ep = _endpoint("GET", "/api/documents/library")
+        a, b, c = (str(uuid.uuid4()) for _ in range(3))
+        db = _TS()
+        try:
+            db.query(Document).delete()
+            d1 = _doc(a, "K1", "alice"); d1.folder = "Tech/Kernel"
+            d2 = _doc(b, "K2", "alice"); d2.folder = "Tech/Kernel"
+            d3 = _doc(c, "Loose note", "alice")  # folder None → Inbox
+            db.add_all([d1, d2, d3]); db.commit()
+        finally:
+            db.close()
+        # Direct calls must pass every Query param (defaults are Query sentinels).
+        full = await lib_ep(_req("alice"), search=None, language=None, folder=None,
+                            sort="recent", offset=0, limit=20, archived=False)
+        assert full["folders"].get("Tech/Kernel") == 2
+        assert full["folders"].get("Inbox") == 1
+        by_id = {d["id"]: d for d in full["documents"]}
+        assert by_id[a]["folder"] == "Tech/Kernel"
+        assert by_id[c]["folder"] == ""
+        only_kernel = await lib_ep(_req("alice"), search=None, language=None,
+                                   folder="Tech/Kernel", sort="recent", offset=0,
+                                   limit=20, archived=False)
+        assert {d["id"] for d in only_kernel["documents"]} == {a, b}
+        only_inbox = await lib_ep(_req("alice"), search=None, language=None,
+                                  folder="Inbox", sort="recent", offset=0,
+                                  limit=20, archived=False)
+        assert {d["id"] for d in only_inbox["documents"]} == {c}
+    finally:
+        droutes.SessionLocal = previous
+
+
 def test_obsidian_extras_frontend_wiring_present():
     """Guard the front-end hooks so a refactor can't silently drop them."""
     from pathlib import Path

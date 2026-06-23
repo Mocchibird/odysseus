@@ -242,6 +242,10 @@ class Document(TimestampMixin, Base):
     # Library + search. Owning the row directly is robust against that.
     owner           = Column(String, nullable=True, index=True)
     tidy_verdict    = Column(String, nullable=True)        # "keep", "junk", or None (not yet reviewed)
+    # Library folder — materialized path (e.g. "Tech/Kernel"). NULL/empty = Inbox
+    # (unsorted). Mirrors Session.folder; documents are organized into a topic +
+    # lifecycle taxonomy and AI-auto-sorted. See _migrate_add_document_folder_column.
+    folder          = Column(String, nullable=True, default=None)
     # Provenance: if this document was created by opening an email attachment,
     # these point back to the source email so the "Sign and reply" flow can
     # thread a response on the original conversation.
@@ -1563,6 +1567,19 @@ def _migrate_add_tidy_verdict():
         logging.getLogger(__name__).warning(f"tidy_verdict migration: {e}")
 
 
+def _migrate_add_document_folder_column():
+    """Add folder column to documents table if missing (Library foldering)."""
+    try:
+        with engine.connect() as conn:
+            cols = [r[1] for r in conn.execute(text("PRAGMA table_info(documents)"))]
+            if "folder" not in cols:
+                conn.execute(text("ALTER TABLE documents ADD COLUMN folder VARCHAR"))
+                conn.commit()
+                logging.getLogger(__name__).info("Added folder column to documents")
+    except Exception as e:
+        logging.getLogger(__name__).warning(f"document folder migration: {e}")
+
+
 def _migrate_add_doc_source_email_cols():
     """Add source-email provenance columns to documents (for the Sign-and-Reply flow)."""
     cols_to_add = {
@@ -2189,6 +2206,7 @@ def init_db():
     _migrate_backfill_document_owner_from_session()
     _migrate_assign_legacy_owner()
     _migrate_add_tidy_verdict()
+    _migrate_add_document_folder_column()
     _migrate_add_doc_source_email_cols()
     _migrate_add_oauth_config()
     _migrate_add_email_oauth_columns()
