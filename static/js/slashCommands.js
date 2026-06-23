@@ -251,10 +251,8 @@ async function _hasConfiguredModels() {
   const modelsBox = document.getElementById('models');
   if (modelsBox && modelsBox.querySelector('.models-row')) return true;
   try {
-    const res = await fetch(`${API_BASE}/api/models`, { credentials: 'same-origin' });
-    if (!res.ok) return false;
-    const data = await res.json();
-    return (data.items || []).some(item =>
+    const items = await modelsModule.getModelsData();
+    return items.some(item =>
       ((item.models || []).length > 0 || (item.models_extra || []).length > 0) && item.url
     );
   } catch {
@@ -964,9 +962,8 @@ async function _cmdSessionNew(args, ctx) {
   // Last resort — pull first model from /api/models
   if (!endpointUrl || !model) {
     try {
-      const mRes = await fetch(`${API_BASE}/api/models`, { credentials: 'same-origin' });
-      const mData = await mRes.json();
-      for (const ep of (mData.items || [])) {
+      const mItems = await modelsModule.getModelsData();
+      for (const ep of mItems) {
         if (ep.models && ep.models.length && ep.url) {
           endpointUrl = ep.url;
           model = ep.models[0];
@@ -1500,8 +1497,7 @@ async function _cmdTheme(args, ctx) {
 
 async function _cmdModels(args, ctx) {
   slashReply('Fetching models...');
-  const res = await fetch(`${API_BASE}/api/models`, { credentials: 'same-origin' });
-  const data = await res.json();
+  const data = { items: await modelsModule.getModelsData() };
   let lines = [];
   (data.items || []).forEach(ep => {
     lines.push(`<b>${ctx.esc(ep.endpoint_name || ep.url)}</b>`);

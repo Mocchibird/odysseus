@@ -638,11 +638,34 @@ export async function refreshProviders() {
 
 export function getCachedItems() { return _cachedItems; }
 
+// Shared data accessor for modules that just need the model list (settings,
+// slash commands, task form) rather than the rendered picker. Reuses the same
+// 30s TTL + in-flight dedup as refreshModels so the whole app shares ONE cache
+// instead of each call site hitting /api/models on its own. Returns the items
+// array; pass force=true to bypass the cache (and the backend's per-user cache).
+export async function getModelsData(force = false) {
+  const now = Date.now();
+  const needsFetch = force || _cachedItems.length === 0 || (now - _lastFetchTime) >= _FETCH_CACHE_TTL;
+  if (needsFetch) {
+    if (!_fetchInflight) {
+      const _url = `${API_BASE}/api/models` + (force ? '?refresh=true' : '');
+      _fetchInflight = fetch(_url, { credentials: 'same-origin' })
+        .then(async (res) => { if (!res.ok) throw new Error(`HTTP ${res.status}`); return res.json(); })
+        .finally(() => { _fetchInflight = null; });
+    }
+    const data = await _fetchInflight;
+    _lastFetchTime = Date.now();
+    _cachedItems = data.items || [];
+  }
+  return _cachedItems;
+}
+
 const modelsModule = {
   init,
   refreshModels,
   refreshProviders,
   getCachedItems,
+  getModelsData,
 };
 
 export default modelsModule;

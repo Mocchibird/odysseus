@@ -65,6 +65,15 @@ let _libraryTags = {};            // tag → count facet from the library respon
 let _librarySort = 'recent';
 let _librarySearch = '';
 let _librarySearchDebounce = null;
+// Reopen cache: the library list rarely changes within a session, but the modal
+// was rebuilt + the list re-fetched on every open. Stamp the time of the last
+// successful default-view fetch and, on reopen within the TTL, render straight
+// from the still-resident module arrays instead of hitting the network. Any
+// documents-refresh (user edit OR an agent tool) invalidates it immediately via
+// a permanent listener, so the cache can never serve a known-stale list.
+let _libraryFetchedAt = 0;
+const _LIBRARY_CACHE_TTL = 30000;
+let _libraryCacheInvalidator = null;
 
 // Highlight the active search terms inside a plain string. Escapes first,
 // then wraps each whitespace-separated term in <mark>. Multi-term, matching
@@ -317,6 +326,13 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
     return new Date(isoString).toLocaleDateString();
   }
 
+  // The reopen cache only trusts the default view (no search/tag/language, sort
+  // by recent, not archived) — that's the state openLibrary resets to on open.
+  function _libraryFiltersAreDefault() {
+    return !_librarySearch && !_libraryActiveTag && !_libraryActiveLanguage &&
+           _librarySort === 'recent' && !_libraryArchivedView;
+  }
+
   async function libraryFetch(append) {
     if (!append) _libraryOffset = 0;
     // Bump page size to the backend max (50) so fullscreen doesn't leave
@@ -349,6 +365,9 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
       _libraryLanguages = data.languages;
       _libraryTags = data.tags || {};
       _librarySessionCount = data.session_count;
+      // Mark the cache fresh only when this is a full default-view load; a
+      // filtered/paged result can't stand in for the next default-view open.
+      _libraryFetchedAt = (!append && _libraryFiltersAreDefault()) ? Date.now() : 0;
 
       libraryRenderStats();
       libraryRenderTagChips();
@@ -383,9 +402,22 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
       const res = await fetch(`${API_BASE}/api/document/${doc.id}/tags?tags=${encodeURIComponent(tagsStr || '')}`, { method: 'POST', credentials: 'same-origin' });
       if (!res.ok) throw new Error('failed');
       const data = await res.json();
-      doc.tags = Array.isArray(data.tags) ? data.tags : [];
-      if (uiModule) uiModule.showToast(doc.tags.length ? `Tagged: ${doc.tags.join(', ')}` : 'Tags cleared');
-      libraryFetch(false);   // refresh tag facet + the active filter view
+      const oldTags = Array.isArray(doc.tags) ? doc.tags.slice() : [];
+      const newTags = Array.isArray(data.tags) ? data.tags : [];
+      doc.tags = newTags;
+      if (uiModule) uiModule.showToast(newTags.length ? `Tagged: ${newTags.join(', ')}` : 'Tags cleared');
+      if (_libraryActiveTag || _librarySearch || _libraryActiveLanguage) {
+        // A filtered view's membership may have changed — re-fetch to be safe.
+        libraryFetch(false);
+      } else {
+        // Default view: apply the facet delta locally and re-render — the POST
+        // already returned the authoritative tag set, so no round-trip needed.
+        const facet = _libraryTags || (_libraryTags = {});
+        for (const t of oldTags) if (!newTags.includes(t)) { facet[t] = Math.max(0, (facet[t] || 0) - 1); if (!facet[t]) delete facet[t]; }
+        for (const t of newTags) if (!oldTags.includes(t)) { facet[t] = (facet[t] || 0) + 1; }
+        libraryRenderTagChips();
+        libraryRenderGrid();
+      }
     } catch { if (uiModule) uiModule.showError('Failed to set tags'); }
   }
 
@@ -1739,7 +1771,11 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
     _libraryActiveTag = null;
     _librarySort = 'recent';
     _libraryOffset = 0;
-    _libraryDocs = [];
+    // Keep the resident list if the reopen cache is still warm (rendered from it
+    // at the end of open); otherwise start clean and re-fetch.
+    if (!(Date.now() - _libraryFetchedAt < _LIBRARY_CACHE_TTL && _libraryDocs.length)) {
+      _libraryDocs = [];
+    }
 
     // Create modal
     const modal = document.createElement('div');
@@ -2014,6 +2050,13 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
     };
     window.addEventListener('documents-refresh', _libDocsHandler);
     window.addEventListener('files-refresh', _libFilesHandler);
+    // Permanent (page-lifetime) cache invalidator: any documents-refresh — even
+    // while the modal is closed (e.g. an agent authors a doc) — marks the reopen
+    // cache stale so the next open re-fetches. Registered once.
+    if (!_libraryCacheInvalidator) {
+      _libraryCacheInvalidator = () => { _libraryFetchedAt = 0; };
+      window.addEventListener('documents-refresh', _libraryCacheInvalidator);
+    }
 
     // Client-side pagination for tabs whose API returns everything at once
     // (chats/archive/research). Render only this many initially; the
@@ -3922,7 +3965,17 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
     const btn = document.getElementById('tool-doclib-btn');
     if (btn) btn.classList.add('active');
 
-    libraryFetch(false);
+    // Serve from the warm reopen cache when possible (see _libraryFetchedAt),
+    // else fetch. Either way the freshly-built grid still needs rendering.
+    if (Date.now() - _libraryFetchedAt < _LIBRARY_CACHE_TTL && _libraryDocs.length) {
+      libraryRenderStats();
+      libraryRenderTagChips();
+      libraryRenderLangChips();
+      libraryRenderGrid();
+      libraryRenderLoadMore();
+    } else {
+      libraryFetch(false);
+    }
     if (window.innerWidth >= 768) searchInput.focus();
   }
 

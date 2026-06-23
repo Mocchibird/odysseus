@@ -16,8 +16,16 @@ const _editingHabits = new Set();  // habit ids (as strings) currently in inline
 // only changes when a habit's done-state changes, so we fetch it once and reuse
 // it across re-renders instead of refetching EVERY habit's heatmap on every
 // mutation (was N network requests per click). Invalidated per-habit on
-// check/uncheck/delete; cleared wholesale on open.
+// check/uncheck/delete; cleared on open only if older than the reuse TTL.
 const _heatmapCache = {};
+let _heatmapCachedAt = 0;            // ms of last habits render (heatmap cache freshness)
+const _HABITS_REUSE_TTL = 45000;     // keep heatmaps on a quick minimize/restore
+
+// /profile changes only when the user saves it, but the Weight and Calories
+// tabs both fetch it on every render. Memoize with a TTL; invalidate on save.
+let _profileCache = null;
+let _profileCachedAt = 0;
+const _HEALTH_PROFILE_TTL = 300000;  // 5 min
 
 const esc = uiModule.esc;  // reuse the canonical HTML-escape helper
 
@@ -159,6 +167,14 @@ async function _api(path, opts = {}) {
     throw new Error(msg);
   }
   return res.status === 204 ? {} : res.json();
+}
+
+// Memoized profile fetch — see _profileCache above.
+async function _getProfile() {
+  if (_profileCache && Date.now() - _profileCachedAt < _HEALTH_PROFILE_TTL) return _profileCache;
+  const p = await _api('/profile');
+  _profileCache = p; _profileCachedAt = Date.now();
+  return p;
 }
 
 // ── SVG charts ───────────────────────────────────────────────────────────────
@@ -331,6 +347,7 @@ async function _renderHabits() {
   // Scroll each heatmap to its right edge so TODAY is visible without the user
   // having to scroll across a year of history.
   b.querySelectorAll('.health-hm-scroll').forEach((el) => { el.scrollLeft = el.scrollWidth; });
+  _heatmapCachedAt = Date.now();   // heatmaps now resident — reuse on a quick reopen
   b.querySelector('#health-add-habit')?.addEventListener('submit', async (e) => {
     e.preventDefault();
     const fd = new FormData(e.target);
@@ -390,7 +407,7 @@ async function _renderHabits() {
 async function _renderWeight() {
   const b = _body(); if (!b) return;
   let trend, profile, wResp;
-  try { [trend, profile, wResp] = await Promise.all([_api('/weights/trend?days=180'), _api('/profile'), _api('/weights?days=180')]); }
+  try { [trend, profile, wResp] = await Promise.all([_api('/weights/trend?days=180'), _getProfile(), _api('/weights?days=180')]); }
   catch (e) { b.innerHTML = `<div class="health-error">${esc(e.message)}</div>`; return; }
   const entries = wResp?.weights || [];
   const target = profile.profile?.target_kg ?? null;
@@ -465,7 +482,7 @@ async function _renderCalories() {
     [day, series, profile, histResp] = await Promise.all([
       _api(`/calories?date=${_todayLocal()}`),
       _api('/calories/series?days=14'),
-      _api('/profile'),
+      _getProfile(),
       _api('/meals?days=14'),
     ]);
   } catch (e) { b.innerHTML = `<div class="health-error">${esc(e.message)}</div>`; return; }
@@ -676,7 +693,7 @@ async function _renderCalories() {
       target_kg: num('target_kg'), target_weekly_loss_kg: num('target_weekly_loss_kg'),
       daily_kcal_target: num('daily_kcal_target'),
     };
-    try { await _api('/profile', { method: 'PUT', body: JSON.stringify(payload) }); _renderCalories(); uiModule.showToast?.('Profile saved'); }
+    try { await _api('/profile', { method: 'PUT', body: JSON.stringify(payload) }); _profileCache = null; _renderCalories(); uiModule.showToast?.('Profile saved'); }
     catch (err) { uiModule.showError?.(err.message); }
   });
 }
@@ -883,9 +900,12 @@ export function openHabits() {
   _habitsEsc = (e) => { if (e.key === 'Escape' && _habitsOpen) closeHabits(); };
   document.addEventListener('keydown', _habitsEsc);
 
-  // Fresh open: drop cached heatmaps so external changes (Today panel, agent)
-  // made while this was closed are reflected.
-  Object.keys(_heatmapCache).forEach((k) => delete _heatmapCache[k]);
+  // Fresh open after the reuse window: drop cached heatmaps so external changes
+  // (Today panel, agent) made while closed are reflected. A quick minimize/
+  // restore keeps them, avoiding a re-fetch of every habit's 371-day heatmap.
+  if (Date.now() - _heatmapCachedAt > _HABITS_REUSE_TTL) {
+    Object.keys(_heatmapCache).forEach((k) => delete _heatmapCache[k]);
+  }
   _renderHabits();
 }
 

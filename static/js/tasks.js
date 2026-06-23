@@ -1349,12 +1349,11 @@ function _showForm(existing, initTaskType, initTriggerType) {
   // Populate model dropdown from /api/models. Value is "endpoint_url::model"
   // so a single field encodes both the model name and which endpoint to call.
   // Blank value (option 0) = inherit session default.
-  fetch(`${API_BASE}/api/models`, { credentials: 'same-origin' })
-    .then(r => r.json())
-    .then(data => {
+  Promise.resolve(window.modelsModule.getModelsData())
+    .then(allItems => {
       const modelSel = document.getElementById('task-form-model');
       if (!modelSel) return;
-      const items = (data.items || []).filter(it => (it.model_type || 'llm') === 'llm');
+      const items = (allItems || []).filter(it => (it.model_type || 'llm') === 'llm');
       const curKey = existing?.endpoint_url && existing?.model
         ? `${existing.endpoint_url}::${existing.model}`
         : '';
