@@ -242,12 +242,9 @@ class Document(TimestampMixin, Base):
     # Library + search. Owning the row directly is robust against that.
     owner           = Column(String, nullable=True, index=True)
     tidy_verdict    = Column(String, nullable=True)        # "keep", "junk", or None (not yet reviewed)
-    # Library organization. `folder` is DEPRECATED (the single-home model was
-    # replaced by multi-`tags`); the column stays for back-compat but is unused.
-    # `tags` is a comma-separated list (e.g. "Tech,Kernel,reference") — a doc can
-    # carry several; the Library filters/AI-suggests on these.
-    folder          = Column(String, nullable=True, default=None)   # deprecated, unused
-    tags            = Column(String, nullable=True, default=None)   # comma-separated tags
+    # Library organization: a comma-separated list of tags (e.g. "Tech,Kernel").
+    # A doc can carry several; the Library filters/AI-suggests on these.
+    tags            = Column(String, nullable=True, default=None)
     # Provenance: if this document was created by opening an email attachment,
     # these point back to the source email so the "Sign and reply" flow can
     # thread a response on the original conversation.
@@ -1589,19 +1586,6 @@ def _migrate_add_tidy_verdict():
         logging.getLogger(__name__).warning(f"tidy_verdict migration: {e}")
 
 
-def _migrate_add_document_folder_column():
-    """Add folder column to documents table if missing (Library foldering)."""
-    try:
-        with engine.connect() as conn:
-            cols = [r[1] for r in conn.execute(text("PRAGMA table_info(documents)"))]
-            if "folder" not in cols:
-                conn.execute(text("ALTER TABLE documents ADD COLUMN folder VARCHAR"))
-                conn.commit()
-                logging.getLogger(__name__).info("Added folder column to documents")
-    except Exception as e:
-        logging.getLogger(__name__).warning(f"document folder migration: {e}")
-
-
 def _migrate_add_document_tags_column():
     """Add tags column to documents table if missing (Library tagging)."""
     try:
@@ -2242,7 +2226,6 @@ def init_db():
     _migrate_backfill_document_owner_from_session()
     _migrate_assign_legacy_owner()
     _migrate_add_tidy_verdict()
-    _migrate_add_document_folder_column()
     _migrate_add_document_tags_column()
     _migrate_add_doc_source_email_cols()
     _migrate_add_oauth_config()
