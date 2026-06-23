@@ -2148,6 +2148,7 @@ function _startResearchPolling() {
       _researchPollTimer = null;
       return;
     }
+    if (document.hidden) return;   // research runs server-side; UI catches up on return
     for (var sid of _researchingSessions) {
       try {
         var res = await fetch(`${API_BASE}/api/research/status/${sid}`);

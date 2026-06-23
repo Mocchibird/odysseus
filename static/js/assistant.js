@@ -379,6 +379,7 @@ function _renderSettingsBody(body, data, tzList) {
       // Poll until done, then navigate to assistant chat
       const sid = _cachedSettings?.crew?.session_id;
       const _poll = setInterval(async () => {
+        if (document.hidden) return;   // run continues server-side; resume polling when visible
         try {
           const res = await fetch(`${API}/run-status/${encodeURIComponent(taskId)}`, { credentials: 'same-origin' });
           if (!res.ok) return;

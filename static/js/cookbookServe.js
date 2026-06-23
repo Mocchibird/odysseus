@@ -49,6 +49,7 @@ const SERVE_STATE_KEY = 'cookbook-serve-state';
 const SERVE_FAVORITES_KEY = 'cookbook-serve-favorite-models';
 
 let _cachedAllModels = [];
+let _vramTimerId = null;   // module-scoped so reopening the panel can't stack timers
 
 function _loadServeFavorites() {
   try {
@@ -1797,11 +1798,15 @@ function _rerenderCachedModels() {
         }
       }
       _refreshVramMonitor();
-      // Poll every 4s while the panel is open; stop when it's removed from the DOM.
-      const _vramTimer = setInterval(async () => {
+      // Poll while the panel is open; stop when it's removed from the DOM. Skip
+      // ticks while the tab is hidden (no point polling VRAM you can't see), and
+      // clear any prior timer so reopening the panel never stacks intervals.
+      if (_vramTimerId) clearInterval(_vramTimerId);
+      _vramTimerId = setInterval(async () => {
+        if (document.hidden) return;
         const ok = await _refreshVramMonitor();
-        if (ok === false) clearInterval(_vramTimer);
-      }, 4000);
+        if (ok === false) { clearInterval(_vramTimerId); _vramTimerId = null; }
+      }, 8000);
 
       // Backend icons — accent color, rendered via currentColor. vLLM gets
       // a stylized double-V mark, the others fall back to a recognizable

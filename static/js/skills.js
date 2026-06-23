@@ -1461,6 +1461,7 @@ async function _auditAllSkills(opts = {}) {
   if (_auditPoll) clearInterval(_auditPoll);
   if (st.status === 'running') {
     _auditPoll = setInterval(async () => {
+      if (document.hidden) return;   // audit runs server-side; catch up when visible
       const s = await _fetchAuditStatus();
       _renderAuditPanel(panel, s);
       _applyAuditResults(s);
@@ -1470,7 +1471,7 @@ async function _auditAllSkills(opts = {}) {
         _highlightAuditCard(null);
         loadSkills();  // refresh statuses (some may have been demoted/edited)
       }
-    }, 1500);
+    }, 3000);
   }
 }
 

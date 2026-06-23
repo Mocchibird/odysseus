@@ -2947,8 +2947,9 @@ function startLogsPolling() {
       return;
     }
 
+    if (document.hidden) return;   // don't fetch logs into a backgrounded tab
     loadLogs(true);
-  }, 3000);
+  }, 5000);
 }
 
 function stopLogsPolling() {

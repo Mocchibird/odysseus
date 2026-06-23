@@ -3656,6 +3656,7 @@ export async function _selfHealStaleTasks(opts = {}) {
 export function _startBackgroundMonitor() {
   if (_bgMonitorInterval) return;
   _bgMonitorInterval = setInterval(() => {
+    if (document.hidden) return;   // don't poll the backend from a backgrounded tab
     _pollBackgroundStatus();
     _checkServeReachability();
     // Auto-reconnect: every cycle, look for download tasks marked finished/
