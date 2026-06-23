@@ -7,3 +7,14 @@ repos:
     rev: v0.15.18
     hooks:
       - id: ruff           # `ruff check` (no --fix: report + block, don't silently rewrite)
+  # CSS lint (config in .stylelintrc.json). Uses the repo's npm stylelint — run
+  # `npm install` once so npx resolves it locally. Real-bug rules block; the
+  # legacy duplicate-selector backlog is a non-blocking warning.
+  - repo: local
+    hooks:
+      - id: stylelint
+        name: stylelint (CSS)
+        entry: npx --no-install stylelint
+        language: system
+        files: ^static/.*\.css$
+        exclude: ^static/lib/

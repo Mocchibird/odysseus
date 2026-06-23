@@ -2256,7 +2256,6 @@ body.bg-pattern-sparkles {
       line-height: 1.4;
       font-size: 0.95em;
       font-family: 'Fira Code', 'Courier New', monospace;
-      min-height: 38px;
       max-width: 100%;
       margin: 8px 0;
       white-space: pre-wrap;
@@ -5219,7 +5218,6 @@ body.bg-pattern-sparkles {
       display:inline-flex;
       align-items:center;
       justify-content:center;
-      line-height:1;
       text-indent:0;
       cursor:pointer;
       border-radius:4px;
@@ -5322,9 +5320,7 @@ body.bg-pattern-sparkles {
       position: fixed !important;
       top: 0 !important;
       left: 0 !important;
-      width: 100% !important;
-      height: 100% !important;
-      top: 0; left: 0; width: 100%; height: 100%;
+      width: 100% !important; height: 100% !important;
     }
     #styled-confirm-overlay .modal-content {
       position: relative;
@@ -9822,8 +9818,6 @@ details a:hover {
   display: flex;
   gap: 0;
   border-bottom: 1px solid var(--border);
-  margin: 0 -10px 12px;
-  padding: 0 10px;
   margin: 0 -16px;
   padding: 0 16px;
   margin-bottom: 12px;
@@ -13504,7 +13498,6 @@ mark.doc-find-mark.current {
 .doc-suggestion-accept-all {
   flex: 1;
   padding: 5px 8px;
-  border: none;
   border-radius: 5px;
   cursor: pointer;
   font-size: 10px;
@@ -13581,7 +13574,6 @@ mark.doc-find-mark.current {
 @media (max-width: 768px) {
   .doc-suggestion-card {
     right: 8px;
-    right: 8px;
     width: auto;
     top: 8px !important;
   }
@@ -13634,7 +13626,6 @@ mark.doc-find-mark.current {
 }
 .diff-stat-del { color: var(--warn); }
 .diff-stat-add { color: var(--green); }
-.doc-diff-content { }
 .doc-diff-line {
   padding: 1px 8px;
   border-radius: 4px;
@@ -17847,7 +17838,7 @@ body:not(.email-doc-split-active) #email-lib-modal.email-lib-fullscreen:not(.mod
 .gallery-ai-chip {
   background: color-mix(in srgb, var(--accent, var(--red)) 12%, transparent);
   border: 1px solid color-mix(in srgb, var(--accent, var(--red)) 25%, transparent);
-  border-radius: 10px; padding: 3px 8px; font-size: 10px;
+  border-radius: 10px; padding: 3px 8px;
   color: var(--fg); opacity: 0.8;
   font: inherit; font-size: 10px;
   cursor: pointer;
@@ -21894,7 +21885,6 @@ body:not(.email-doc-split-active) #email-lib-modal.email-lib-fullscreen:not(.mod
   align-items: center;
   justify-content: center;
   padding: 0;
-  line-height: 0;
   padding-bottom: 3px;
   line-height: 16px;
   text-align: center;
@@ -26353,7 +26343,6 @@ details.hwfit-serve-advanced > .hwfit-serve-checks:last-of-type {
   width: 100%;
   text-align: left;
   padding: 5px 8px;
-  font-size: 11px;
   gap: 8px;
   font: inherit;
   font-size: 11px;
@@ -36680,7 +36669,6 @@ button.cal-event-more:hover { opacity:1 !important; }
   letter-spacing: 0.02em;
   font-weight: 200;
   color: var(--fg);
-  line-height: 1;
   /* Behaves like a button — strip native chrome but keep it tappable. */
   background: none;
   border: none;

@@ -1,0 +1,14 @@
+{
+  "comment": "High-signal CSS checks only — real bugs/cruft, NOT stylistic reformatting (the codebase has its own conventions). Mirrors the Ruff philosophy.",
+  "rules": {
+    "declaration-block-no-duplicate-properties": [true, { "ignore": ["consecutive-duplicates-with-different-values"] }],
+    "declaration-block-no-shorthand-property-overrides": true,
+    "no-duplicate-selectors": [true, { "severity": "warning" }],
+    "no-duplicate-at-import-rules": true,
+    "block-no-empty": true,
+    "color-no-invalid-hex": true,
+    "font-family-no-duplicate-names": true,
+    "no-invalid-position-at-import-rule": true,
+    "no-empty-source": true
+  }
+}

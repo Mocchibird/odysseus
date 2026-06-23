@@ -3,7 +3,11 @@
     "type": "git",
     "url": "https://github.com/pewdiepie-archdaemon/odysseus.git"
   },
+  "scripts": {
+    "lint:css": "stylelint static/style.css static/fork.css"
+  },
   "devDependencies": {
-    "@antithesishq/bombadil": "^0.6.1"
+    "@antithesishq/bombadil": "^0.6.1",
+    "stylelint": "^16.0.0"
   }
 }
