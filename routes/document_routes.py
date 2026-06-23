@@ -357,6 +357,7 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
         try:
             body_text = strip_pdf_content_marker(_process_pdf(pdf_path, owner=user))
         except Exception:
+            logger.warning("PDF text extraction failed for %s; importing without body", pdf_path, exc_info=True)
             body_text = None
 
         is_form = False

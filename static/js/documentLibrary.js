@@ -602,6 +602,8 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
     const card = document.createElement('div');
     card.className = 'doclib-card memory-item';
     card.dataset.docId = doc.id;
+    card.setAttribute('role', 'button');   // keyboard-operable (Enter/Space wired below)
+    card.tabIndex = 0;
     if (_librarySelectMode && _librarySelectedIds.has(doc.id)) {
       card.classList.add('selected');
     }
@@ -1001,6 +1003,15 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
         if (cb) { cb.checked = !cb.checked; cb.dispatchEvent(new Event('change')); }
       } else {
         libraryExpandCard(card, doc);
+      }
+    });
+    // Keyboard activation for the role=button card — Enter/Space, but only when
+    // the card itself is focused (let child controls like the ⋮ menu / links
+    // handle their own keys).
+    card.addEventListener('keydown', (e) => {
+      if ((e.key === 'Enter' || e.key === ' ') && e.target === card) {
+        e.preventDefault();
+        card.click();
       }
     });
     _attachLongPressMenu(card, '.memory-item-btn');
@@ -1766,7 +1777,7 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
                   <option value="alpha">A\u2013Z</option>
                 </select>
                 <button class="memory-toolbar-btn" id="doclib-chats-select-btn">Select</button>
-                <button class="memory-toolbar-btn" id="doclib-chats-tidy-btn" title="AI tidy: delete junk sessions and organize into folders"><svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" style="vertical-align:-1px;margin-right:2px;"><path d="M12 0L14.59 8.41L23 12L14.59 15.59L12 24L9.41 15.59L1 12L9.41 8.41Z"/></svg> Tidy</button>
+                <button class="memory-toolbar-btn" id="doclib-chats-tidy-btn" aria-label="AI tidy chats" title="AI tidy: delete junk sessions and organize into folders"><svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" style="vertical-align:-1px;margin-right:2px;"><path d="M12 0L14.59 8.41L23 12L14.59 15.59L12 24L9.41 15.59L1 12L9.41 8.41Z"/></svg> Tidy</button>
               </div>
               <input type="text" id="doclib-chats-search" placeholder="Search chats\u2026" class="memory-search-input" />
               <div id="doclib-chats-chips" class="doclib-lang-chips"></div>
@@ -1821,7 +1832,7 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
                   <option value="alpha">A\u2013Z</option>
                 </select>
                 <button class="memory-toolbar-btn" id="doclib-research-select-btn">Select</button>
-                <button class="memory-toolbar-btn" id="doclib-research-tidy-btn" title="Tidy: delete research with no sources or empty reports">Tidy</button>
+                <button class="memory-toolbar-btn" id="doclib-research-tidy-btn" aria-label="Tidy research" title="Tidy: delete research with no sources or empty reports">Tidy</button>
               </div>
               <input type="text" id="doclib-research-search" placeholder="Search research\u2026" class="memory-search-input" />
             </div>
@@ -1877,7 +1888,7 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
                   <option value="alpha">A\u2013Z</option>
                 </select>
                 <button class="memory-toolbar-btn" id="doclib-select-btn" title="Select documents">Select</button>
-                <button class="memory-toolbar-btn" id="doclib-tidy-btn" title="Tidy: remove empty / junk / duplicate documents">Tidy</button>
+                <button class="memory-toolbar-btn" id="doclib-tidy-btn" aria-label="Tidy documents" title="Tidy: remove empty / junk / duplicate documents">Tidy</button>
               </div>
               <input type="text" id="doclib-search" placeholder="Search titles &amp; content\u2026" class="memory-search-input" />
               <div id="doclib-tag-chips" class="doclib-lang-chips"></div>
