@@ -362,9 +362,17 @@ def _link_meal_photo(owner, meal, att_ids, upload_handler):
         if len(image_ids) != 1:  # 0 or ambiguous → skip; user can attach via the panel
             return None
         from src import health_store as hs
-        if hs.update_meal(owner, int(meal_id), photo_upload_id=image_ids[0]):
-            return image_ids[0]
-        return None
+        if not hs.update_meal(owner, int(meal_id), photo_upload_id=image_ids[0]):
+            return None
+        # Auto-file the same photo into the "Food Journal" gallery album so it
+        # lands there from a single log action — no fragile second tool call by
+        # the model (which was mis-passing upload_ids / breaking images).
+        try:
+            from src.gallery_ingest import ingest_upload
+            ingest_upload(owner, image_ids[0], album="Food Journal")
+        except Exception:
+            logger.debug("Food Journal auto-file skipped", exc_info=True)
+        return image_ids[0]
     except Exception:
         logger.exception("Failed to link meal photo")
         return None

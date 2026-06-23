@@ -20,6 +20,27 @@ logger = logging.getLogger(__name__)
 _VIDEO_EXTS = {"mp4", "mov", "webm", "mkv", "m4v"}
 _IMAGE_EXTS = {"png", "jpg", "jpeg", "webp", "gif"}
 
+# Fallback when the upload's stored NAME has no usable extension (e.g. a pasted
+# PC screenshot or an iPhone share saved without one). The direct gallery upload
+# defaults a missing extension to a sane value instead of rejecting; ingest used
+# to default to "" and then reject/mis-store → broken/blank gallery thumbnail.
+_MIME_TO_EXT = {
+    "image/png": "png", "image/jpeg": "jpg", "image/jpg": "jpg",
+    "image/webp": "webp", "image/gif": "gif",
+    "video/mp4": "mp4", "video/quicktime": "mov", "video/webm": "webm",
+    "video/x-matroska": "mkv",
+}
+
+
+def _pick_ext(name: str, mime: str = "") -> str:
+    """Choose a storage extension for an upload: prefer a known extension on the
+    name, else derive from the mime type. Returns "" if neither yields a
+    supported image/video extension (caller rejects)."""
+    ext = (name or "").rsplit(".", 1)[-1].lower() if "." in (name or "") else ""
+    if ext in _VIDEO_EXTS or ext in _IMAGE_EXTS:
+        return ext
+    return _MIME_TO_EXT.get((mime or "").split(";")[0].strip().lower(), "")
+
 
 def _find_or_create_album(db, owner: Optional[str], name: str) -> Optional[str]:
     from core.database import GalleryAlbum
@@ -55,9 +76,9 @@ def ingest_upload(owner: Optional[str], upload_id: str, *, album: Optional[str] 
 
     src_path = info["path"]
     original = str(info.get("name") or info.get("original_name") or upload_id)
-    ext = (original.rsplit(".", 1)[-1].lower() if "." in original else "")
+    ext = _pick_ext(original, info.get("mime") or "")
     if ext not in _VIDEO_EXTS and ext not in _IMAGE_EXTS:
-        raise ValueError(f"Not an image/video (.{ext}) — use manage_files for other types")
+        raise ValueError(f"Not an image/video (.{ext or '?'}) — use manage_files for other types")
     is_video = ext in _VIDEO_EXTS
 
     with open(src_path, "rb") as fh:
