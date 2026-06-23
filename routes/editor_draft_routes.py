@@ -23,6 +23,7 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
+from sqlalchemy.orm import defer
 
 from core.database import EditorDraft, SessionLocal
 from src.auth_helpers import get_current_user
@@ -83,7 +84,10 @@ def setup_editor_draft_routes() -> APIRouter:
         user = get_current_user(request)
         db = SessionLocal()
         try:
-            q = db.query(EditorDraft).filter(EditorDraft.is_active == True)
+            # defer(payload): the list view never returns the (multi-MB,
+            # base64-PNG) payload — _summary() omits it — so don't read it out
+            # of SQLite for up to 200 rows just to discard it.
+            q = db.query(EditorDraft).options(defer(EditorDraft.payload)).filter(EditorDraft.is_active == True)
             if user is not None:
                 q = q.filter(EditorDraft.owner == user)
             rows = q.order_by(EditorDraft.updated_at.desc()).limit(200).all()

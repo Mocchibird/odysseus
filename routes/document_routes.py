@@ -467,9 +467,24 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
             sc_q = _owner_session_filter(sc_q, user)
             session_count = sc_q.scalar()
 
-            # Base query
+            # Base query. Select only the columns the list needs — crucially
+            # NOT the full current_content (authored docs / PDF wrappers can be
+            # many MB), just a 500-char preview computed in SQL. Language is the
+            # same SQL expression used for the facet counts above, so row and
+            # facet language can't drift apart.
             q = (
-                db.query(Document, DbSession.name)
+                db.query(
+                    Document.id,
+                    Document.session_id,
+                    Document.title,
+                    library_language_expr.label("lib_language"),
+                    func.substr(Document.current_content, 1, 500).label("preview"),
+                    Document.version_count,
+                    Document.tags,
+                    Document.created_at,
+                    Document.updated_at,
+                    DbSession.name.label("session_name"),
+                )
                 .outerjoin(DbSession, Document.session_id == DbSession.id)
                 .filter(Document.is_active == True).filter(_arch_cond)
             )
@@ -523,18 +538,18 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
             rows = q.offset(offset).limit(limit).all()
 
             documents = []
-            for doc, session_name in rows:
+            for row in rows:
                 documents.append({
-                    "id": doc.id,
-                    "session_id": doc.session_id,
-                    "session_name": session_name,
-                    "title": doc.title,
-                    "language": _library_language_for_document(doc),
-                    "preview": (doc.current_content or "")[:500],
-                    "version_count": doc.version_count,
-                    "tags": _parse_tags(doc.tags),
-                    "created_at": (doc.created_at.isoformat() + "Z") if doc.created_at else None,
-                    "updated_at": (doc.updated_at.isoformat() + "Z") if doc.updated_at else None,
+                    "id": row.id,
+                    "session_id": row.session_id,
+                    "session_name": row.session_name,
+                    "title": row.title,
+                    "language": row.lib_language,
+                    "preview": (row.preview or "")[:500],
+                    "version_count": row.version_count,
+                    "tags": _parse_tags(row.tags),
+                    "created_at": (row.created_at.isoformat() + "Z") if row.created_at else None,
+                    "updated_at": (row.updated_at.isoformat() + "Z") if row.updated_at else None,
                 })
 
             return {

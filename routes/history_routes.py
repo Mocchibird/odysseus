@@ -181,19 +181,28 @@ def setup_history_routes(session_manager) -> APIRouter:
                         return meta.get('_db_id') if isinstance(meta, dict) else None
                     session.history = [m for m in session.history if _get_db_id(m) not in msg_ids]
                 elif indices:
-                    # Legacy index-based delete
+                    # Legacy index-based delete. Pull only the id column ordered
+                    # by timestamp (not whole message bodies) to map position →
+                    # id, then bulk-delete by id.
                     indices = sorted(indices, reverse=True)
-                    db_messages = db.query(DbChatMessage).filter(
-                        DbChatMessage.session_id == session_id
-                    ).order_by(DbChatMessage.timestamp).all()
+                    ids_by_pos = [
+                        r[0] for r in db.query(DbChatMessage.id).filter(
+                            DbChatMessage.session_id == session_id
+                        ).order_by(DbChatMessage.timestamp).all()
+                    ]
 
                     deleted = 0
+                    target_ids = []
                     for idx in indices:
-                        if 0 <= idx < len(db_messages):
-                            db.delete(db_messages[idx])
+                        if 0 <= idx < len(ids_by_pos):
+                            target_ids.append(ids_by_pos[idx])
                             deleted += 1
                         if 0 <= idx < len(session.history):
                             session.history.pop(idx)
+                    if target_ids:
+                        db.query(DbChatMessage).filter(
+                            DbChatMessage.id.in_(target_ids)
+                        ).delete(synchronize_session=False)
                 else:
                     return {"status": "ok", "deleted": 0}
 
