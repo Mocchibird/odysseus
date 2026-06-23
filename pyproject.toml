@@ -1,3 +1,28 @@
+[tool.ruff]
+# Lint only (we don't run the formatter — keeps the diff sane on this codebase).
+line-length = 100
+# data/ is a persisted venv; agent_migration_manifest is generated.
+extend-exclude = ["data", "scripts/agent_migration_manifest.py"]
+
+[tool.ruff.lint]
+# HIGH-SIGNAL ONLY. pyflakes (F) = real bugs: unused imports/vars, undefined
+# names, f-strings with no placeholders, duplicate dict keys. E9 = syntax/IO
+# errors. The stylistic E4/E7 rules are deliberately OFF — this codebase uses
+# late imports (E402), one-line `if x: return` (E701/E702), and SQLAlchemy
+# `== True` / `== None` filter idioms (E712/E711) on purpose, and churning
+# those would be noise, not consistency.
+select = ["E9", "F"]
+
+[tool.ruff.lint.per-file-ignores]
+# Package __init__ files legitimately re-export names (incl. via `import *`).
+"**/__init__.py" = ["F401", "F403"]
+# src/database.py is a pure re-export shim of core.database (keeps `from
+# src.database import X` working everywhere) — its "unused" imports ARE the point.
+"src/database.py" = ["F401", "F403"]
+# Tests import fixtures/modules for side effects, redefine helpers, and keep
+# unused locals (e.g. an awaited result they don't assert on) for clarity.
+"tests/**" = ["F401", "F811", "F841"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"

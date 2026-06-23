@@ -17,7 +17,6 @@ import os
 import logging
 import sys
 from pathlib import Path
-from typing import List, Tuple
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from src.constants import PERSONAL_DIR

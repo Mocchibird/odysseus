@@ -1,0 +1,8 @@
+# Dev-only tooling — NOT installed in the runtime image. Install with:
+#   pip install -r requirements-dev.txt
+#
+# Lint (config in pyproject.toml [tool.ruff] — high-signal pyflakes F + E9 only):
+#   ruff check .          # report
+#   ruff check . --fix    # apply safe autofixes (removes unused imports, etc.)
+ruff>=0.15,<0.16
+pre-commit>=3.5

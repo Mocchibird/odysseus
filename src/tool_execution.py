@@ -18,7 +18,7 @@ from typing import Any, Awaitable, Callable, Dict, Optional, Tuple
 
 from src.tool_security import is_public_blocked_tool, owner_is_admin_or_single_user
 from src.constants import DATA_DIR
-from src.tool_utils import _truncate
+from src.tool_utils import _truncate  # noqa: F401  (re-exported; agent_tools import it from here)
 
 # Persistent working directory for agent subprocesses.
 # Resolves to <repo_root>/data, which is the bind-mounted volume in Docker

@@ -190,7 +190,7 @@ async def _fetch_ics_feed(url: str) -> tuple[bytes, str]:
                     if 300 <= resp.status_code < 400:
                         location = resp.headers.get("location")
                         if not location:
-                            raise HTTPException(400, f"ICS feed redirected without a Location header")
+                            raise HTTPException(400, "ICS feed redirected without a Location header")
                         current = urljoin(str(resp.url), location)
                         continue
                     if resp.status_code >= 400:

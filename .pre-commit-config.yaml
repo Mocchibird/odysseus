@@ -1,0 +1,9 @@
+# Automated lint on commit. One-time setup (after `pip install -r requirements-dev.txt`):
+#   pre-commit install
+# Then Ruff (pyproject [tool.ruff]: real-bug rules F + E9) runs on changed Python
+# files before each commit and blocks on errors. Lint everything: `pre-commit run -a`.
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.18
+    hooks:
+      - id: ruff           # `ruff check` (no --fix: report + block, don't silently rewrite)
