@@ -3288,21 +3288,14 @@ body.bg-pattern-sparkles {
     .overflow-menu-item.active .overflow-active-dot {
       display: block;
     }
+    .attach-strip:empty {
+      display: none;
+    }
     .attach-strip {
       display: flex;
       gap: 6px;
       flex-wrap: wrap;
-      margin: 0 0 8px;
-      min-height: 0;
-    }
-    .attach-strip:empty {
-      display: none;
-    }
-    .attach-strip { 
-      display: flex; 
-      gap: 6px; 
-      flex-wrap: wrap; 
-      margin: 6px 0 0; 
+      margin: 6px 0 0;
       min-height: 32px;
       padding: 2px;
     }
@@ -19410,7 +19403,6 @@ body:not(.email-doc-split-active) #email-lib-modal.email-lib-fullscreen:not(.mod
   border-color: color-mix(in srgb, var(--red) 60%, var(--border));
   background: color-mix(in srgb, var(--red) 8%, transparent);
 }
-.cookbook-gpu-clear:disabled { opacity: 0.4; cursor: wait; }
 .cookbook-gpu-clear:disabled { opacity: 0.4; cursor: wait; }
 /* GPU probe popup — per-GPU process list with kill buttons */
 .cookbook-gpu-popup {
