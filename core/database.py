@@ -2197,13 +2197,43 @@ def _migrate_add_notes_reminder_at():
             pass
 
 
+# Bump this WHENEVER a new _migrate_* call is added to init_db() below. Once a
+# database's PRAGMA user_version reaches this number, init_db() skips the whole
+# (idempotent but not free) migration block on subsequent boots — on a mature
+# DB that was ~58 no-op PRAGMA/ALTER probes, 30-odd of them opening their own
+# raw sqlite3 connection, on every startup. Forgetting to bump this means a new
+# migration won't run on already-stamped DBs, so: ADD A MIGRATION -> BUMP THIS.
+SCHEMA_VERSION = 1
+
+
+def _get_user_version() -> int:
+    try:
+        with engine.connect() as conn:
+            return int(conn.execute(text("PRAGMA user_version")).scalar() or 0)
+    except Exception:
+        return 0
+
+
+def _set_user_version(v: int) -> None:
+    try:
+        with engine.connect() as conn:
+            conn.execute(text(f"PRAGMA user_version = {int(v)}"))
+            conn.commit()
+    except Exception as e:
+        logging.getLogger(__name__).warning(f"could not stamp schema user_version: {e}")
+
+
 def init_db():
     """
     Initialize the database by creating all tables.
     Should be called when starting the application.
     """
+    # Always run: the pre-create endpoint migration and table creation are cheap
+    # and must apply to brand-new DBs (which then get stamped + skip the rest).
     _migrate_model_endpoints()
     Base.metadata.create_all(bind=engine)
+    if _get_user_version() >= SCHEMA_VERSION:
+        return
     _migrate_add_hidden_models_column()
     _migrate_add_cached_models_column()
     _migrate_add_pinned_models_column()
@@ -2257,6 +2287,8 @@ def init_db():
     _migrate_encrypt_signatures()
     _migrate_encrypt_endpoint_keys()
     _migrate_backfill_task_folders()
+    # All migrations applied — stamp so the next boot skips this block.
+    _set_user_version(SCHEMA_VERSION)
 
 
 def _migrate_backfill_task_folders():
