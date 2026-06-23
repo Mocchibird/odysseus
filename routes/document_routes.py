@@ -545,7 +545,9 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
             }
         except Exception as e:
             logger.error(f"Failed to fetch document library: {e}")
-            raise HTTPException(500, f"Failed to fetch document library: {e}")
+            # Don't echo the raw exception to the client (can leak internals);
+            # the detail is logged above.
+            raise HTTPException(500, "Failed to load the document library")
         finally:
             db.close()
 

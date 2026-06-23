@@ -686,6 +686,7 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
     const menuBtn = document.createElement('button');
     menuBtn.className = 'memory-item-btn';
     menuBtn.title = 'Actions';
+    menuBtn.setAttribute('aria-label', 'Document actions');   // icon-only button
     menuBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg>';
     menuBtn.addEventListener('click', (e) => {
       e.stopPropagation();

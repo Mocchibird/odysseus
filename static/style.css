@@ -11427,6 +11427,12 @@ textarea.memory-add-input {
   color: var(--red);
 }
 
+/* Keyboard focus ring for the filter chips (they're buttons; were hover-only). */
+.memory-cat-chip:focus-visible {
+  outline: 2px solid var(--red);
+  outline-offset: 2px;
+}
+
 /* Sort select — styled to match the .email-filter-btn look:
    appearance reset + custom caret so the native chevron doesn't
    collide with our icon/border treatment. */
@@ -15215,6 +15221,38 @@ span[id$="-logo"] svg:not([width]) {
   position: relative;
 }
 
+/* Consistent clean thin scrollbar for the app's main scroll surfaces (these were
+   a mix of styled + bare chunky OS scrollbars). Mirrors the .doc-editor-textarea
+   pattern; specific `scrollbar-width: none` hide-rules are more specific and
+   still win (mobile chip rows, recipient chips, etc.). */
+.doclib-grid, .modal-body, .memory-modal-body, .memory-tab-panel, .search-results {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--fg) 24%, transparent) transparent;
+}
+.doclib-grid::-webkit-scrollbar, .modal-body::-webkit-scrollbar,
+.memory-modal-body::-webkit-scrollbar, .memory-tab-panel::-webkit-scrollbar,
+.search-results::-webkit-scrollbar { width: 8px; height: 8px; }
+.doclib-grid::-webkit-scrollbar-track, .modal-body::-webkit-scrollbar-track,
+.memory-modal-body::-webkit-scrollbar-track, .memory-tab-panel::-webkit-scrollbar-track,
+.search-results::-webkit-scrollbar-track { background: transparent; }
+.doclib-grid::-webkit-scrollbar-thumb, .modal-body::-webkit-scrollbar-thumb,
+.memory-modal-body::-webkit-scrollbar-thumb, .memory-tab-panel::-webkit-scrollbar-thumb,
+.search-results::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--fg) 24%, transparent);
+  border-radius: 999px;
+}
+.doclib-grid::-webkit-scrollbar-thumb:hover, .modal-body::-webkit-scrollbar-thumb:hover,
+.memory-modal-body::-webkit-scrollbar-thumb:hover, .memory-tab-panel::-webkit-scrollbar-thumb:hover,
+.search-results::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--fg) 36%, transparent);
+}
+
+/* Respect reduced-motion for the library's staggered card reveal. */
+@media (prefers-reduced-motion: reduce) {
+  .doclib-just-opened > .memory-item,
+  .doclib-just-opened > .doclib-card { animation: none !important; }
+}
+
 /* Gallery grid domino-in cascade on open — same recipe as the document/email
    libraries. Applied to #gallery-grid in gallery.js on the first render after
    each open, removed after the longest delay so re-renders feel instant.
@@ -17301,10 +17339,9 @@ body:not(.email-doc-split-active) #email-lib-modal.email-lib-fullscreen:not(.mod
 }
 .doclib-empty {
   text-align: center;
-  color: color-mix(in srgb, var(--fg) 35%, transparent);
+  color: color-mix(in srgb, var(--fg) 55%, transparent);   /* was 35% — near-invisible on dark themes */
   padding: 32px 16px;
-  font-size: 12px;
-  font-style: italic;
+  font-size: 13px;
 }
 /* Unified loading row across every Library tab (Chats / Documents / Research /
    Archive): one opacity, one size, with the whirlpool spinner next to it. */
