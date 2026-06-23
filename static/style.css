@@ -15190,18 +15190,25 @@ span[id$="-logo"] svg:not([width]) {
   .doclib-lang-chips::-webkit-scrollbar { display: none; }
   .doclib-lang-chips > * { flex-shrink: 0; }
 }
-/* Desktop: the Documents library chip rows (tag filter + language facet) wrap
-   fully instead of clipping into the 52px internal scroll above. That scroll
-   showed cut-off chips + up/down arrows once a row passed ~2 lines — the bug
-   that hit folders and then tags. They grow with their content; the doc grid
-   below keeps its own scroll. Scoped to these two ids so the cookbook/Serve and
-   mobile chip rows keep their existing behaviour. */
-@media (min-width: 769px) {
-  #doclib-tag-chips, #doclib-chips {
-    max-height: none;
-    overflow: visible;
-  }
+/* Documents library chip rows (the tag filter + the language facet) get the
+   SAME treatment as each other at every width: ONE line, scroll horizontally.
+   Previously the desktop rule let them wrap into a tall multi-line block and the
+   base rule scrolled them vertically inside 52px — together they overflowed the
+   toolbar and overlapped the grid. Scoped to these two ids so the cookbook/Serve
+   chip rows keep their behaviour. */
+#doclib-tag-chips, #doclib-chips {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  overflow-y: hidden;
+  max-height: none;
+  scrollbar-width: thin;
 }
+#doclib-tag-chips > *, #doclib-chips > * { flex-shrink: 0; }
+/* The library toolbars stack filters + search + two chip rows, which exceeds
+   the generic .memory-toolbar 120px cap (added for the cookbook). Let the
+   library's toolbars size to their content so the chip rows can't bleed over
+   the document grid below. */
+#doclib-modal .memory-toolbar { max-height: none; }
 #doclib-tidy-btn, #doclib-select-btn, #doclib-chats-tidy-btn {
   position: relative;
   top: -3px;
