@@ -329,6 +329,69 @@ async def test_documents_library_folder_facet_and_filter():
         droutes.SessionLocal = previous
 
 
+@pytest.mark.asyncio
+async def test_suggest_folder_uses_model_and_neighbours(monkeypatch):
+    """The suggester feeds the model where related notes already live and returns
+    its pick. Two kernel notes in Tech/Kernel → a new kernel note → Tech/Kernel."""
+    import src.task_endpoint as te
+    import src.llm_core as llm
+    previous = _bind_test_db()
+    try:
+        ep = _endpoint("GET", "/api/document/{doc_id}/suggest-folder")
+        target, n1, n2 = (str(uuid.uuid4()) for _ in range(3))
+        db = _TS()
+        try:
+            db.query(Document).delete()
+            db.add(_doc(target, "Kernel scheduler notes", "alice", content="CFS scheduler"))
+            d1 = _doc(n1, "Kernel memory mgmt", "alice"); d1.folder = "Tech/Kernel"
+            d2 = _doc(n2, "Linux boot", "alice"); d2.folder = "Tech/Kernel"
+            db.add_all([d1, d2]); db.commit()
+        finally:
+            db.close()
+        monkeypatch.setattr(content_rag, "semantic_search", lambda *a, **k: [{"kb_id": n1}, {"kb_id": n2}])
+        monkeypatch.setattr(te, "resolve_task_endpoint", lambda owner=None: ("http://x", "m", {}))
+        captured = {}
+
+        def _fake_llm(url, model, messages, **kw):
+            captured["prompt"] = messages[0]["content"]
+            return '{"folder": "Tech/Kernel", "reason": "matches your kernel notes", "confidence": 0.92}'
+
+        monkeypatch.setattr(llm, "llm_call", _fake_llm)
+        res = await ep(_req("alice"), target)
+        assert res["suggestion"] == "Tech/Kernel"
+        assert res["is_new"] is False                 # Tech/Kernel already exists
+        assert "Tech/Kernel" in res["neighbours"]
+        assert 0.9 <= res["confidence"] <= 1.0
+        assert "Tech/Kernel" in captured["prompt"]     # neighbour folder grounds the prompt
+    finally:
+        droutes.SessionLocal = previous
+
+
+@pytest.mark.asyncio
+async def test_suggest_folder_fallback_without_model(monkeypatch):
+    """No utility model configured → graceful suggestion=None (UI falls back to
+    the manual picker), never an error."""
+    import src.task_endpoint as te
+    previous = _bind_test_db()
+    try:
+        ep = _endpoint("GET", "/api/document/{doc_id}/suggest-folder")
+        did = str(uuid.uuid4())
+        db = _TS()
+        try:
+            db.query(Document).delete()
+            db.add(_doc(did, "Some note", "alice"))
+            db.commit()
+        finally:
+            db.close()
+        monkeypatch.setattr(content_rag, "semantic_search", lambda *a, **k: [])
+        monkeypatch.setattr(te, "resolve_task_endpoint", lambda owner=None: (None, None, None))
+        res = await ep(_req("alice"), did)
+        assert res["suggestion"] is None
+        assert "model" in res["reason"].lower()
+    finally:
+        droutes.SessionLocal = previous
+
+
 def test_document_library_folder_ui_wiring_present():
     """Guard the Phase 1 Library folder UI hooks so a refactor can't drop them."""
     from pathlib import Path
@@ -343,6 +406,10 @@ def test_document_library_folder_ui_wiring_present():
     assert "libraryMoveDocToFolder" in lib
     assert "/api/document/${doc.id}/folder" in lib
     assert "_libraryActiveFolder" in lib
+    # Phase 2: AI suggest-and-confirm "File this" action.
+    assert "librarySuggestFolder" in lib
+    assert "/api/document/${doc.id}/suggest-folder" in lib
+    assert "File this (AI)" in lib
 
 
 def test_obsidian_extras_frontend_wiring_present():

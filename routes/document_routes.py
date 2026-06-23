@@ -776,6 +776,129 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
         finally:
             db.close()
 
+    # ---- GET /api/document/{doc_id}/suggest-folder — AI suggest-and-confirm ----
+    @router.get("/api/document/{doc_id}/suggest-folder")
+    async def suggest_document_folder(request: Request, doc_id: str) -> Dict[str, Any]:
+        """Suggest a Library folder for a document — suggest-and-confirm, it never
+        moves anything. Grounds the choice in where the note's nearest related
+        notes already live, plus the existing folder taxonomy. Best-effort:
+        returns suggestion=None (UI falls back to the manual picker) when no
+        utility model is configured or the output can't be parsed."""
+        import asyncio
+        import json as _json
+        user = get_current_user(request)
+        db = SessionLocal()
+        try:
+            doc = db.query(Document).filter(Document.id == doc_id).first()
+            if not doc:
+                raise HTTPException(404, "Document not found")
+            _verify_doc_owner(db, doc, user)
+            title = doc.title or ""
+            body = re.sub(r"<!--.*?-->", "", doc.current_content or "", flags=re.DOTALL)
+            fq = (db.query(Document.folder)
+                    .filter(Document.is_active == True)
+                    .filter(Document.folder.isnot(None))
+                    .filter(Document.folder != ""))
+            fq = _owner_session_filter(fq, user)
+            existing = sorted({(r[0] or "").strip() for r in fq.distinct().all() if (r[0] or "").strip()})
+        finally:
+            db.close()
+
+        SEED_TOP = ["Personal", "Learning", "Tech", "Transient"]
+
+        # Where do the note's nearest neighbours already live? (the strong signal)
+        neighbours = []  # [(folder, title)]
+        query = (title + "\n" + body).strip()[:2000]
+        if query:
+            try:
+                from src import content_rag
+                hits = content_rag.semantic_search(user, query, k=12, kinds=["document"])
+                nb_ids = [h.get("kb_id") for h in hits if h.get("kb_id") and h.get("kb_id") != doc_id]
+                if nb_ids:
+                    db2 = SessionLocal()
+                    try:
+                        rows = (db2.query(Document.title, Document.folder)
+                                   .filter(Document.id.in_(nb_ids[:12]))
+                                   .filter(Document.folder.isnot(None))
+                                   .filter(Document.folder != "")).all()
+                    finally:
+                        db2.close()
+                    seen = set()
+                    for t, f in rows:
+                        f = (f or "").strip()
+                        if f and f not in seen:
+                            seen.add(f)
+                            neighbours.append((f, t or "Untitled"))
+            except Exception:
+                logger.debug("suggest-folder neighbour lookup failed", exc_info=True)
+
+        def _fallback(reason):
+            return {"suggestion": None, "reason": reason, "confidence": 0.0,
+                    "is_new": False, "candidates": existing,
+                    "neighbours": [f for f, _ in neighbours]}
+
+        from src.task_endpoint import resolve_task_endpoint
+        url, model, headers = resolve_task_endpoint(owner=user)
+        if not url:
+            return _fallback("No utility model configured")
+
+        nb_text = "\n".join(f'  - "{t[:50]}" -> {f}' for f, t in neighbours[:8]) or "  (none filed yet)"
+        prompt = (
+            "You file a personal note into ONE folder. Choose the single best folder.\n\n"
+            "Rules:\n"
+            "- STRONGLY prefer an existing folder, especially one where closely-related notes already live.\n"
+            f"- You may propose a NEW folder ONLY as \"Top/Sub\" under one of: {', '.join(SEED_TOP)} (e.g. \"Tech/Kernel\").\n"
+            "- Use \"Inbox\" only if the note is truly uncategorizable.\n"
+            "- Output ONLY raw JSON, no markdown, no explanation.\n\n"
+            f"Existing folders: {', '.join(existing) if existing else '(none yet)'}\n"
+            f"Closely-related notes already filed:\n{nb_text}\n\n"
+            f"Note title: {title}\n"
+            f"Note excerpt: {body[:1200]}\n\n"
+            'JSON format: {"folder": "Tech/Kernel", "reason": "short why", "confidence": 0.0}'
+        )
+
+        try:
+            from src.llm_core import llm_call
+            raw = await asyncio.to_thread(
+                llm_call, url, model, [{"role": "user", "content": prompt}],
+                temperature=0.2, max_tokens=1024, headers=headers, timeout=60,
+            )
+        except Exception as e:
+            logger.warning("suggest-folder LLM call failed: %s", e)
+            return _fallback("Model call failed")
+
+        text = re.sub(r'<think(?:ing)?>[\s\S]*?</think(?:ing)?>', '', (raw or "").strip(), flags=re.I).strip()
+        fence = re.search(r'```(?:json)?\s*\n?([\s\S]*?)```', text)
+        candidates = [text, fence.group(1) if fence else None,
+                      text[text.find('{'): text.rfind('}') + 1] if ('{' in text and '}' in text) else None]
+        parsed = None
+        for cand in candidates:
+            if not cand:
+                continue
+            try:
+                parsed = _json.loads(re.sub(r',(\s*[}\]])', r'\1', cand))
+                break
+            except Exception:
+                continue
+        if not isinstance(parsed, dict) or not str(parsed.get("folder") or "").strip():
+            return _fallback("Could not parse model output")
+
+        folder = str(parsed.get("folder") or "").strip().strip("/").strip()
+        if folder.lower() == "inbox":
+            folder = ""  # Inbox = unsorted
+        try:
+            confidence = max(0.0, min(1.0, float(parsed.get("confidence") or 0.0)))
+        except (TypeError, ValueError):
+            confidence = 0.0
+        return {
+            "suggestion": folder,                       # "" = Inbox / leave unsorted
+            "reason": str(parsed.get("reason") or "").strip()[:200],
+            "confidence": confidence,
+            "is_new": bool(folder) and folder not in existing,
+            "candidates": existing,
+            "neighbours": [f for f, _ in neighbours],
+        }
+
     # ---- POST /api/document/{doc_id}/extract-pdf-text ----
     @router.post("/api/document/{doc_id}/extract-pdf-text")
     async def extract_pdf_text(request: Request, doc_id: str) -> Dict[str, Any]:

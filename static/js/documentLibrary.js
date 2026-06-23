@@ -411,6 +411,44 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
     } catch { if (uiModule) uiModule.showError('Failed to move document'); }
   }
 
+  // AI suggest-and-confirm: ask the backend for the best folder, then open the
+  // picker with that suggestion pinned on top (with its reason). Falls back to
+  // the plain picker if no suggestion (no model / unparseable). Never auto-moves.
+  async function librarySuggestFolder(anchor, doc) {
+    if (uiModule) uiModule.showToast('Finding a folder…');
+    let data = null;
+    try {
+      const res = await fetch(`${API_BASE}/api/document/${doc.id}/suggest-folder`, { credentials: 'same-origin' });
+      if (res.ok) data = await res.json();
+    } catch { /* fall through to manual */ }
+
+    const sugg = data && typeof data.suggestion === 'string' ? data.suggestion : null;
+    if (sugg === null) {
+      if (uiModule) uiModule.showToast(data && data.reason ? `No suggestion: ${data.reason}` : 'No suggestion — pick a folder');
+      libraryShowFolderPicker(anchor, doc);
+      return;
+    }
+
+    const cur = (doc.folder || '').trim();
+    const names = [...DOCLIB_SEED_FOLDERS];
+    for (const f of Object.keys(_libraryFolders || {})) { if (f && !names.includes(f)) names.push(f); }
+    const reason = (data.reason || '').slice(0, 80);
+    const items = [{
+      label: `✨ ${sugg || 'Inbox'}${reason ? ' — ' + reason : ''}`,
+      action: () => libraryMoveDocToFolder(doc, sugg),
+    }];
+    for (const name of names) {
+      if ((name === 'Inbox' ? '' : name) === sugg) continue;   // already pinned on top
+      const isCur = name === cur || (name === 'Inbox' && !cur);
+      items.push({ label: isCur ? `${name} ✓` : name, action: () => libraryMoveDocToFolder(doc, name === 'Inbox' ? '' : name) });
+    }
+    items.push({
+      label: 'New folder…',
+      action: () => { const sub = prompt('Move to folder (use / for nesting):', sugg || cur); if (sub !== null) libraryMoveDocToFolder(doc, sub.trim()); },
+    });
+    _showLibDropdown(anchor, items);
+  }
+
   function libraryRenderFolderChips() {
     const wrap = document.getElementById('doclib-folder-chips');
     if (!wrap) return;
@@ -841,6 +879,16 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
         libraryShowFolderPicker(menuBtn, doc);
       });
       dropdown.appendChild(moveItem);
+
+      // File this (AI) — suggest-and-confirm: asks the model for the best folder,
+      // then opens the picker with that pick pinned on top. Never auto-moves.
+      const _aiIco = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0l2.6 8.4L23 11l-8.4 2.6L12 22l-2.6-8.4L1 11l8.4-2.6z"/></svg>';
+      const aiItem = document.createElement('button');
+      aiItem.className = 'dropdown-item-compact';
+      aiItem.style.cssText = 'background:none;border:none;width:100%;';
+      aiItem.innerHTML = _di(_aiIco) + '<span>File this (AI)</span>';
+      aiItem.addEventListener('click', (e) => { e.stopPropagation(); hideCardDropdown(); librarySuggestFolder(menuBtn, doc); });
+      dropdown.appendChild(aiItem);
     }
 
     // Delete
