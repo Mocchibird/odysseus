@@ -1,6 +1,12 @@
 /* ============================================ */
 /* Odysseus UI — Consolidated Stylesheet        */
 /* ============================================ */
+/* HEADS UP: many selectors are ALSO overridden inside @media blocks (mobile,
+   print, reduced-motion, short-height). Editing a desktop rule alone often
+   "doesn't move" because a @media rule wins/masks it. Before changing a
+   selector, list all its definitions:
+       python scripts/css_media_audit.py --selector ".your-selector"
+   (and `python scripts/css_media_audit.py` lists every desktop+@media pair.) */
 
 
 /* ── Variables ──
