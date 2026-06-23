@@ -1,4 +1,5 @@
 """User preferences API — per-user key/value store backed by a JSON file."""
+import copy
 import json
 import os
 from typing import Optional
@@ -8,18 +9,37 @@ from src.constants import USER_PREFS_FILE
 
 PREFS_FILE = USER_PREFS_FILE
 
+# mtime-guarded cache: /api/prefs is hit on chat init, settings open, model
+# switch, etc. — re-reading + json-parsing the whole file every time (on the
+# event loop) was pure waste. Re-read only when the file's mtime changes;
+# _save() invalidates explicitly so a same-second write can't serve stale data.
+_prefs_cache = None
+_prefs_cache_mtime = None
+
 
 def _load():
-    """Load the raw prefs file (internal use only)."""
+    """Load the raw prefs file (internal use only). Cached on mtime."""
+    global _prefs_cache, _prefs_cache_mtime
+    try:
+        mtime = os.path.getmtime(PREFS_FILE)
+    except OSError:
+        _prefs_cache, _prefs_cache_mtime = None, None
+        return {}
+    if _prefs_cache is not None and mtime == _prefs_cache_mtime:
+        # Return a deep copy — callers mutate the result before saving.
+        return copy.deepcopy(_prefs_cache)
     try:
         with open(PREFS_FILE, "r", encoding="utf-8") as f:
             data = json.load(f)
-            return data if isinstance(data, dict) else {}
+            data = data if isinstance(data, dict) else {}
     except (FileNotFoundError, json.JSONDecodeError):
         return {}
+    _prefs_cache, _prefs_cache_mtime = data, mtime
+    return copy.deepcopy(data)
 
 
 def _save(prefs):
+    global _prefs_cache, _prefs_cache_mtime
     os.makedirs(os.path.dirname(PREFS_FILE) or ".", exist_ok=True)
     tmp = f"{PREFS_FILE}.tmp.{os.getpid()}"
     with open(tmp, "w", encoding="utf-8") as f:
@@ -27,6 +47,8 @@ def _save(prefs):
         f.flush()
         os.fsync(f.fileno())
     os.replace(tmp, PREFS_FILE)
+    # Invalidate so the next _load() re-reads (mtime resolution can be coarse).
+    _prefs_cache, _prefs_cache_mtime = None, None
 
 
 def _load_for_user(user: Optional[str] = None) -> dict:

@@ -7,6 +7,12 @@ CUSTOM_FONTS_DIR = os.path.join("static", "fonts", "custom")
 FONT_EXTENSIONS = {".ttf", ".otf", ".woff", ".woff2"}
 FAMILY_SUFFIX_WORDS = ("Display", "Rounded", "Serif", "Sans", "Mono", "Code", "Text")
 
+# Cache the derived family map keyed on the directory's mtime — adding/removing
+# a font changes the dir mtime, so the listing + per-file regex parsing only
+# re-runs when fonts actually change, not on every font-picker open.
+_fonts_cache = None
+_fonts_cache_mtime = None
+
 
 def _split_family_token(token):
     """Split common compact font-family suffixes without breaking brand names."""
@@ -36,7 +42,14 @@ def setup_font_routes():
     @router.get("/custom")
     async def list_custom_fonts():
         """Return available custom fonts grouped by derived family name."""
+        global _fonts_cache, _fonts_cache_mtime
         os.makedirs(CUSTOM_FONTS_DIR, exist_ok=True)
+        try:
+            mtime = os.path.getmtime(CUSTOM_FONTS_DIR)
+        except OSError:
+            mtime = None
+        if _fonts_cache is not None and mtime == _fonts_cache_mtime:
+            return {"fonts": _fonts_cache}
         families = {}
         for f in sorted(os.listdir(CUSTOM_FONTS_DIR)):
             ext = os.path.splitext(f)[1].lower()
@@ -50,6 +63,7 @@ def setup_font_routes():
                 "url": f"/static/fonts/custom/{f}",
                 "format": ext.lstrip('.'),
             })
+        _fonts_cache, _fonts_cache_mtime = families, mtime
         return {"fonts": families}
 
     return router
