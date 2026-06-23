@@ -15188,6 +15188,18 @@ span[id$="-logo"] svg:not([width]) {
   .doclib-lang-chips::-webkit-scrollbar { display: none; }
   .doclib-lang-chips > * { flex-shrink: 0; }
 }
+/* Desktop: the Documents library chip rows (tag filter + language facet) wrap
+   fully instead of clipping into the 52px internal scroll above. That scroll
+   showed cut-off chips + up/down arrows once a row passed ~2 lines — the bug
+   that hit folders and then tags. They grow with their content; the doc grid
+   below keeps its own scroll. Scoped to these two ids so the cookbook/Serve and
+   mobile chip rows keep their existing behaviour. */
+@media (min-width: 769px) {
+  #doclib-tag-chips, #doclib-chips {
+    max-height: none;
+    overflow: visible;
+  }
+}
 #doclib-tidy-btn, #doclib-select-btn, #doclib-chats-tidy-btn {
   position: relative;
   top: -3px;
