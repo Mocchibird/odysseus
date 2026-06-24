@@ -265,6 +265,21 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
     _unreg = registerMenuDismiss(teardown);
     dd._dismiss = teardown;   // let bulk removers (reopen sweep) tear down cleanly
 
+    // The library can be dismissed by the swipe-down gesture, which only adds
+    // .hidden to the modal and never runs closeLibrary's _lib-dd cleanup — so
+    // this body-appended popup would linger over the app. Watch the modal and
+    // tear down if it hides or detaches by ANY path (button, Escape, swipe).
+    const _libModal = document.getElementById('doclib-modal');
+    if (_libModal && typeof MutationObserver !== 'undefined') {
+      const _mo = new MutationObserver(() => {
+        if (!document.body.contains(_libModal) || _libModal.classList.contains('hidden')) teardown();
+      });
+      _mo.observe(document.body, { childList: true });
+      _mo.observe(_libModal, { attributes: true, attributeFilter: ['class'] });
+      const _prevUnreg = _unreg;
+      _unreg = () => { _prevUnreg(); _mo.disconnect(); };
+    }
+
     // Swipe-down-to-dismiss (mobile). Mirrors the bottom-sheet feel — drag the
     // popup down and release past the threshold to close. Below threshold,
     // snap back. Vertical-only; horizontal flicks fall through to scrolling.
@@ -730,7 +745,11 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
       // Cancel. Heavier actions (Archive, Delete, Export) live in bulk mode.
       if (window.innerWidth <= 768) {
         const items = [];
-        if (doc.session_id) items.push({ label: 'Open', action: () => libraryOpenInSession(doc) });
+        // Always offer Open. Session-less imports (PDFs etc.) open by id in the
+        // editor via libraryOpenDocument — same as the desktop ⋮ menu and the
+        // expanded card. Previously Open was dropped entirely when a doc had no
+        // session, so imported docs could only be Cloned on mobile/iOS.
+        items.push({ label: 'Open', action: () => (doc.session_id ? libraryOpenInSession(doc) : libraryOpenDocument(doc)) });
         items.push({ label: 'Clone', action: () => libraryImportDocument(doc) });
         _showLibDropdown(menuBtn, items, { onSelect: () => {
           libraryEnterSelectMode();
