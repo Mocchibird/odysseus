@@ -97,6 +97,15 @@ report that answers the original question as completely as possible given all ev
 Remove redundancy, resolve contradictions, and maintain logical flow. \
 Keep source URLs as inline citations where relevant.
 
+Grounding rules (these override the desire to sound complete):
+- Only state claims that the collected evidence supports. Do NOT add facts, numbers, \
+dates, names, or URLs from your own prior knowledge — if it isn't in the evidence, leave \
+it out.
+- Attach the supporting source URL to specific facts, figures, and quotes.
+- Where the evidence is thin, missing, or conflicting, say so plainly (e.g. "Evidence is \
+limited on X" or "Sources disagree on Y") rather than guessing or papering over the gap.
+- Never invent a citation — only cite URLs that actually appear in the evidence.
+
 Write only the updated report — no preamble or meta-commentary.
 """
 
@@ -143,6 +152,14 @@ Requirements:
 - Add a brief executive summary at the top
 - End with a clear conclusion that directly answers the question
 - Write in an engaging, informative style — not dry or robotic
+
+Grounding (do not skip — accuracy outranks completeness):
+- Ground EVERY claim in the collected evidence above. Do NOT introduce facts, statistics, \
+dates, names, or URLs that the evidence doesn't support — if you're reaching for outside \
+knowledge to fill a gap, don't; flag the gap instead.
+- Where the evidence is missing, weak, or contradictory, say so explicitly. A short \
+"## Limitations" or "## Open questions" note is far better than a confident guess.
+- Only cite URLs that appear in the evidence; never fabricate a source or a link.
 """
 
 CATEGORY_PROMPTS = {
