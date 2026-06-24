@@ -948,7 +948,10 @@ async function initImageSettings() {
   const enabledToggle = el('set-imgEnabledToggle');
   const configWrap = modelSel ? modelSel.closest('div[style*="flex-direction"]') : null;
   try {
-    const modelsData = { items: await window.modelsModule.getModelsData() };
+    // Fetch fresh (not the shared cache) — this panel is opened right after
+    // adding/serving an endpoint, so a just-added model must show immediately.
+    const modelsRes = await fetch('/api/models', { credentials: 'same-origin' });
+    const modelsData = await modelsRes.json();
     // Inpaint-compat allowlist — image gen here is scoped to inpainting only,
     // so DALL-E / GPT-Image-1 (no inpaint API) are excluded. Currently:
     //   - any model with 'inpaint' in the id
@@ -1015,7 +1018,10 @@ async function initVisionSettings() {
     return !_vlExclude.some(function(kw) { return lower.includes(kw); });
   }
   try {
-    const modelsData = { items: await window.modelsModule.getModelsData() };
+    // Fetch fresh (not the shared cache) — this panel is opened right after
+    // adding/serving an endpoint, so a just-added model must show immediately.
+    const modelsRes = await fetch('/api/models', { credentials: 'same-origin' });
+    const modelsData = await modelsRes.json();
     const visionModels = [];
     (modelsData.items || []).forEach(item => {
       if (item.offline) return;
