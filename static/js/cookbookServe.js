@@ -1111,10 +1111,14 @@ function _rerenderCachedModels() {
       const _isMiniMaxM3 = _isMiniMaxM3Model({ ...m, repo_id: repo });
       const _isMiniMaxM2 = _isMiniMaxM2Model({ ...m, repo_id: repo });
       const _isMiniMaxMSeries = _isMiniMaxM3 || _isMiniMaxM2;
+      // Xiaomi MiMo needs native tool-calling (+ its reasoning parser) ON by
+      // default — like MiniMax-M / StepFun — so the generated serve command
+      // includes --enable-auto-tool-choice + the right --tool-call-parser.
+      const _isMiMo = /mimo/.test(String(repo).toLowerCase());
       const _toolParserDefault = _detectToolParser(repo);
       const _isStepFunStep = _toolParserDefault === 'step3p5';
-      const _nativeToolDefault = _isMiniMaxMSeries || _isStepFunStep;
-      const _reasoningDefault = _isMiniMaxMSeries || _isStepFunStep;
+      const _nativeToolDefault = _isMiniMaxMSeries || _isStepFunStep || _isMiMo;
+      const _reasoningDefault = _isMiniMaxMSeries || _isStepFunStep || _isMiMo;
       const _expertParallelDefault = _isMiniMaxMSeries || _isStepFunStep;
       const svm = (k, def) => (_modelSs && _hasOwn(_modelSs, k)) ? _modelSs[k] : def;
       const _serveTarget = _selectedServeTarget();

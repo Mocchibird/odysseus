@@ -2214,7 +2214,7 @@ async def stream_agent_loop(
         # Local-served models that follow OpenAI-style function calling
         # via vLLM's `--enable-auto-tool-choice`. Belt-and-suspenders
         # with the per-endpoint flag above.
-        "minimax", "kimi", "yi-", "phi-3", "phi-4", "command-r",
+        "minimax", "mimo", "kimi", "yi-", "phi-3", "phi-4", "command-r",
         "glm-4", "internlm", "hermes",
         # deepseek-v2/v3/chat support tools via the cloud API; deepseek-r1
         # (reasoning model) does not — handled by the blocklist below.

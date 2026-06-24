@@ -334,6 +334,9 @@ export function _detectReasoningParser(modelName) {
   // StepFun Step-3.x uses Step's native <think> / tool-call tokens. vLLM
   // registers this parser as step3p5.
   if (_isStepFunStepModel(modelName)) return 'step3p5';
+  // Xiaomi MiMo emits <think> blocks: V2.5 / V2.5-Pro use the `mimo` reasoning
+  // parser, V2-Flash uses qwen3 (per vLLM's MiMo recipes).
+  if (n.includes('mimo')) return n.includes('flash') ? 'qwen3' : 'mimo';
   // MiniMax M3 — newer vLLM nightly/parser builds use minimax_m3. This must
   // be checked before the M2.x rule and before the generic MiniMax tool parser.
   if (n.includes('minimax') && /\bm3\b/.test(n)) return 'minimax_m3';
@@ -371,6 +374,12 @@ export function _detectReasoningParser(modelName) {
 export function _detectToolParser(modelName) {
   const n = (modelName || '').toLowerCase();
   if (_isStepFunStepModel(modelName)) return 'step3p5';
+  // Xiaomi MiMo: V2.5 / V2.5-Pro ship a dedicated `mimo` parser; V2-Flash uses
+  // Qwen3's XML tool format (per vLLM's MiMo recipes). Without this MiMo fell
+  // through to the `hermes` default below, so vLLM never surfaced its native
+  // tool_calls and the call silently vanished. (Needs a vLLM new enough to
+  // register the `mimo` parser.)
+  if (n.includes('mimo')) return n.includes('flash') ? 'qwen3_xml' : 'mimo';
   if (n.includes('qwen3') && n.includes('coder')) return 'qwen3_coder';
   if (n.includes('qwen3')) return 'qwen3_xml';
   if (n.includes('qwen')) return 'hermes';   // Qwen2.5 / Qwen2 / Qwen1.5

@@ -3859,7 +3859,7 @@ async function _pollBackgroundStatus() {
       // hallucinate a fake [TOOL_CALL]...[/TOOL_CALL] text format
       // the backend can't parse.
       const _cmd = localTask?.payload?._cmd || '';
-      const _supportsTools = _cmd.includes('--enable-auto-tool-choice') || _isDiffusion === false && /(?:^|\s)(?:deepseek|gpt-[45o]|claude|gemini|qwen3|qwen2\.5|mixtral|llama-[34]|minimax|kimi|hermes|glm-4)/i.test(t.model);
+      const _supportsTools = _cmd.includes('--enable-auto-tool-choice') || _isDiffusion === false && /(?:^|\s)(?:deepseek|gpt-[45o]|claude|gemini|qwen3|qwen2\.5|mixtral|llama-[34]|minimax|mimo|kimi|hermes|glm-4)/i.test(t.model);
 
       fetch('/api/model-endpoints', { credentials: 'same-origin' })
         .then(r => r.json())
