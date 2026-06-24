@@ -965,11 +965,11 @@ async function initImageSettings() {
     };
     const imageModels = [];
     (modelsData.items || []).forEach(item => {
-      (item.models || []).forEach(mid => {
+      [...(item.models || []), ...(item.models_extra || [])].forEach(mid => {
         if (_isInpaintModel(mid)) imageModels.push(mid);
       });
     });
-    sortModelIds(imageModels).forEach(mid => { const opt = document.createElement('option'); opt.value = mid; opt.textContent = mid; modelSel.appendChild(opt); });
+    sortModelIds([...new Set(imageModels)]).forEach(mid => { const opt = document.createElement('option'); opt.value = mid; opt.textContent = mid; modelSel.appendChild(opt); });
     // Hardcoded fallbacks shown as "(not detected)" so users know what to
     // download/serve to enable inpaint here.
     ['stable-diffusion-3.5-medium', 'stable-diffusion-inpainting'].forEach(mid => {
@@ -1025,13 +1025,16 @@ async function initVisionSettings() {
     const visionModels = [];
     (modelsData.items || []).forEach(item => {
       if (item.offline) return;
-      (item.models || []).forEach(mid => {
+      // Include models_extra (uncurated/newer ids the catalog doesn't know yet,
+      // e.g. a freshly-released Gemini) — the chat picker lists them, so the
+      // vision select must too, or a brand-new vision model is unselectable.
+      [...(item.models || []), ...(item.models_extra || [])].forEach(mid => {
         if (_isVisionModel(mid)) {
           visionModels.push(mid);
         }
       });
     });
-    sortModelIds(visionModels).forEach(mid => {
+    sortModelIds([...new Set(visionModels)]).forEach(mid => {
       var opt = document.createElement('option'); opt.value = mid; opt.textContent = mid; vlSel.appendChild(opt);
     });
   } catch (e) { console.warn('Failed to load models for vision settings', e); }
