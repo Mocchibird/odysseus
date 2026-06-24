@@ -962,6 +962,15 @@ def _append_llama_cpp_linux_accel_build_lines(runner_lines: list[str]) -> None:
     runner_lines.append('      rm -rf build')
     runner_lines.append('      cmake -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build -j"$NPROC" --target llama-server && ln -sf ~/llama.cpp/build/bin/llama-server ~/bin/llama-server')
     runner_lines.append('    fi')
+    # Catch-all: if a GPU branch (HIP/CUDA/Vulkan) was taken but its build failed
+    # to produce a binary — e.g. CUDA 13 can't target an older Pascal/sm_61 card,
+    # or a toolkit/driver mismatch — fall back to a guaranteed CPU-only build so
+    # serving still works instead of failing hard (was exiting 127 with no binary).
+    runner_lines.append('    if ! { [ -x ~/bin/llama-server ] || command -v llama-server >/dev/null 2>&1; }; then')
+    runner_lines.append('      echo "[odysseus] Accelerated build produced no binary (e.g. CUDA 13 dropped Pascal sm_61, or a toolkit/driver mismatch) — falling back to a CPU-only llama-server build..."')
+    runner_lines.append('      rm -rf build')
+    runner_lines.append('      cmake -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build -j"$NPROC" --target llama-server && ln -sf ~/llama.cpp/build/bin/llama-server ~/bin/llama-server')
+    runner_lines.append('    fi')
     runner_lines.append('  fi  # end _odysseus_have_prebuilt guard')
 
 
