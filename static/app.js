@@ -3757,6 +3757,15 @@ function startOdysseusApp() {
         return;
       }
 
+      // If streaming, this is the Stop button — abort the run (handleSubmit
+      // detects isStreaming and stops it). MUST come before the mic/record
+      // branch below: while streaming the composer is empty and STT may be on,
+      // which would otherwise START A VOICE RECORDING instead of stopping.
+      if (sendBtn.dataset.mode === 'streaming') {
+        handleSubmit(e);
+        return;
+      }
+
       const hasText = messageInput && messageInput.value.trim().length > 0;
       const hasFiles = _hasAttachments();
 
