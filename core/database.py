@@ -86,6 +86,13 @@ def set_sqlite_pragma(dbapi_connection, connection_record):
         cursor.execute("PRAGMA journal_mode=WAL")
         cursor.execute("PRAGMA busy_timeout=5000")
         cursor.execute("PRAGMA synchronous=NORMAL")
+        # A bigger page cache + in-memory temp store keep the gallery/document
+        # facet sorts and GROUP BYs off disk, and mmap lets reads page the DB
+        # in through the OS cache instead of per-page read() syscalls. All are
+        # per-connection and WAL-safe; no-ops on the in-memory test DB.
+        cursor.execute("PRAGMA cache_size=-65536")    # ~64 MB (negative = KiB)
+        cursor.execute("PRAGMA temp_store=MEMORY")
+        cursor.execute("PRAGMA mmap_size=268435456")  # 256 MB
         cursor.close()
 
 
