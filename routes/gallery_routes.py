@@ -2025,7 +2025,6 @@ def setup_gallery_routes() -> APIRouter:
         db = SessionLocal()
         try:
             img = _get_or_404_image(db, image_id, user)
-            logger.info("[ai-tag DIAG] request id=%s -> resolved filename=%r owner=%r", image_id, img.filename, getattr(img, "owner", None))
 
             img_path = _gallery_image_path(img.filename)
             if not img_path.exists():
@@ -2108,23 +2107,15 @@ def setup_gallery_routes() -> APIRouter:
                 # Anthropic returns content[0].text, OpenAI returns choices[0].message.content
                 if provider == "anthropic":
                     content = (data.get("content") or [{}])[0].get("text", "") or ""
-                    _finish = data.get("stop_reason")
-                    _msg_keys = []
                 else:
-                    _choice0 = (data.get("choices") or [{}])[0]
-                    _msg = _choice0.get("message") or {}
+                    _msg = (data.get("choices") or [{}])[0].get("message") or {}
                     content = _msg.get("content") or ""
-                    _finish = _choice0.get("finish_reason")
-                    _msg_keys = list(_msg.keys())
-                logger.info("[ai-tag DIAG] raw model=%s content_len=%d finish=%s msg_keys=%s head=%r",
-                            model_name, len(content), _finish, _msg_keys, content[:160])
 
             # Clean up tags
             tags = [t.strip().lower() for t in content.split(",") if t.strip()]
             tag_str = ", ".join(tags[:30])
             img.ai_tags = tag_str
             db.commit()
-            logger.info("[ai-tag DIAG] saved id=%s filename=%r model=%s tags=%r", image_id, img.filename, model_name, tag_str)
             return {"ok": True, "ai_tags": tag_str}
         except HTTPException:
             raise
