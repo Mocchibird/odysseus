@@ -972,36 +972,70 @@ def setup_gallery_routes() -> APIRouter:
             ).all()
             if not imgs:
                 raise HTTPException(404, "No images found")
-            import io
-            import re
-            import zipfile
-            buf = io.BytesIO()
-            used = set()
-            with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-                for img in imgs:
-                    src = _gallery_image_path(img.filename)
-                    if not src.exists():
-                        continue
-                    ext = src.suffix or ".png"
-                    base = (img.prompt or "").strip() or src.stem
-                    base = re.sub(r"[^\w\-. ]+", "", base)[:60].strip() or img.id
-                    name = f"{base}{ext}"
-                    i = 1
-                    while name in used:
-                        name = f"{base}-{i}{ext}"
-                        i += 1
-                    used.add(name)
-                    zf.write(src, arcname=name)
-            if not used:
-                raise HTTPException(404, "No image files found on disk")
-            from fastapi import Response
-            return Response(
-                content=buf.getvalue(),
-                media_type="application/zip",
-                headers={"Content-Disposition": 'attachment; filename="gallery-photos.zip"'},
-            )
+            # Cap so a runaway selection can't fill the temp disk or run for
+            # minutes; the client should batch larger downloads.
+            total_bytes = sum((im.file_size or 0) for im in imgs)
+            if len(imgs) > 2000 or total_bytes > 5 * 1024 ** 3:
+                raise HTTPException(413, "Selection too large to zip; download in smaller batches")
+            # Snapshot the fields the worker needs so it never touches the ORM
+            # session (SQLAlchemy sessions aren't thread-safe).
+            specs = [(im.filename, (im.prompt or "").strip(), im.id) for im in imgs]
         finally:
             db.close()
+
+        import re
+        import tempfile
+        import zipfile
+
+        def _build_zip():
+            # Build to a temp FILE (not an in-memory BytesIO) so a multi-GB
+            # selection can't spike RAM, and use ZIP_STORED — gallery media is
+            # already compressed, so deflate just burns CPU for no gain.
+            used = set()
+            fd, tmp = tempfile.mkstemp(suffix=".zip")
+            os.close(fd)
+            try:
+                with zipfile.ZipFile(tmp, "w", zipfile.ZIP_STORED) as zf:
+                    for filename, prompt, img_id in specs:
+                        src = _gallery_image_path(filename)
+                        if not src.exists():
+                            continue
+                        ext = src.suffix or ".png"
+                        base = re.sub(r"[^\w\-. ]+", "", (prompt or src.stem))[:60].strip() or img_id
+                        name = f"{base}{ext}"
+                        i = 1
+                        while name in used:
+                            name = f"{base}-{i}{ext}"
+                            i += 1
+                        used.add(name)
+                        zf.write(src, arcname=name)
+                return tmp, used
+            except BaseException:
+                try:
+                    os.unlink(tmp)
+                except OSError:
+                    pass
+                raise
+
+        # Disk reads + zip happen off the event loop so a big bundle doesn't
+        # stall every other request on this single worker.
+        tmp_path, used = await asyncio.to_thread(_build_zip)
+        if not used:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise HTTPException(404, "No image files found on disk")
+        # FileResponse streams the zip from disk in chunks (low memory); the
+        # BackgroundTask removes the temp file once the response is sent.
+        from fastapi.responses import FileResponse
+        from starlette.background import BackgroundTask
+        return FileResponse(
+            tmp_path,
+            media_type="application/zip",
+            filename="gallery-photos.zip",
+            background=BackgroundTask(lambda p=tmp_path: os.path.exists(p) and os.unlink(p)),
+        )
 
     # ---- POST /api/gallery/clear-user-tags ----
     # Wipe the `tags` field on every image owned by the current user.
