@@ -7,7 +7,8 @@
 
 import uiModule from './ui.js';
 import * as spinnerModule from './spinner.js';
-import { bindMenuDismiss, dismissOrRemove, topPopupZ } from './escMenuStack.js';
+import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
+import { topPortalZ } from './toolWindowZOrder.js';
 
 const API = window.location.origin;
 let skills = [];
@@ -454,7 +455,10 @@ function _openSkillMenu(btn, card, sk, name, isPublished) {
     menu.style.maxHeight = Math.max(80, window.innerHeight - 12 - mr2.top) + 'px';
     menu.style.overflowY = 'auto';
   }
-  menu.style.zIndex = String(topPopupZ());
+  // Derive z from the live tool-window stack (not a 10001 literal) so the
+  // kebab menu can't render behind the Memory modal once its bring-to-front
+  // z has climbed in a long session (#4720). Matches memory.js / tasks.js.
+  menu.style.zIndex = String(topPortalZ());
   const close = bindMenuDismiss(menu, () => { menu.remove(); }, (ev) => !menu.contains(ev.target));
 }
 
