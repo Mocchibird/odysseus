@@ -1495,6 +1495,22 @@ function _appendCards(newItems) {
   if (loadMore) loadMore.style.display = _items.length < _total ? 'block' : 'none';
 }
 
+// Run an async fn over items with bounded concurrency, returning results in
+// order. Keeps bulk actions fast without firing N requests at once.
+async function _poolMap(items, fn, concurrency = 5) {
+  const results = new Array(items.length);
+  let cursor = 0;
+  async function worker() {
+    while (true) {
+      const i = cursor++;
+      if (i >= items.length) return;
+      results[i] = await fn(items[i], i);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(concurrency, Math.max(1, items.length)) }, worker));
+  return results;
+}
+
 function _renderGrid() {
   const grid = document.getElementById('gallery-grid');
   const loadMore = document.getElementById('gallery-load-more');
@@ -3084,7 +3100,10 @@ export function openGallery() {
     if (!ids.length) return;
     if (!await uiModule.styledConfirm(`Delete ${ids.length} photo${ids.length > 1 ? 's' : ''}? This cannot be undone.`, { confirmText: 'Delete', danger: true })) return;
     const deleted = [], failed = [];
-    for (const id of ids) { const ok = await _deleteImage(id); (ok ? deleted : failed).push(id); }
+    // Delete a few at a time (each delete also runs a chat-history cleanup, so
+    // keep concurrency modest) instead of strictly one-by-one.
+    const oks = await _poolMap(ids, (id) => _deleteImage(id), 4);
+    ids.forEach((id, i) => (oks[i] ? deleted : failed).push(id));
     if (failed.length) uiModule.showError(`Failed to delete ${failed.length} of ${ids.length} photos`);
     _items = _items.filter(i => !deleted.includes(i.id));
     _total = Math.max(0, _total - deleted.length);
@@ -3160,12 +3179,10 @@ export function openGallery() {
 
   async function _bulkFavorite(ids) {
     let n = 0;
-    for (const id of ids) {
-      if (await _patchImage(id, { favorite: true })) {
-        n++;
-        const it = _items.find(i => i.id === id); if (it) it.favorite = true;
-      }
-    }
+    const oks = await _poolMap(ids, (id) => _patchImage(id, { favorite: true }));
+    ids.forEach((id, i) => {
+      if (oks[i]) { n++; const it = _items.find(x => x.id === id); if (it) it.favorite = true; }
+    });
     _renderGrid(); _exitSelectMode();
     if (uiModule) uiModule.showToast(`Favorited ${n} photo${n > 1 ? 's' : ''}`);
   }
@@ -3195,12 +3212,10 @@ export function openGallery() {
   async function _bulkHide(ids, hidden) {
     if (!ids.length) return;
     let n = 0;
-    for (const id of ids) {
-      if (await _patchImage(id, { hidden })) {
-        n++;
-        const it = _items.find(i => i.id === id); if (it) it.hidden = hidden;
-      }
-    }
+    const oks = await _poolMap(ids, (id) => _patchImage(id, { hidden }));
+    ids.forEach((id, i) => {
+      if (oks[i]) { n++; const it = _items.find(x => x.id === id); if (it) it.hidden = hidden; }
+    });
     _exitSelectMode();
     // Hiding while the grid isn't showing hidden items drops them from view.
     if (hidden && !_showHidden) {
