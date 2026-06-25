@@ -37613,6 +37613,19 @@ body.research-panel-view #research-divider { display:none; }
   .research-sb-dot { animation: none; }
 }
 
+/* Global reduced-motion safety net. The app has many per-component
+   prefers-reduced-motion blocks, but most of its 200+ animations/transitions
+   aren't covered individually; this catches the rest. Near-zero durations
+   (not `none`) so any JS waiting on transitionend/animationend still fires. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
 /* ── In-house color picker ── */
 /* A color-picker swatch input shows the chosen colour as its background; hide
    the underlying hex text/caret so it doesn't read as "#a1b2c3" in the box.
