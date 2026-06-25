@@ -94,6 +94,17 @@ RUN pip install --no-cache-dir --no-deps /tmp/odysseus-wheels/*.whl \
 # Copy app code
 COPY . .
 
+# Minify the app's own JS/CSS in place (build-time only — the source on disk
+# stays un-minified for development). esbuild minifies both; static/lib is
+# skipped (vendored, already-minified bundles). Gated behind an ARG so a build
+# can opt out if a minified asset ever misbehaves. Uses the nodejs/npm above.
+ARG MINIFY_ASSETS=true
+RUN if [ "$MINIFY_ASSETS" = "true" ]; then \
+        npm install --no-save --no-package-lock --no-audit --no-fund esbuild@^0.24 \
+        && node scripts/minify_assets.mjs \
+        && rm -rf node_modules; \
+    fi
+
 # Create data directory (mount a volume here for persistence).
 RUN mkdir -p data logs services/cache/search
 
