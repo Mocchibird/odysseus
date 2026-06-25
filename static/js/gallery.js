@@ -117,10 +117,11 @@ async function _fetchLibrary(append) {
     // A newer fetch superseded us (filter/tab switched mid-flight) — drop this
     // stale response so it can't paint the wrong media set.
     if (_tok !== _libToken) return;
+    const newItems = data.items || [];
     if (append) {
-      _items = _items.concat(data.items || []);
+      _items = _items.concat(newItems);
     } else {
-      _items = data.items || [];
+      _items = newItems;
     }
     // Cache an "empty" verdict so the next open of an empty gallery doesn't
     // flash skeleton tiles before the real "No photos yet" message.
@@ -136,7 +137,10 @@ async function _fetchLibrary(append) {
     if (typeof data.total === 'number') _total = data.total;
     if (typeof data.total_tagged === 'number') _totalTagged = data.total_tagged;
     _updateTagCount();
-    _renderGrid();
+    // Append only the new cards on scroll (offset > 0) so existing tiles and
+    // their decoded thumbnails aren't destroyed/rebuilt; full render otherwise.
+    if (append) _appendCards(newItems);
+    else _renderGrid();
     // Facets (tags/models) are sent only on the first page (offset 0); on
     // append the server omits them (null), so keep the chips already rendered
     // instead of clearing them.
@@ -1359,6 +1363,140 @@ function _renderSkeletons(n) {
   if (lm) lm.style.display = 'none';
 }
 
+// One grid card's markup. Shared by the full render and the incremental
+// append path so "load more" doesn't rebuild (and re-decode) the whole grid.
+function _cardHtml(img) {
+  const date = img.taken_at
+    ? new Date(img.taken_at).toLocaleDateString()
+    : (img.created_at ? new Date(img.created_at).toLocaleDateString() : '');
+  // Card label: prefer the prompt (which doubles as the user-editable
+  // name for uploaded photos). Fall back to a cleaned filename so
+  // imported photos with empty prompts still show something useful
+  // instead of a blank row.
+  const fallbackName = (img.filename || '')
+    .replace(/^\d{4,}[_-]/, '')   // drop date-prefix on uploads
+    .replace(/\.[^.]+$/, '')       // drop extension
+    .replace(/[_-]+/g, ' ')
+    .trim();
+  const labelText = (img.prompt || '').trim() || fallbackName || 'Photo';
+  const promptPreview = labelText.length > 60 ? labelText.substring(0, 58) + '...' : labelText;
+  const favCls = img.favorite ? ' gallery-fav-active' : '';
+  return `
+      <div class="gallery-card" data-id="${_esc(img.id)}">
+        <span class="gallery-select-dot" style="display:none;"></span>
+        <button class="gallery-fav-btn${favCls}" data-id="${_esc(img.id)}" title="Favorite">&#9829;</button>
+        <button class="gallery-dl-btn" data-id="${_esc(img.id)}" data-url="${_esc(img.url)}" data-filename="${_esc(img.filename || '')}" title="Download">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        </button>
+        <button class="gallery-card-menu-btn" data-id="${_esc(img.id)}" title="More actions" aria-label="More actions">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg>
+        </button>
+        ${img.hidden ? `<span class="gallery-card-hidden" title="Hidden" aria-label="Hidden"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-10-7-10-7a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 10 7 10 7a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg></span>` : ''}
+        ${_isVideoUrl(img.url)
+          ? `<video src="${_esc(img.url)}" preload="metadata" muted playsinline></video>
+             <span class="gallery-card-play" aria-hidden="true">
+               <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+             </span>`
+          : `<img src="${_esc(img.thumb_url || img.url)}" alt="${_esc(img.prompt)}" loading="lazy" decoding="async" />`}
+        <div class="gallery-card-info">
+          <div class="gallery-card-prompt">${_esc(promptPreview)}</div>
+          <div class="gallery-card-meta">
+            ${img.model ? `<span class="gallery-card-model">${_esc(img.model)}</span>` : ''}
+            <span class="gallery-card-date">${date}</span>
+          </div>
+        </div>
+      </div>`;
+}
+
+// Wire one card's click/download/favorite/menu listeners. Per-card so the
+// append path can wire only the newly-inserted cards (same listener semantics
+// as a full render — stopPropagation guards, favorite in-flight lock).
+function _wireCard(card) {
+  // Card click → detail (skip the action buttons; skip while in select mode).
+  card.addEventListener('click', (e) => {
+    if (e.target.closest('.gallery-fav-btn')) return;
+    if (e.target.closest('.gallery-dl-btn')) return;
+    if (e.target.closest('.gallery-card-menu-btn')) return;
+    const selectBtn = document.getElementById('gallery-select-btn');
+    if (selectBtn && selectBtn.classList.contains('active')) return;
+    const img = _items.find(i => i.id === card.dataset.id);
+    if (img) _openDetail(img);
+  });
+
+  const dl = card.querySelector('.gallery-dl-btn');
+  if (dl) dl.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    const url = dl.dataset.url;
+    const filename = dl.dataset.filename || `image-${dl.dataset.id}.png`;
+    try {
+      const res = await fetch(url, { credentials: 'same-origin' });
+      const blob = await res.blob();
+      const objUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = objUrl;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(objUrl), 1000);
+    } catch (_) {
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    }
+  });
+
+  const fav = card.querySelector('.gallery-fav-btn');
+  if (fav) fav.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    // The endpoint is a server-side TOGGLE; without an in-flight guard a
+    // double-tap fires two toggles whose responses can land out of order,
+    // leaving the heart out of sync with the persisted state.
+    if (fav.dataset.busy) return;
+    fav.dataset.busy = '1';
+    const id = fav.dataset.id;
+    try {
+      const res = await fetch(`${API_BASE}/api/gallery/${id}/favorite`, {
+        method: 'POST', credentials: 'same-origin',
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data.ok) {
+        fav.classList.toggle('gallery-fav-active', data.favorite);
+        const item = _items.find(i => i.id === id);
+        if (item) item.favorite = data.favorite;
+      }
+    } finally {
+      delete fav.dataset.busy;
+    }
+  });
+
+  const menuBtn = card.querySelector('.gallery-card-menu-btn');
+  if (menuBtn) menuBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const img = _items.find(i => i.id === menuBtn.dataset.id);
+    if (img) _showCardMenu(menuBtn, img);
+  });
+}
+
+// Append newly-loaded items WITHOUT rebuilding existing cards, so "load more"
+// doesn't destroy/re-decode on-screen thumbnails or re-wire every card. Only
+// the new cards are parsed and wired.
+function _appendCards(newItems) {
+  const grid = document.getElementById('gallery-grid');
+  if (!grid || !newItems || !newItems.length) return;
+  const tpl = document.createElement('template');
+  tpl.innerHTML = newItems.map(_cardHtml).join('');
+  const cards = Array.from(tpl.content.children);
+  cards.forEach(c => grid.appendChild(c));
+  cards.forEach(_wireCard);
+  const loadMore = document.getElementById('gallery-load-more');
+  if (loadMore) loadMore.style.display = _items.length < _total ? 'block' : 'none';
+}
+
 function _renderGrid() {
   const grid = document.getElementById('gallery-grid');
   const loadMore = document.getElementById('gallery-load-more');
@@ -1384,50 +1522,7 @@ function _renderGrid() {
     return;
   }
 
-  let html = uploadTile;
-  _items.forEach(img => {
-    const date = img.taken_at
-      ? new Date(img.taken_at).toLocaleDateString()
-      : (img.created_at ? new Date(img.created_at).toLocaleDateString() : '');
-    // Card label: prefer the prompt (which doubles as the user-editable
-    // name for uploaded photos). Fall back to a cleaned filename so
-    // imported photos with empty prompts still show something useful
-    // instead of a blank row.
-    const fallbackName = (img.filename || '')
-      .replace(/^\d{4,}[_-]/, '')   // drop date-prefix on uploads
-      .replace(/\.[^.]+$/, '')       // drop extension
-      .replace(/[_-]+/g, ' ')
-      .trim();
-    const labelText = (img.prompt || '').trim() || fallbackName || 'Photo';
-    const promptPreview = labelText.length > 60 ? labelText.substring(0, 58) + '...' : labelText;
-    const favCls = img.favorite ? ' gallery-fav-active' : '';
-    html += `
-      <div class="gallery-card" data-id="${_esc(img.id)}">
-        <span class="gallery-select-dot" style="display:none;"></span>
-        <button class="gallery-fav-btn${favCls}" data-id="${_esc(img.id)}" title="Favorite">&#9829;</button>
-        <button class="gallery-dl-btn" data-id="${_esc(img.id)}" data-url="${_esc(img.url)}" data-filename="${_esc(img.filename || '')}" title="Download">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-        </button>
-        <button class="gallery-card-menu-btn" data-id="${_esc(img.id)}" title="More actions" aria-label="More actions">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg>
-        </button>
-        ${img.hidden ? `<span class="gallery-card-hidden" title="Hidden" aria-label="Hidden"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-10-7-10-7a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 10 7 10 7a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg></span>` : ''}
-        ${_isVideoUrl(img.url)
-          ? `<video src="${_esc(img.url)}" preload="metadata" muted playsinline></video>
-             <span class="gallery-card-play" aria-hidden="true">
-               <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
-             </span>`
-          : `<img src="${_esc(img.thumb_url || img.url)}" alt="${_esc(img.prompt)}" loading="lazy" decoding="async" />`}
-        <div class="gallery-card-info">
-          <div class="gallery-card-prompt">${_esc(promptPreview)}</div>
-          <div class="gallery-card-meta">
-            ${img.model ? `<span class="gallery-card-model">${_esc(img.model)}</span>` : ''}
-            <span class="gallery-card-date">${date}</span>
-          </div>
-        </div>
-      </div>`;
-  });
-  grid.innerHTML = html;
+  grid.innerHTML = uploadTile + _items.map(_cardHtml).join('');
   _wireUploadTile();
 
   // Domino-in cascade the first render after opening (not on filter/sort/
@@ -1442,83 +1537,9 @@ function _renderGrid() {
     loadMore.style.display = _items.length < _total ? 'block' : 'none';
   }
 
-  // Card click → detail (skip the upload tile, it has its own handler)
-  grid.querySelectorAll('.gallery-card[data-id]').forEach(card => {
-    card.addEventListener('click', (e) => {
-      if (e.target.closest('.gallery-fav-btn')) return;
-      if (e.target.closest('.gallery-dl-btn')) return;
-      if (e.target.closest('.gallery-card-menu-btn')) return;
-      const selectBtn = document.getElementById('gallery-select-btn');
-      if (selectBtn && selectBtn.classList.contains('active')) return;
-      const img = _items.find(i => i.id === card.dataset.id);
-      if (img) _openDetail(img);
-    });
-  });
-
-  // Download buttons
-  grid.querySelectorAll('.gallery-dl-btn').forEach(btn => {
-    btn.addEventListener('click', async (e) => {
-      e.stopPropagation();
-      const url = btn.dataset.url;
-      const filename = btn.dataset.filename || `image-${btn.dataset.id}.png`;
-      try {
-        const res = await fetch(url, { credentials: 'same-origin' });
-        const blob = await res.blob();
-        const objUrl = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = objUrl;
-        a.download = filename;
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        setTimeout(() => URL.revokeObjectURL(objUrl), 1000);
-      } catch (_) {
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = filename;
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-      }
-    });
-  });
-
-  // Favorite buttons
-  grid.querySelectorAll('.gallery-fav-btn').forEach(btn => {
-    btn.addEventListener('click', async (e) => {
-      e.stopPropagation();
-      // The endpoint is a server-side TOGGLE; without an in-flight guard a
-      // double-tap fires two toggles whose responses can land out of order,
-      // leaving the heart out of sync with the persisted state.
-      if (btn.dataset.busy) return;
-      btn.dataset.busy = '1';
-      const id = btn.dataset.id;
-      try {
-        const res = await fetch(`${API_BASE}/api/gallery/${id}/favorite`, {
-          method: 'POST', credentials: 'same-origin',
-        });
-        if (!res.ok) return;
-        const data = await res.json();
-        if (data.ok) {
-          btn.classList.toggle('gallery-fav-active', data.favorite);
-          const item = _items.find(i => i.id === id);
-          if (item) item.favorite = data.favorite;
-        }
-      } finally {
-        delete btn.dataset.busy;
-      }
-    });
-  });
-
-  // Per-card "⋮" actions menu — quick Edit / Hide / Delete without opening the
-  // detail view. Mirrors the album-card kebab and the bulk-actions dropdown.
-  grid.querySelectorAll('.gallery-card-menu-btn').forEach(btn => {
-    btn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      const img = _items.find(i => i.id === btn.dataset.id);
-      if (img) _showCardMenu(btn, img);
-    });
-  });
+  // Wire each card's listeners. The append path wires only the newly-inserted
+  // cards via the same _wireCard helper.
+  grid.querySelectorAll('.gallery-card[data-id]').forEach(_wireCard);
 }
 
 // Per-card actions dropdown. Built fixed-positioned at the button (same as the
@@ -2762,20 +2783,33 @@ export function openGallery() {
       if (cancelBtn) cancelBtn.style.display = 'none';   // start button covers it now
       cancelBtn.onclick = () => { _tagCancelRequested = true; statusEl.textContent = 'Cancelling...'; };
 
+      // Tag a few photos at once (vision endpoints handle modest parallelism)
+      // instead of strictly one-at-a-time — cuts wall-clock ~3x. Mirrors the
+      // _bulkUpload worker pool. Cancellation is checked per worker iteration;
+      // up to TAG_CONCURRENCY in-flight requests still finish after Cancel.
       let done = 0, failed = 0;
-      for (const id of listRes.image_ids) {
-        if (_tagCancelRequested) break;
-        try {
-          const r = await fetch(`${API_BASE}/api/gallery/${id}/ai-tag`, {
-            method: 'POST', credentials: 'same-origin',
-          });
-          const d = await r.json();
-          if (!d.ok) failed++;
-        } catch (_) { failed++; }
-        done++;
-        progEl.style.width = `${Math.round((done / total) * 100)}%`;
-        statusEl.textContent = `Tagging ${done}/${total}${failed ? ` — ${failed} failed` : ''}`;
+      const _tagIds = listRes.image_ids;
+      const TAG_CONCURRENCY = 3;
+      let _tagCursor = 0;
+      async function _tagWorker() {
+        while (true) {
+          if (_tagCancelRequested) return;
+          const idx = _tagCursor++;
+          if (idx >= _tagIds.length) return;
+          const id = _tagIds[idx];
+          try {
+            const r = await fetch(`${API_BASE}/api/gallery/${id}/ai-tag`, {
+              method: 'POST', credentials: 'same-origin',
+            });
+            const d = await r.json();
+            if (!d.ok) failed++;
+          } catch (_) { failed++; }
+          done++;
+          progEl.style.width = `${Math.round((done / total) * 100)}%`;
+          statusEl.textContent = `Tagging ${done}/${total}${failed ? ` — ${failed} failed` : ''}`;
+        }
       }
+      await Promise.all(Array.from({ length: Math.min(TAG_CONCURRENCY, Math.max(1, _tagIds.length)) }, _tagWorker));
 
       statusEl.textContent = _tagCancelRequested
         ? `Cancelled after ${done}/${total}${failed ? ` (${failed} failed)` : ''}`
