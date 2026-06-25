@@ -110,6 +110,16 @@ def _resolve_model(spec: str, owner: Optional[str] = None) -> Tuple[str, str, Di
             raise ValueError("No enabled endpoints found" +
                              (f" matching '{target_endpoint_name}'" if target_endpoint_name else ""))
 
+        # Prefer a GLOBAL exact match over any partial (substring) match. The
+        # earlier per-endpoint "exact-then-partial, return on first hit" logic
+        # let an EARLIER endpoint's partial match win over a LATER endpoint's
+        # exact one: e.g. "mimo-v2.5" is a substring of OpenRouter's
+        # "xiaomi/mimo-v2.5-pro" (text-only), so it bound there instead of the
+        # user's MiMo endpoint that lists "mimo-v2.5" exactly — routing chat AND
+        # vision to the wrong, image-incapable model. Exact wins regardless of
+        # endpoint order; the first partial is only a fallback.
+        ml = model_name.lower()
+        partial_hit = None
         for ep in endpoints:
             try:
                 base, api_key = resolve_endpoint_runtime(ep, owner=owner)
@@ -119,14 +129,8 @@ def _resolve_model(spec: str, owner: Optional[str] = None) -> Tuple[str, str, Di
             headers = build_headers(api_key, base)
 
             if provider == "anthropic":
-                # Anthropic: match against hardcoded model list
-                matched = None
-                for am in ANTHROPIC_MODELS:
-                    if model_name.lower() in am.lower() or am.lower() in model_name.lower():
-                        matched = am
-                        break
-                if matched:
-                    return build_chat_url(base), matched, headers
+                # Anthropic: match against the hardcoded model list.
+                model_ids = list(ANTHROPIC_MODELS)
             else:
                 # OpenAI-compatible and native Ollama: probe the provider's model list.
                 try:
@@ -147,16 +151,19 @@ def _resolve_model(spec: str, owner: Optional[str] = None) -> Tuple[str, str, Di
                 except Exception:
                     model_ids = []
 
-                # Exact match first
+            # An exact match anywhere wins immediately.
+            for mid in model_ids:
+                if mid and mid.lower() == ml:
+                    return build_chat_url(base), mid, headers
+            # Otherwise remember the first partial match as a fallback.
+            if partial_hit is None:
                 for mid in model_ids:
-                    if mid.lower() == model_name.lower():
-                        return build_chat_url(base), mid, headers
+                    if mid and (ml in mid.lower() or mid.lower() in ml):
+                        partial_hit = (build_chat_url(base), mid, headers)
+                        break
 
-                # Partial match
-                for mid in model_ids:
-                    if model_name.lower() in mid.lower() or mid.lower() in model_name.lower():
-                        return build_chat_url(base), mid, headers
-
+        if partial_hit is not None:
+            return partial_hit
         raise ValueError(f"Model '{spec}' not found on any configured endpoint")
     finally:
         db.close()
