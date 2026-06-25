@@ -2065,7 +2065,7 @@ def setup_gallery_routes() -> APIRouter:
             if provider == "anthropic":
                 payload = {
                     "model": model_name,
-                    "max_tokens": 200,
+                    "max_tokens": 1024,
                     "messages": [{
                         "role": "user",
                         "content": [
@@ -2087,7 +2087,7 @@ def setup_gallery_routes() -> APIRouter:
                             {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}},
                         ],
                     }],
-                    _tok_key: 200,
+                    _tok_key: 1024,
                     "temperature": 0.3,
                 }
                 # Reasoning models (o1/o3/o4/gpt-5) reject an explicit temperature.
@@ -2107,9 +2107,17 @@ def setup_gallery_routes() -> APIRouter:
                 data = resp.json()
                 # Anthropic returns content[0].text, OpenAI returns choices[0].message.content
                 if provider == "anthropic":
-                    content = (data.get("content") or [{}])[0].get("text", "")
+                    content = (data.get("content") or [{}])[0].get("text", "") or ""
+                    _finish = data.get("stop_reason")
+                    _msg_keys = []
                 else:
-                    content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+                    _choice0 = (data.get("choices") or [{}])[0]
+                    _msg = _choice0.get("message") or {}
+                    content = _msg.get("content") or ""
+                    _finish = _choice0.get("finish_reason")
+                    _msg_keys = list(_msg.keys())
+                logger.info("[ai-tag DIAG] raw model=%s content_len=%d finish=%s msg_keys=%s head=%r",
+                            model_name, len(content), _finish, _msg_keys, content[:160])
 
             # Clean up tags
             tags = [t.strip().lower() for t in content.split(",") if t.strip()]
