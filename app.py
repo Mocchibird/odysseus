@@ -484,6 +484,46 @@ def _generate_gallery_thumb(img_path, thumb_dir, thumb_path):
         raise
 
 
+def _generate_video_poster(video_path, thumb_dir, thumb_path):
+    """Extract a poster frame from a video as a 400px-wide WebP via ffmpeg.
+
+    IO/CPU-bound, so callers run it via asyncio.to_thread. Returns True on
+    success; False if ffmpeg is unavailable or no frame could be grabbed (the
+    caller then falls through to serving the video file). Atomic temp-file
+    publish so a concurrent first-load can't read a half-written poster.
+    """
+    import os
+    import shutil
+    import subprocess
+    import tempfile
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg:
+        return False
+    thumb_dir.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(suffix=".webp", dir=str(thumb_dir))
+    os.close(fd)
+    try:
+        # Try ~1s in first (skips black leading frames), then frame 0 for clips
+        # shorter than a second. Scale to fit 400px wide, keep aspect (even h).
+        for ss in ("1", "0"):
+            cmd = [
+                ffmpeg, "-y", "-ss", ss, "-i", str(video_path),
+                "-frames:v", "1", "-vf", "scale='min(400,iw)':-2",
+                "-f", "webp", tmp,
+            ]
+            res = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+            if res.returncode == 0 and os.path.getsize(tmp) > 0:
+                os.replace(tmp, str(thumb_path))  # atomic publish
+                return True
+        return False
+    finally:
+        try:
+            if os.path.exists(tmp):
+                os.unlink(tmp)
+        except OSError:
+            pass
+
+
 @app.get("/api/generated-image/{filename}")
 async def serve_generated_image(filename: str, request: Request, thumb: int = 0):
     """Serve generated images from the data directory."""
@@ -520,8 +560,8 @@ async def serve_generated_image(filename: str, request: Request, thumb: int = 0)
     # multi-MB original so the gallery scrolls fast with many images. Filenames
     # are content hashes, so a thumbnail for a given filename never changes →
     # generate once, cache it next to the originals, and reuse the immutable
-    # headers. Videos fall through to the original (the grid renders them via
-    # <video>); generation failures also fall through to the full image.
+    # headers. Videos get a cached poster frame (see the video branch below);
+    # generation failures fall through to serving the original media.
     if thumb and mime.startswith("image/"):
         try:
             from src.generated_images import GENERATED_IMAGE_DIR
@@ -540,6 +580,24 @@ async def serve_generated_image(filename: str, request: Request, thumb: int = 0)
         except Exception as _te:
             logger.warning("Gallery thumbnail generation failed for %r: %s", filename, _te)
             # Fall through to the full image.
+    # Video tiles also request ?thumb=1 — serve a cached poster frame (one WebP
+    # still) instead of the multi-MB clip, so the grid shows a preview without
+    # every tile opening a connection to fetch video metadata. Offload the
+    # ffmpeg extraction; on failure (no ffmpeg / unreadable) fall through.
+    if thumb and mime.startswith("video/"):
+        try:
+            from src.generated_images import GENERATED_IMAGE_DIR
+            thumb_dir = GENERATED_IMAGE_DIR / ".thumbs"
+            thumb_path = thumb_dir / (filename + ".webp")
+            if thumb_path.exists() or await asyncio.to_thread(
+                _generate_video_poster, img_path, thumb_dir, thumb_path
+            ):
+                return FileResponse(
+                    str(thumb_path), media_type="image/webp", headers=GENERATED_IMAGE_HEADERS,
+                )
+        except Exception as _ve:
+            logger.warning("Gallery video poster generation failed for %r: %s", filename, _ve)
+            # Fall through to the full video.
     # Generated-image filenames are content hashes → the bytes for a given
     # filename never change. Cache them hard so the gallery doesn't
     # re-download every full-size image each time it's opened. `immutable`
