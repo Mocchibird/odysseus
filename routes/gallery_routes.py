@@ -691,10 +691,17 @@ def setup_gallery_routes() -> APIRouter:
                 else:
                     rows = []
             else:
+                # Tiebreak on id so the order is STABLE across pages/refreshes.
+                # created_at alone is non-unique (e.g. several chat-uploaded
+                # photos share a timestamp); without a tiebreaker, offset/limit
+                # pagination reorders on every query — rows duplicate or get
+                # skipped between pages, so a freshly-tagged photo can drop out
+                # of the loaded set and look untagged. (shuffle is already stable
+                # — it pages a seeded id list.)
                 if sort == "oldest":
-                    q = q.order_by(GalleryImage.created_at.asc())
+                    q = q.order_by(GalleryImage.created_at.asc(), GalleryImage.id.asc())
                 else:  # recent
-                    q = q.order_by(GalleryImage.created_at.desc())
+                    q = q.order_by(GalleryImage.created_at.desc(), GalleryImage.id.desc())
                 rows = q.offset(offset).limit(limit).all()
 
             items = []
