@@ -592,9 +592,7 @@ async def _execute_tool_block_impl(
     """
     from src.tool_implementations import (
         do_search_chats, do_manage_tasks,
-        do_manage_skills, do_api_call, do_send_ping, do_manage_endpoints,
-        do_manage_mcp, do_manage_webhooks, do_manage_tokens,
-        do_manage_settings, do_manage_notes,
+        do_manage_skills, do_api_call, do_send_ping, do_manage_notes,
         do_manage_health, do_search_files, do_manage_files, do_manage_gallery,
         do_manage_calendar, do_manage_books,
         do_download_model, do_serve_model, do_list_served_models, do_stop_served_model,
@@ -841,18 +839,11 @@ async def _execute_tool_block_impl(
     elif tool == "send_ping":
         desc = "send_ping"
         result = await do_send_ping(content, owner=owner)
-    elif tool == "manage_endpoints":
-        desc = "manage_endpoints"
-        result = await do_manage_endpoints(content, owner=owner)
-    elif tool == "manage_mcp":
-        desc = "manage_mcp"
-        result = await do_manage_mcp(content, owner=owner)
-    elif tool == "manage_webhooks":
-        desc = "manage_webhooks"
-        result = await do_manage_webhooks(content, owner=owner)
-    elif tool == "manage_tokens":
-        desc = "manage_tokens"
-        result = await do_manage_tokens(content, owner=owner)
+    elif tool in ("manage_endpoints", "manage_mcp", "manage_webhooks", "manage_tokens", "manage_settings"):
+        # Registry-dispatched (agent_tools.admin_tools); owner threaded for ownership/admin checks.
+        desc = tool
+        result = await _direct_fallback(tool, content, owner=owner) \
+            or {"error": f"{tool}: execution failed", "exit_code": 1}
     elif tool == "search_files":
         desc = "search_files"
         result = await do_search_files(content, owner=owner)
@@ -862,9 +853,6 @@ async def _execute_tool_block_impl(
     elif tool == "manage_gallery":
         desc = "manage_gallery"
         result = await do_manage_gallery(content, owner=owner)
-    elif tool == "manage_settings":
-        desc = "manage_settings"
-        result = await do_manage_settings(content, owner=owner)
     elif tool == "manage_notes":
         desc = "manage_notes"
         result = await do_manage_notes(content, owner=owner)
