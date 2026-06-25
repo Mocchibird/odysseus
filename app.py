@@ -453,6 +453,37 @@ from src.static_serving import RevalidatingStatic as _RevalidatingStatic
 app.mount("/static", _RevalidatingStatic(directory=STATIC_DIR), name="static")
 
 # ========= GENERATED IMAGES =========
+def _generate_gallery_thumb(img_path, thumb_dir, thumb_path):
+    """Decode/resize/encode a 400px WebP gallery thumbnail.
+
+    CPU-bound (PIL decode + encode), so callers run it via asyncio.to_thread
+    to keep it off the event loop. Writes to a temp file and atomically
+    renames, so a concurrent first-load never reads or caches a half-written
+    thumbnail.
+    """
+    import os
+    import tempfile
+    from PIL import Image, ImageOps
+    thumb_dir.mkdir(parents=True, exist_ok=True)
+    im = Image.open(str(img_path))
+    # Bake EXIF rotation into the pixels (PIL drops EXIF on save).
+    im = ImageOps.exif_transpose(im)
+    im.thumbnail((400, 400))
+    if im.mode not in ("RGB", "RGBA", "L"):
+        im = im.convert("RGB")
+    fd, tmp = tempfile.mkstemp(suffix=".webp", dir=str(thumb_dir))
+    os.close(fd)
+    try:
+        im.save(tmp, "WEBP", quality=80)
+        os.replace(tmp, str(thumb_path))  # atomic publish
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
 @app.get("/api/generated-image/{filename}")
 async def serve_generated_image(filename: str, request: Request, thumb: int = 0):
     """Serve generated images from the data directory."""
@@ -493,19 +524,16 @@ async def serve_generated_image(filename: str, request: Request, thumb: int = 0)
     # <video>); generation failures also fall through to the full image.
     if thumb and mime.startswith("image/"):
         try:
-            from PIL import Image, ImageOps
             from src.generated_images import GENERATED_IMAGE_DIR
             thumb_dir = GENERATED_IMAGE_DIR / ".thumbs"
-            thumb_dir.mkdir(parents=True, exist_ok=True)
             thumb_path = thumb_dir / (filename + ".webp")
             if not thumb_path.exists():
-                im = Image.open(str(img_path))
-                # Bake EXIF rotation into the pixels (PIL drops EXIF on save).
-                im = ImageOps.exif_transpose(im)
-                im.thumbnail((400, 400))
-                if im.mode not in ("RGB", "RGBA", "L"):
-                    im = im.convert("RGB")
-                im.save(str(thumb_path), "WEBP", quality=80)
+                # CPU-bound decode/resize/encode (tens-to-hundreds of ms for a
+                # multi-MP phone photo). Offload to a worker thread so a cold
+                # grid — many first-time tiles requested at once — doesn't
+                # stall the event loop and freeze every other request on this
+                # single uvicorn worker.
+                await asyncio.to_thread(_generate_gallery_thumb, img_path, thumb_dir, thumb_path)
             return FileResponse(
                 str(thumb_path), media_type="image/webp", headers=GENERATED_IMAGE_HEADERS,
             )
