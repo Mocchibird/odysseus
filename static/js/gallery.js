@@ -131,7 +131,9 @@ async function _fetchLibrary(append) {
         else localStorage.removeItem('gallery-known-empty');
       }
     } catch (_) {}
-    _total = data.total || 0;
+    // total is sent only on the first page (offset 0); on append the server
+    // omits it (null) to skip a COUNT(*), so keep the value we already have.
+    if (typeof data.total === 'number') _total = data.total;
     if (typeof data.total_tagged === 'number') _totalTagged = data.total_tagged;
     _updateTagCount();
     _renderGrid();
@@ -2025,6 +2027,18 @@ function _openDetail(img) {
 
   // Prev/Next navigation
   const curIdx = _items.findIndex(i => i.id === img.id);
+  // Warm the adjacent full-res images so arrow/swipe navigation paints
+  // instantly instead of re-fetching on each step. URLs are immutable content
+  // hashes, so this only primes the browser cache. Skip videos (Image() can't
+  // preload them) and out-of-range neighbours.
+  [curIdx - 1, curIdx + 1].forEach((_i) => {
+    const _nb = _items[_i];
+    if (_nb && _nb.url && !_isVideoUrl(_nb.url)) {
+      const _pre = new Image();
+      _pre.decoding = 'async';
+      _pre.src = _nb.url;
+    }
+  });
   const prevBtn = document.getElementById('gallery-detail-prev');
   const nextBtn = document.getElementById('gallery-detail-next');
   if (curIdx <= 0) prevBtn.classList.add('gallery-detail-nav-disabled');

@@ -654,8 +654,13 @@ def setup_gallery_routes() -> APIRouter:
             if favorites:
                 q = q.filter(GalleryImage.favorite == True)
 
-            # Total before pagination — needed every page for the Load More gate.
-            total = q.count()
+            # Total before pagination — the client gates "Load More" on this.
+            # Like the facets/total_tagged below, it's a first-page-only stat:
+            # on scroll pages (offset > 0) we skip the COUNT(*) and the client
+            # keeps the value it already has (None = unchanged).
+            total = None
+            if offset == 0:
+                total = q.count()
             # How many of those have AI tags — surfaced as "X/Y photos tagged"
             # in the AI-tagging settings header. Like the facets, this is a
             # first-page-only stat; on scroll pages we skip the extra count and
