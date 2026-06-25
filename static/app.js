@@ -23,14 +23,9 @@ import sessionModule from './js/sessions.js';
 import memoryModule from './js/memory.js';
 import voiceRecorderModule from './js/voiceRecorder.js';
 import censorModule from './js/censor.js';
-import galleryModule from './js/gallery.js?v=456';
-import tasksModule from './js/tasks.js';
-import calendarModule from './js/calendar.js';
 import notesModule from './js/notes.js?v=464';
 import booksModule from './js/books.js?v=420';
-import healthModule from './js/health.js?v=399';
 import pingsModule from './js/pings.js?v=396';
-import todayModule from './js/today.js?v=422';
 import adminModule from './js/admin.js?v=450';
 import settingsModule from './js/settings.js?v=457';
 // FORK: runtime-inject fork-only UI (e.g. the API Tokens panel) into stable
@@ -55,6 +50,18 @@ import spinnerModule from './js/spinner.js';
 import { initKeyboardShortcuts } from './js/keyboard-shortcuts.js';
 import { initSidebarLayout, syncRailSide } from './js/sidebar-layout.js';
 import { initSectionCollapse, initSectionDrag } from './js/section-management.js';
+
+// Route-only modules: imported on first open instead of at boot, so their JS
+// isn't parsed up front (the rest of the eager graph is minified at build
+// time). The ES module cache makes the dynamic import idempotent; the cached
+// var just avoids re-awaiting. These aren't used at startup and aren't wired
+// onto window, so deferring them is safe.
+const _lazyModule = (loader) => { let m; return async () => (m ||= (await loader()).default); };
+const _gallery  = _lazyModule(() => import('./js/gallery.js?v=456'));
+const _tasks    = _lazyModule(() => import('./js/tasks.js'));
+const _calendar = _lazyModule(() => import('./js/calendar.js'));
+const _health   = _lazyModule(() => import('./js/health.js?v=399'));
+const _today    = _lazyModule(() => import('./js/today.js?v=422'));
 
 const API_BASE = window.location.origin;
 window.themeModule = themeModule;
@@ -221,7 +228,7 @@ function initializeEventListeners() {
       e.preventDefault();
       const href = cite.getAttribute('href');
       if (href.startsWith('#book-')) booksModule?.openBooksPanel?.();
-      else if (href.startsWith('#gallery-')) galleryModule?.openGallery?.();
+      else if (href.startsWith('#gallery-')) _gallery().then(m => m.openGallery());
       else documentModule?.openLibrary?.({ tab: 'files' });  // #file- / legacy #knowledge-
       return;
     }
@@ -890,11 +897,11 @@ function initializeEventListeners() {
   const toolGalleryBtn = el('tool-gallery-btn');
   if (toolGalleryBtn) {
     toolGalleryBtn.addEventListener('click', async () => {
-      if (!galleryModule) return;
       const Modals = await import('./js/modalManager.js');
       if (!Modals.toggle('gallery-modal')) {
-        if (galleryModule.isGalleryOpen()) galleryModule.closeGallery();
-        else galleryModule.openGallery();
+        const m = await _gallery();
+        if (m.isGalleryOpen()) m.closeGallery();
+        else m.openGallery();
       }
     });
   }
@@ -918,10 +925,9 @@ function initializeEventListeners() {
     btn.addEventListener("click", () => {
     });
   });
-    toolTasksBtn.addEventListener('click', () => {
-      if (tasksModule) {
-        tasksModule.isTasksOpen() ? tasksModule.closeTasks() : tasksModule.openTasks();
-      }
+    toolTasksBtn.addEventListener('click', async () => {
+      const m = await _tasks();
+      m.isTasksOpen() ? m.closeTasks() : m.openTasks();
     });
   }
 
@@ -929,20 +935,19 @@ function initializeEventListeners() {
   // (openHealth); Habits is its own panel (openHabits).
   const toolHealthBtn = el('tool-health-btn');
   if (toolHealthBtn) {
-    toolHealthBtn.addEventListener('click', () => healthModule && healthModule.openHealth('calories'));
+    toolHealthBtn.addEventListener('click', async () => (await _health()).openHealth('calories'));
   }
   const toolHabitsBtn = el('tool-habits-btn');
   if (toolHabitsBtn) {
-    toolHabitsBtn.addEventListener('click', () => healthModule && healthModule.openHabits());
+    toolHabitsBtn.addEventListener('click', async () => (await _health()).openHabits());
   }
 
   // "Today" dashboard tool button (toggles open/closed)
   const toolTodayBtn = el('tool-today-btn');
   if (toolTodayBtn) {
     toolTodayBtn.addEventListener('click', () => {
-      if (todayModule) {
-        todayModule.isTodayOpen() ? todayModule.closeToday() : todayModule.openToday();
-      }
+      const m = await _today();
+      m.isTodayOpen() ? m.closeToday() : m.openToday();
     });
   }
 
@@ -970,13 +975,13 @@ function initializeEventListeners() {
   const toolCalendarBtn = el('tool-calendar-btn');
   if (toolCalendarBtn) {
     toolCalendarBtn.addEventListener('click', async () => {
-      if (!calendarModule) return;
       const Modals = await import('./js/modalManager.js');
       // toggle returns true when a registered modal was minimized/restored;
       // returns false when nothing is registered → open fresh.
       if (!Modals.toggle('calendar-modal')) {
-        if (calendarModule.isCalendarOpen()) calendarModule.closeCalendar();
-        else calendarModule.openCalendar();
+        const m = await _calendar();
+        if (m.isCalendarOpen()) m.closeCalendar();
+        else m.openCalendar();
       }
     });
   }
@@ -1084,7 +1089,7 @@ function initializeEventListeners() {
       }
     },
     '/books':    () => booksModule?.openBooksPanel && booksModule.openBooksPanel(),
-    '/calendar': () => calendarModule && calendarModule.openCalendar(),
+    '/calendar': () => _calendar().then(m => m.openCalendar()),
     '/cookbook': () => document.getElementById('tool-cookbook-btn')?.click(),
     '/email':    () => {
       // Collapse the wide sidebar → icon rail (48px) so the user keeps
