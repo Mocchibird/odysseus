@@ -579,28 +579,35 @@ def setup_gallery_routes() -> APIRouter:
             return query
 
         try:
-            # Distinct tags for filter UI
-            tag_q = db.query(GalleryImage.tags).filter(
-                GalleryImage.is_active == True, GalleryImage.tags != None, GalleryImage.tags != ""
-            )
-            tag_q = _owner_filter(tag_q, user)
-            tag_q = _apply_media_filters(tag_q)
-            tag_rows = tag_q.all()
-            all_tags = set()
-            for (raw,) in tag_rows:
-                for t in raw.split(","):
-                    t = t.strip()
-                    if t:
-                        all_tags.add(t)
+            # Distinct tags + models for the filter UI. These scan the whole
+            # (media-filtered) library and don't change between pages of the
+            # same view, so only compute them on the first page; infinite-scroll
+            # requests (offset > 0) skip them and the client keeps the chips it
+            # already rendered. None signals "unchanged" to the client.
+            all_tags = None
+            all_models = None
+            if offset == 0:
+                tag_q = db.query(GalleryImage.tags).filter(
+                    GalleryImage.is_active == True, GalleryImage.tags != None, GalleryImage.tags != ""
+                )
+                tag_q = _owner_filter(tag_q, user)
+                tag_q = _apply_media_filters(tag_q)
+                tag_rows = tag_q.all()
+                all_tags = set()
+                for (raw,) in tag_rows:
+                    for t in raw.split(","):
+                        t = t.strip()
+                        if t:
+                            all_tags.add(t)
 
-            # Distinct models for filter UI
-            model_q = db.query(GalleryImage.model).filter(
-                GalleryImage.is_active == True, GalleryImage.model != None
-            )
-            model_q = _owner_filter(model_q, user)
-            model_q = _apply_media_filters(model_q)
-            model_rows = model_q.distinct().all()
-            all_models = sorted([m for (m,) in model_rows if m])
+                # Distinct models for filter UI
+                model_q = db.query(GalleryImage.model).filter(
+                    GalleryImage.is_active == True, GalleryImage.model != None
+                )
+                model_q = _owner_filter(model_q, user)
+                model_q = _apply_media_filters(model_q)
+                model_rows = model_q.distinct().all()
+                all_models = sorted([m for (m,) in model_rows if m])
 
             # Base query with left join to sessions for session_name
             q = (
@@ -647,13 +654,17 @@ def setup_gallery_routes() -> APIRouter:
             if favorites:
                 q = q.filter(GalleryImage.favorite == True)
 
-            # Total before pagination
+            # Total before pagination — needed every page for the Load More gate.
             total = q.count()
             # How many of those have AI tags — surfaced as "X/Y photos tagged"
-            # in the AI-tagging settings header.
-            total_tagged = q.filter(
-                GalleryImage.ai_tags.isnot(None), GalleryImage.ai_tags != ""
-            ).count()
+            # in the AI-tagging settings header. Like the facets, this is a
+            # first-page-only stat; on scroll pages we skip the extra count and
+            # the client keeps the value it already has (None = unchanged).
+            total_tagged = None
+            if offset == 0:
+                total_tagged = q.filter(
+                    GalleryImage.ai_tags.isnot(None), GalleryImage.ai_tags != ""
+                ).count()
 
             # Sorting
             if sort == "shuffle":
@@ -694,7 +705,8 @@ def setup_gallery_routes() -> APIRouter:
                 "items": items,
                 "total": total,
                 "total_tagged": total_tagged,
-                "tags": sorted(all_tags),
+                # tags/models are None on scroll pages (offset > 0) — see above.
+                "tags": sorted(all_tags) if all_tags is not None else None,
                 "models": all_models,
             }
         except Exception as e:
@@ -772,7 +784,8 @@ def setup_gallery_routes() -> APIRouter:
                 fn = (cover_by_id.get(a.cover_id) if a.cover_id else None) or (
                     fallback.get(a.id) if count > 0 else None
                 )
-                cover_url = f"/api/generated-image/{fn}" if fn else None
+                # Album covers render at thumbnail size — serve the small WebP.
+                cover_url = f"/api/generated-image/{fn}?thumb=1" if fn else None
                 result.append({
                     "id": a.id, "name": a.name, "description": a.description or "",
                     "cover_url": cover_url, "count": count,
