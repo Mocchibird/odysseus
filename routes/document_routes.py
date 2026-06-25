@@ -451,6 +451,9 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
                 db.query(Document.tags)
                 .outerjoin(DbSession, Document.session_id == DbSession.id)
                 .filter(Document.is_active == True).filter(_arch_cond)
+                # Only tagged docs contribute to the facet — skip fetching the
+                # (potentially many) untagged rows just to split empty strings.
+                .filter(Document.tags.isnot(None)).filter(Document.tags != "")
             )
             tag_q = _owner_session_filter(tag_q, user)
             tag_facet: Dict[str, int] = {}
