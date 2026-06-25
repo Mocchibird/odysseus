@@ -18279,7 +18279,7 @@ body:not(.email-doc-split-active) #email-lib-modal.email-lib-fullscreen:not(.mod
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 2px 8px 4px;
+  padding: 8px 12px;
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
   /* Pin to top so a tall (portrait) photo can't cover the Back / ⋮
@@ -18301,8 +18301,6 @@ body:not(.email-doc-split-active) #email-lib-modal.email-lib-fullscreen:not(.mod
   font-size: 12px;
   padding: 4px 8px;
   border-radius: 4px;
-  position: relative;
-  top: -2px;
 }
 /* Slightly larger header icons (back/edit/heart/⋮) — override the inline 14px. */
 .gallery-detail-header svg { width: 16px; height: 16px; }
@@ -18339,8 +18337,6 @@ body:not(.email-doc-split-active) #email-lib-modal.email-lib-fullscreen:not(.mod
   width: 28px;
   height: 26px;
   padding: 0;
-  position: relative;
-  top: -2px;
 }
 .gallery-detail-menu {
   position: absolute;
