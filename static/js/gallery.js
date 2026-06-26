@@ -1384,8 +1384,8 @@ function _cardHtml(img) {
   return `
       <div class="gallery-card" data-id="${_esc(img.id)}">
         <span class="gallery-select-dot" style="display:none;"></span>
-        <button class="gallery-fav-btn${favCls}" data-id="${_esc(img.id)}" title="Favorite">&#9829;</button>
-        <button class="gallery-dl-btn" data-id="${_esc(img.id)}" data-url="${_esc(img.url)}" data-filename="${_esc(img.filename || '')}" title="Download">
+        <button class="gallery-fav-btn${favCls}" data-id="${_esc(img.id)}" title="Favorite" aria-label="Favorite">&#9829;</button>
+        <button class="gallery-dl-btn" data-id="${_esc(img.id)}" data-url="${_esc(img.url)}" data-filename="${_esc(img.filename || '')}" title="Download" aria-label="Download">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
         </button>
         <button class="gallery-card-menu-btn" data-id="${_esc(img.id)}" title="More actions" aria-label="More actions">
