@@ -475,13 +475,20 @@ def _generate_gallery_thumb(img_path, thumb_dir, thumb_path):
     os.close(fd)
     try:
         im.save(tmp, "WEBP", quality=80)
-        os.replace(tmp, str(thumb_path))  # atomic publish
-    except BaseException:
         try:
-            os.unlink(tmp)
+            os.replace(tmp, str(thumb_path))  # atomic publish
+        except OSError:
+            # Concurrent first-load race: another worker already published this
+            # thumb and a response may have it open (Windows blocks replace onto
+            # an open file). If the destination now exists, the race is benign.
+            if not thumb_path.exists():
+                raise
+    finally:
+        try:
+            if os.path.exists(tmp):
+                os.unlink(tmp)
         except OSError:
             pass
-        raise
 
 
 def _generate_video_poster(video_path, thumb_dir, thumb_path):
@@ -513,7 +520,12 @@ def _generate_video_poster(video_path, thumb_dir, thumb_path):
             ]
             res = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
             if res.returncode == 0 and os.path.getsize(tmp) > 0:
-                os.replace(tmp, str(thumb_path))  # atomic publish
+                try:
+                    os.replace(tmp, str(thumb_path))  # atomic publish
+                except OSError:
+                    # Benign concurrent-publish race (see _generate_gallery_thumb).
+                    if not thumb_path.exists():
+                        raise
                 return True
         return False
     finally:
@@ -522,6 +534,18 @@ def _generate_video_poster(video_path, thumb_dir, thumb_path):
                 os.unlink(tmp)
         except OSError:
             pass
+
+
+# Generic video placeholder served for ?thumb=1 on a video when no poster frame
+# can be produced (no ffmpeg / unreadable clip) — the grid renders video tiles
+# as <img>, which can't display video bytes, so this avoids a broken-image icon.
+_VIDEO_PLACEHOLDER_SVG = (
+    b'<svg xmlns="http://www.w3.org/2000/svg" width="400" height="400" viewBox="0 0 400 400">'
+    b'<rect width="400" height="400" fill="#1b1b1b"/>'
+    b'<circle cx="200" cy="200" r="54" fill="none" stroke="#8a8a8a" stroke-width="6"/>'
+    b'<path d="M185 172 L185 228 L233 200 Z" fill="#8a8a8a"/>'
+    b'</svg>'
+)
 
 
 @app.get("/api/generated-image/{filename}")
@@ -597,7 +621,14 @@ async def serve_generated_image(filename: str, request: Request, thumb: int = 0)
                 )
         except Exception as _ve:
             logger.warning("Gallery video poster generation failed for %r: %s", filename, _ve)
-            # Fall through to the full video.
+        # No poster (no ffmpeg / unreadable clip): return a generic placeholder
+        # image rather than the raw video bytes — the grid <img> can't render
+        # video/*, so falling through would show a broken-image icon.
+        from starlette.responses import Response as _Response
+        return _Response(
+            content=_VIDEO_PLACEHOLDER_SVG, media_type="image/svg+xml",
+            headers={"Cache-Control": "public, max-age=300"},
+        )
     # Generated-image filenames are content hashes → the bytes for a given
     # filename never change. Cache them hard so the gallery doesn't
     # re-download every full-size image each time it's opened. `immutable`
