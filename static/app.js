@@ -26,6 +26,13 @@ import censorModule from './js/censor.js';
 import notesModule from './js/notes.js?v=464';
 import booksModule from './js/books.js?v=420';
 import pingsModule from './js/pings.js?v=396';
+// tasks.js + calendar.js are imported EAGERLY (not lazy): they run boot-time
+// side effects at module load — tasks.js starts background-task notification
+// polling, calendar.js populates the sidebar today-events badge + wires its
+// 'calendar-refresh' listener — which would silently never run if deferred to
+// first open.
+import tasksModule from './js/tasks.js';
+import calendarModule from './js/calendar.js';
 import adminModule from './js/admin.js?v=450';
 import settingsModule from './js/settings.js?v=457';
 // FORK: runtime-inject fork-only UI (e.g. the API Tokens panel) into stable
@@ -51,15 +58,14 @@ import { initKeyboardShortcuts } from './js/keyboard-shortcuts.js';
 import { initSidebarLayout, syncRailSide } from './js/sidebar-layout.js';
 import { initSectionCollapse, initSectionDrag } from './js/section-management.js';
 
-// Route-only modules: imported on first open instead of at boot, so their JS
-// isn't parsed up front (the rest of the eager graph is minified at build
-// time). The ES module cache makes the dynamic import idempotent; the cached
-// var just avoids re-awaiting. These aren't used at startup and aren't wired
-// onto window, so deferring them is safe.
+// Route-only modules with NO boot-time side effects (verified: gallery has only
+// an _open-guarded refresh listener; health/today have none) — imported on
+// first open instead of at boot so their JS isn't parsed up front. The ES
+// module cache makes the dynamic import idempotent; the cached var just avoids
+// re-awaiting. (tasks/calendar are NOT lazy — they have boot side effects and
+// stay eagerly imported above.)
 const _lazyModule = (loader) => { let m; return async () => (m ||= (await loader()).default); };
 const _gallery  = _lazyModule(() => import('./js/gallery.js?v=456'));
-const _tasks    = _lazyModule(() => import('./js/tasks.js'));
-const _calendar = _lazyModule(() => import('./js/calendar.js'));
 const _health   = _lazyModule(() => import('./js/health.js?v=399'));
 const _today    = _lazyModule(() => import('./js/today.js?v=422'));
 
@@ -925,9 +931,10 @@ function initializeEventListeners() {
     btn.addEventListener("click", () => {
     });
   });
-    toolTasksBtn.addEventListener('click', async () => {
-      const m = await _tasks();
-      m.isTasksOpen() ? m.closeTasks() : m.openTasks();
+    toolTasksBtn.addEventListener('click', () => {
+      if (tasksModule) {
+        tasksModule.isTasksOpen() ? tasksModule.closeTasks() : tasksModule.openTasks();
+      }
     });
   }
 
@@ -975,13 +982,13 @@ function initializeEventListeners() {
   const toolCalendarBtn = el('tool-calendar-btn');
   if (toolCalendarBtn) {
     toolCalendarBtn.addEventListener('click', async () => {
+      if (!calendarModule) return;
       const Modals = await import('./js/modalManager.js');
       // toggle returns true when a registered modal was minimized/restored;
       // returns false when nothing is registered → open fresh.
       if (!Modals.toggle('calendar-modal')) {
-        const m = await _calendar();
-        if (m.isCalendarOpen()) m.closeCalendar();
-        else m.openCalendar();
+        if (calendarModule.isCalendarOpen()) calendarModule.closeCalendar();
+        else calendarModule.openCalendar();
       }
     });
   }
@@ -1089,7 +1096,7 @@ function initializeEventListeners() {
       }
     },
     '/books':    () => booksModule?.openBooksPanel && booksModule.openBooksPanel(),
-    '/calendar': () => _calendar().then(m => m.openCalendar()),
+    '/calendar': () => calendarModule && calendarModule.openCalendar(),
     '/cookbook': () => document.getElementById('tool-cookbook-btn')?.click(),
     '/email':    () => {
       // Collapse the wide sidebar → icon rail (48px) so the user keeps
