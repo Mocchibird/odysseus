@@ -90,7 +90,10 @@ def set_sqlite_pragma(dbapi_connection, connection_record):
         # facet sorts and GROUP BYs off disk, and mmap lets reads page the DB
         # in through the OS cache instead of per-page read() syscalls. All are
         # per-connection and WAL-safe; no-ops on the in-memory test DB.
-        cursor.execute("PRAGMA cache_size=-65536")    # ~64 MB (negative = KiB)
+        # ~16 MB per connection (negative = KiB). The default QueuePool can open
+        # up to 15 connections (5 + 10 overflow), so this is a ≤240 MB ceiling on
+        # the resource-light host — not 64 MB × 15. SQLite allocates it lazily.
+        cursor.execute("PRAGMA cache_size=-16384")
         cursor.execute("PRAGMA temp_store=MEMORY")
         cursor.execute("PRAGMA mmap_size=268435456")  # 256 MB
         cursor.close()
