@@ -1491,6 +1491,16 @@ function _appendCards(newItems) {
   const cards = Array.from(tpl.content.children);
   cards.forEach(c => grid.appendChild(c));
   cards.forEach(_wireCard);
+  // If appended while select mode is active, reveal the new cards' select dots
+  // + mark them selectable — _setSelectMode only ran over cards present when
+  // Select was toggled. body.gallery-selecting is the active-mode signal.
+  if (document.body.classList.contains('gallery-selecting')) {
+    cards.forEach(c => {
+      const dot = c.querySelector('.gallery-select-dot');
+      if (dot) dot.style.display = '';
+      c.classList.add('gallery-card-selectable');
+    });
+  }
   const loadMore = document.getElementById('gallery-load-more');
   if (loadMore) loadMore.style.display = _items.length < _total ? 'block' : 'none';
 }
