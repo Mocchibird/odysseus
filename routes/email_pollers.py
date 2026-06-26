@@ -222,7 +222,7 @@ async def _auto_summarize_pass_single(days_back: int = 1, account_id: str | None
         if auto_cal:
             for sent_name in ("Sent", "INBOX/Sent", "Sent Items", "[Gmail]/Sent Mail"):
                 try:
-                    st, _ = conn.select(_q(sent_name), readonly=True)
+                    st, _ = await asyncio.to_thread(conn.select, _q(sent_name), readonly=True)
                     if st == "OK":
                         folders_to_scan.append(sent_name)
                         break
@@ -230,7 +230,7 @@ async def _auto_summarize_pass_single(days_back: int = 1, account_id: str | None
                     continue
         for folder in folders_to_scan:
             try:
-                conn.select(_q(folder), readonly=True)
+                await asyncio.to_thread(conn.select, _q(folder), readonly=True)
                 status, data = await asyncio.to_thread(conn.uid, "SEARCH", None, f'(SINCE {since})')
                 if status == "OK" and data[0]:
                     for u in reversed(data[0].split()[-30:]):
@@ -243,13 +243,13 @@ async def _auto_summarize_pass_single(days_back: int = 1, account_id: str | None
         # the latest visible inbox messages so Clear cache -> Run again can
         # actually repopulate AI reply/summary/tag caches.
         if not uid_list:
-            _fb_uids, conn = _latest_inbox_fallback_uids(
-                conn, lambda: _imap_connect(account_id, owner=account_owner)
+            _fb_uids, conn = await asyncio.to_thread(
+                _latest_inbox_fallback_uids, conn, lambda: _imap_connect(account_id, owner=account_owner)
             )
             uid_list.extend(_fb_uids)
         # Re-select INBOX as default for downstream code (on a clean socket even
         # if the SEARCH ALL fallback above failed — see #1613).
-        conn.select("INBOX", readonly=True)
+        await asyncio.to_thread(conn.select, "INBOX", readonly=True)
         if not uid_list:
             return "No recent emails"
         await _emit_progress(progress_cb, f"Found {len(uid_list)} recent email(s); checking cache…")
@@ -326,7 +326,7 @@ async def _auto_summarize_pass_single(days_back: int = 1, account_id: str | None
                 _folder, uid = "INBOX", _entry
             try:
                 if _folder != _current_folder:
-                    conn.select(_q(_folder), readonly=True)
+                    await asyncio.to_thread(conn.select, _q(_folder), readonly=True)
                     _current_folder = _folder
                 # Per-message body fetch is the heaviest blocking call (one
                 # IMAP round-trip each) — run it off the event loop.
