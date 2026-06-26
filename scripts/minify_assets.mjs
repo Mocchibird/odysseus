@@ -30,7 +30,14 @@ const jsFiles = [...walkJs('static/js'), 'static/app.js'];
 let jsBefore = 0, jsAfter = 0;
 for (const f of jsFiles) {
   const src = readFileSync(f, 'utf8');
-  const out = await esbuild.transform(src, { loader: 'js', minify: true, legalComments: 'none' });
+  let out;
+  try {
+    // format:'esm' is required so esbuild allows top-level `await` (some
+    // modules use it); these files are all loaded as ES modules anyway.
+    out = await esbuild.transform(src, { loader: 'js', minify: true, legalComments: 'none', format: 'esm' });
+  } catch (e) {
+    throw new Error(`minify failed for ${f}: ${e.message}`);
+  }
   writeFileSync(f, out.code);
   jsBefore += src.length;
   jsAfter += out.code.length;
