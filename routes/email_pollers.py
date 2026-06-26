@@ -208,7 +208,10 @@ async def _auto_summarize_pass_single(days_back: int = 1, account_id: str | None
     conn = None
     try:
         await _emit_progress(progress_cb, "Connecting to mail…")
-        conn = _imap_connect(account_id, owner=account_owner)
+        # Offload the blocking IMAP connect (TLS handshake) off the event loop —
+        # this background pass runs across every account, so a sync connect here
+        # stalls all other requests on the single worker.
+        conn = await asyncio.to_thread(_imap_connect, account_id, owner=account_owner)
         from datetime import timedelta as _td
         since = (datetime.utcnow() - _td(days=max(1, days_back))).strftime("%d-%b-%Y")
         # uid_list carries real IMAP UIDs, matching the email UI/read routes.
@@ -228,7 +231,7 @@ async def _auto_summarize_pass_single(days_back: int = 1, account_id: str | None
         for folder in folders_to_scan:
             try:
                 conn.select(_q(folder), readonly=True)
-                status, data = conn.uid("SEARCH", None, f'(SINCE {since})')
+                status, data = await asyncio.to_thread(conn.uid, "SEARCH", None, f'(SINCE {since})')
                 if status == "OK" and data[0]:
                     for u in reversed(data[0].split()[-30:]):
                         uid_list.append((folder, u))
@@ -325,7 +328,9 @@ async def _auto_summarize_pass_single(days_back: int = 1, account_id: str | None
                 if _folder != _current_folder:
                     conn.select(_q(_folder), readonly=True)
                     _current_folder = _folder
-                st, msg_data = conn.uid("FETCH", uid if isinstance(uid, bytes) else str(uid).encode(), "(RFC822)")
+                # Per-message body fetch is the heaviest blocking call (one
+                # IMAP round-trip each) — run it off the event loop.
+                st, msg_data = await asyncio.to_thread(conn.uid, "FETCH", uid if isinstance(uid, bytes) else str(uid).encode(), "(RFC822)")
                 if st != "OK":
                     continue
                 examined += 1
