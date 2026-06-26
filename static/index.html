@@ -203,6 +203,12 @@
     @font-face { font-family: 'Inter'; font-weight: 500; font-style: normal; font-display: swap; src: url('/static/fonts/Inter-Medium.woff2') format('woff2'); }
     @font-face { font-family: 'Inter'; font-weight: 600; font-style: normal; font-display: swap; src: url('/static/fonts/Inter-SemiBold.woff2') format('woff2'); }
   </style>
+  <!-- Warm the connection to the math/diagram CDN before the async KaTeX/
+       Mermaid loads below, so DNS + TLS are already done when they fetch.
+       (These libs are still CDN-loaded; self-hosting them like the Inter font
+       above would remove the last external front-end dependency.) -->
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+  <link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
   <!-- KaTeX CSS is loaded with media="print" so it doesn't block render,
        then flipped to "all" via JS after load. Mermaid init runs once the
        library finishes loading. Both hooks are wired via addEventListener
