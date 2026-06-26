@@ -945,7 +945,7 @@ function initializeEventListeners() {
   // "Today" dashboard tool button (toggles open/closed)
   const toolTodayBtn = el('tool-today-btn');
   if (toolTodayBtn) {
-    toolTodayBtn.addEventListener('click', () => {
+    toolTodayBtn.addEventListener('click', async () => {
       const m = await _today();
       m.isTodayOpen() ? m.closeToday() : m.openToday();
     });
