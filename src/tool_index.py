@@ -33,47 +33,10 @@ logger = logging.getLogger(__name__)
 # keyword intent so a trivial agent prompt like "test" does not carry every
 # domain's schemas and rules.
 ALWAYS_AVAILABLE = frozenset({
-    "web_search", "web_fetch",
-    # File/shell tools (bash, python, read_file, write_file, edit_file, grep,
-    # glob, ls) are NOT always-on: upstream's workspace confinement surfaces the
-    # read-only ones only when a workspace is active (see stream_agent_loop), and
-    # RAG/keyword retrieval adds the write/shell tools on a real file-work ask.
-    "api_call",  # For configured integrations (Miniflux, Gitea, Linkding, etc.)
-    "send_ping",  # Immediate ntfy notifications for "ping me now" requests.
-    # The two genuinely AMBIENT cookbook tools — "what's running" and
-    # "kill it" can be asked any time without prior cookbook context,
-    # and need to survive typos. The other cookbook tools (downloads,
-    # presets, serve, cached, servers) are CONTEXTUAL — they fire via
-    # keyword hints when the user is actually talking about cookbook.
-    # Keeping the always-on set small leaves room in the ~16-tool
-    # budget for manage_tasks / manage_calendar / etc.
-    "list_served_models", "stop_served_model", "tail_serve_output",
-    # Serving is a core agent capability — keep these always available so
-    # the router doesn't lose them on phrasings like "servic" / "fire up" / "boot".
-    "serve_model", "serve_preset", "list_serve_presets",
-    "list_cached_models", "list_cookbook_servers",
-    # Fallback when serve_model's allowlist rejects a cmd or when the
-    # model was launched out-of-band via bash+tmux — without this the
-    # session is invisible to the cookbook UI even though it's running.
-    "adopt_served_model",
-    # Generic API loopback — the catch-all when no named tool fits.
-    "app_api",
     # Memory is ambient — "remember this" can follow any message regardless
     # of topic. Without this, RAG drops it and the agent falls back to
     # app_api /api/memory/add which fails with 422 on first attempt.
     "manage_memory",
-    # Reading state is durable user context; keep it reachable for
-    # "what was I reading?" and book/PDF follow-ups.
-    "manage_books",
-    # The native habit/health tracker is a first-class, frequently-used feature
-    # (its own panel + DB). Keep it always reachable so "add a habit", "rename
-    # my habit / give it an emoji", "log my lunch", "did I work out" never miss
-    # the tool and wrongly fall back to a checklist note or a vault search.
-    "manage_health",
-    # The user's content (Files / Books / Documents). Keep reachable so "what do
-    # my files say about X", "find my file/book on Y", "look up Z" hit
-    # search_files instead of falling back to a web_search.
-    "search_files",
     # Ask the user a multiple-choice question for a decision/clarification.
     # Always reachable so the agent can pause and ask at any point.
     "ask_user",
@@ -86,13 +49,11 @@ ALWAYS_AVAILABLE = frozenset({
 ASSISTANT_ALWAYS_AVAILABLE = frozenset({
     "list_email_accounts", "list_emails", "read_email", "send_email", "reply_to_email",
     "bulk_email", "archive_email", "delete_email", "mark_email_read",
-    "manage_calendar", "manage_notes", "manage_tasks", "manage_health",
-    "search_files",
-    "manage_memory", "manage_books", "web_search", "read_file",
+    "manage_calendar", "manage_notes", "manage_tasks",
+    "manage_memory", "web_search", "read_file",
     "create_document", "update_document",
     "resolve_contact", "search_chats",
     "api_call",  # For Miniflux/Gitea/Linkding/etc. integrations
-    "send_ping",  # Proactive assistant pings through ntfy.
     # Core UI control (toggles, open panels, switch model/mode, themes).
     # Always available so vague follow-ups ("now make it playful", "make it
     # darker") that don't repeat a theme/UI keyword still keep the tool in
@@ -115,7 +76,7 @@ BUILTIN_TOOL_DESCRIPTIONS: Dict[str, str] = {
     "glob": "Find FILES by glob pattern (e.g. '**/*.py'), newest first. Use to locate files by name/extension — prefer over bash find/ls.",
     "ls": "List a directory's entries (folders then files with sizes). Use to see what's in a folder — prefer over bash ls.",
     "get_workspace": "Return the absolute path of the active workspace folder the user is working in. File tools are confined to it; the shell starts there but is not sandboxed. Call this first when the user refers to 'the project'/'the code'/'this folder' without giving a path, instead of asking them.",
-    "write_file": "Write/create or fully rewrite a file ON DISK (source code, configs, project files). Use for new files or full rewrites — NOT create_document (editor panel) and NOT a bash heredoc. NEVER for saving user content/attachments: a user's uploaded file goes through manage_files (action=add with an upload_id — it routes images/videos to the Gallery, PDFs/EPUBs to Books, and everything else to the Files store).",
+    "write_file": "Write/create or fully rewrite a file ON DISK (source code, configs, project files). Use for new files or full rewrites — NOT create_document (editor panel) and NOT a bash heredoc.",
     "edit_file": "Edit an existing file ON DISK by exact string replacement (fix a bug, change a function). Shows a diff. The tool for changing files on disk — NOT edit_document (editor panel) and NOT bash sed/heredoc.",
     "create_document": "Create a new document in the editor panel. For code, articles, text content longer than 15 lines, unless an already-open document/email draft is the obvious target. If an email compose draft is open, edit that draft instead of creating another document.",
     "edit_document": "Preferred tool for editing an existing document — targeted find-and-replace. Use for any small change: add a function, fix a bug, tweak a section, rename things.",
@@ -136,7 +97,6 @@ BUILTIN_TOOL_DESCRIPTIONS: Dict[str, str] = {
     "api_call": "Call a configured API integration by name (Home Assistant, Miniflux, Gitea, Linkding, Jellyfin, RSS reader, git forge, bookmark manager, smart home, or any other registered service). Make a GET/POST/PUT/PATCH/DELETE request to the integration's endpoint path, with an optional JSON body. Use whenever the user asks to query or control one of their connected integrations/services.",
     "manage_tokens": "API token management: list, create, or delete API access tokens.",
     "manage_documents": "List, read, delete, or tidy documents in the editor panel. action='list' returns clickable rows (most-recent first) so the user can open any doc by clicking. action='read' (aka view/open/get) with document_id returns the content; supports offset=<N> + limit=<N> to page through large docs (response includes next_offset when more remains, so you can keep calling with offset=next_offset). action='delete' with document_id removes a doc (only way to delete). Use this for ANY 'show/read/list/open my documents/docs/files/notes' request — never shell or curl.",
-    "manage_books": "EPUB/PDF e-reader: list books, read EPUB chapters or PDF pages, and save/read reading progress. Use for books, ebooks, EPUBs, PDFs, chapter/page status, and what the user has read.",
     "manage_research": "List, read/open, or delete saved DEEP RESEARCH results from the Library. action='list' returns clickable [query](#research-<id>) rows (most-recent first). action='read' (aka open/view/get) with id returns the report + sources. action='delete' with id removes it. Use this for ANY 'open/read/find/delete my research / that report / the research on X' request. NOTE: this is for EXISTING research; to START new research use trigger_research.",
     "manage_settings": "Change ANY real app setting (the ones the Settings panel writes) so the user never has to open it: TTS voice/provider/speed, STT, search engine + result count, default/teacher/task/utility/vision/image/research models, image quality, reminder channel (browser/email/ntfy), agent timeout/tool-call budget, and more. action=set with key (friendly aliases ok: voice, 'search engine', 'default model', 'teacher model', 'image quality', 'reminder channel'...) + value; get/list/reset too. Also toggles tools on/off (disable_tool/enable_tool/list_tools). Secrets/API keys are read-only. Use for any 'change my…/set my…/use X for…/turn on…' preference request.",
     "create_session": "Create a new chat with a name and model.",
@@ -145,7 +105,6 @@ BUILTIN_TOOL_DESCRIPTIONS: Dict[str, str] = {
     "search_chats": "Search past session transcripts across chats.",
     "ask_user": "Ask the user a multiple-choice question to get a decision or clarification. Use this when the task is genuinely ambiguous and the answer changes what you do next — pick between approaches, confirm an assumption, choose among options — instead of guessing. Provide a clear `question` and 2-6 `options` (each with a short `label`, optional `description`). Omit `multi`/keep it false unless the question explicitly permits choosing multiple options. Calling this ENDS your turn: the user sees clickable buttons and their choice arrives as your next message. Don't use it for things you can decide from context or sensible defaults, or for irreversible-action confirmation if a dedicated flow exists.",
     "update_plan": "Write back to the ACTIVE PLAN while executing an approved plan: mark steps done or revise them. After finishing a step call this with the full checklist and that step marked done; when the user asks to change the plan call it with the revised checklist. Always pass the COMPLETE markdown checklist (`- [ ]` / `- [x]`), not a diff. The user's docked plan window updates live. No effect when there is no active plan.",
-    "send_ping": "Send an immediate ntfy push notification/ping to the user through the configured ntfy integration and reminder topic. Use for 'ping me now', 'send me a notification', or proactive assistant pings. For reminders at a future time, use manage_notes with due_date.",
     "ui_control": "Control the UI and toggle tools on/off. Use this to turn off / turn on / disable / enable individual tools and features: shell (bash), search (web), research, browser, documents, incognito. Open panels (documents library, gallery, email inbox, sessions, notes, memories/brain, skills, settings, cookbook) via `open_panel <name>`. Use `open_email_reply <uid> <folder> reply` to open an email reply draft document without sending. To pre-fill the reply body in one shot (USE THIS whenever the user told you what to say — opening an empty draft when they asked you to write is wrong), append the body after the mode: `open_email_reply <uid> <folder> reply <body text>`. Body can continue on subsequent lines for multi-line replies. Also switches between chat/agent modes, changes the current model, and applies/creates themes.",
     "list_email_accounts": "List configured email accounts and default status. Use before reading or sending mail when the user mentions Gmail, work mail, custom domain mail, another mailbox, or asks to compare/check multiple inboxes.",
     "list_emails": "List emails for a folder/account, newest first, including read messages by default. Shows subject, sender, date, UID, account, and AI summary. Check inbox, find emails needing replies. Supports account from list_email_accounts for Gmail/work/custom mailboxes. For last/latest/newest email, use max_results=1 and unread_only=false.",
@@ -156,14 +115,10 @@ BUILTIN_TOOL_DESCRIPTIONS: Dict[str, str] = {
     "delete_email": "Delete an email — moves to Trash by default, or expunges permanently with permanent=true.",
     "mark_email_read": "Mark an email as read or unread by toggling the \\Seen flag.",
     "bulk_email": "Perform one action on many emails at once. Use for delete all those, archive these, mark all read, move spam to junk. Takes explicit UIDs from list_emails or all_unread=true. Always pass account for Gmail/work/custom mailbox results.",
-    "search_files": "Search the user's content — their Files (uploaded docs), Books (PDF/EPUB), and authored Documents — to recall facts/specs/notes. Combines exact keyword/tag matching with semantic recall across every store, and returns [filename](#<kind>-<id>) links — ALWAYS cite the source so the user can open + verify the original. For 'what do my files/notes say about X', 'find my file/book about Y', 'look up Z in my docs'. Not for live web info (use web_search) and not the habit tracker (use manage_health).",
-    "manage_files": "STORE and MANAGE the user's files: STORE a user-attached/uploaded file (add + upload_id — use when the user says 'save/store/remember this image/file/screenshot/document/book'). It ROUTES by type: images/videos → the Gallery (optionally into a named album, e.g. game screenshots into a '<game>' album), PDFs/EPUBs → Books, everything else → the Files store. For Files items you can also replace/correct text (edit), append, set tags (retag), AI-generate tags (autotag), rename, or delete. Identify a Files item by id (from a search_files #file-<id> link) or a unique filename. Every change re-indexes recall. Not for reading (use search_files) or authoring new documents (use the document tools).",
-    "manage_gallery": "MANAGE the user's Gallery (photos + videos): tag them, rename them, favorite/unfavorite, hide/unhide, delete, create albums, and FILE media into an album ('sort' game screenshots into a '<game>' album). Use action=list (by album/tag/media_type) to find items + their ids first, then act by id (or a unique name/keyword). To store a NEW chat-attached photo/video, use manage_files add (it routes media into the Gallery). For files/docs use manage_files; for reading book/file contents use search_files.",
     "resolve_contact": "Look up a contact's email address by name. Searches CardDAV address book and sent email history. Use when the user says 'message [name]', 'email [name]', or 'send to [name]' without an email address.",
     "manage_contact": "Save / update / delete / list address-book contacts (CardDAV). Use for info about ANOTHER person — name, email, phone, postal address. Args: action=list|add|update|delete, name, email, phones, address, uid (from list). For 'save this for <person>' / address pastes / phone numbers next to a name, this is the right tool — NOT manage_memory. Do NOT use for facts about the USER ('my name is X'); those are manage_memory.",
-    "manage_notes": "Create and manage notes and checklists (Google Keep-style). ALWAYS use this for note/todo/checklist/reminder creation — NEVER hit /api/notes via app_api. BUT a recurring HABIT (one with streaks/a heatmap, e.g. 'add a habit', 'track meditation daily', 'rename my habit') is NOT a checklist — use manage_health for the habit tracker, not a note. Accepts natural-language `due_date` like 'tomorrow at 9am' or '11pm today' (parsed in the USER'S timezone). The due_date IS the reminder — it fires a notification at that time, so do NOT also create a calendar event for the same reminder. Set colors, labels, pin, archive. Do NOT use manage_memory for note content.",
-    "manage_calendar": "Calendar event management: list, create, update, delete. Each event can carry a tag/category (event_type — work/personal/health/travel/meal/social/admin/other) and importance (low/normal/high/critical). For relative dates like today/tomorrow, prefer passing natural language directly, e.g. dtstart='today 9:00'; the tool resolves it in the user's timezone. ISO datetimes are accepted only when they match the Current date/time context and are in the user's local wall time. Supports all-day events. For event reminders/alarms, pass reminder_minutes; this creates the Notes reminder, so do not also call manage_notes for the same reminder.",
-    "manage_health": "The user's HABIT TRACKER and health/training log (same data the Health panel shows; backed by the app database — NOT a checklist note and NOT a vault/Obsidian file). Use for the habit tracker and anything health: 'start/add a habit' (create_habit), 'rename a habit / give a habit an emoji or icon / change its category or color' (update_habit), 'delete a habit' (delete_habit), 'mark a habit done' (check_habit), 'list my habits / streaks' (list_habits), habit_heatmap, 'log my lunch ~600 kcal' (log_meal), 'I weigh 72kg' (log_weight), 'log a workout' (log_training), 'set my height/calorie goal' (set_profile), 'calories today', 'weight progress'. Actions: create_habit, update_habit, delete_habit, check_habit, list_habits, habit_heatmap, log_meal, log_weight, log_training, calories, weight_trend, set_profile, summary.",
+    "manage_notes": "Create and manage notes and checklists (Google Keep-style). ALWAYS use this for note/todo/checklist/reminder creation — NEVER hit /api/notes via app_api. Accepts natural-language `due_date` like 'tomorrow at 9am' or '11pm today' (parsed in the USER'S timezone). The due_date IS the reminder — it fires a notification at that time, so do NOT also create a calendar event for the same reminder. Set colors, labels, pin, archive. Do NOT use manage_memory for note content.",
+    "manage_calendar": "Calendar event management: list, create, update, delete. Each event can carry a tag/category (event_type — work/personal/health/travel/meal/social/admin/other) and importance (low/normal/high/critical). Resolve today/tomorrow using the Current date and time context, then use ISO datetimes in the user's local wall time; supports all-day events. For event reminders/alarms, pass reminder_minutes; this creates the Notes reminder, so do not also call manage_notes for the same reminder.",
     "download_model": "Download a HuggingFace model to a local or remote server. Specify repo_id (e.g. 'Qwen/Qwen3-8B'), optional server host, and optional include filter for specific files.",
     "serve_model": "Start serving a model with vLLM, SGLang, llama.cpp, Ollama, or Diffusers. cmd MUST start with the binary directly — e.g. `vllm serve /mnt/HADES/models/Qwen3.5-397B-A17B-AWQ --port 8003 --tensor-parallel-size 8 …`. NEVER prefix with `cd …`, `source …`, or chain with `&&`/`||` — those get rejected by the validator. The venv activation (env_prefix) and CUDA env are added automatically from the target host's saved settings. For image/inpainting/diffusion use python3 scripts/diffusion_server.py --model <repo> --port 8100. After launch, call list_served_models for readiness/errors and retry suggestions. If serve_model fails with 'Invalid characters in cmd', simplify to the bare binary + args.",
     "list_served_models": "List currently running model servers in the Cookbook — shows status (loading, ready, idle, error), model name, port, throughput, and serve failure diagnosis/retry suggestions. Use when the user asks 'what's running', 'show my cookbook', 'which models are up', 'what's serving'.",
@@ -403,37 +358,6 @@ class ToolIndex:
             {"manage_bg_jobs"},
         frozenset({"note", "todo", "reminder", "remind", "checklist", "remember to"}):
             {"manage_notes"},
-        # The user's content stores (Files / Books / Gallery / Documents). "what
-        # do my files/notes say about X", "find my file/book on Y", "save this
-        # screenshot to my <game> album", "add this pdf to my books".
-        frozenset({"knowledge", "knowledge base", "my files", "my file", "my docs",
-                   "my documents", "look up", "find my", "search my", "uploaded file",
-                   "what do my notes say", "in my files", "in my notes",
-                   "save this", "store this", "add to my", "add this", "to my books",
-                   "add this book", "edit my file", "update my file", "fix the text",
-                   "tag my file", "retag", "delete my file", "append to my"}):
-            {"search_files", "manage_files"},
-        # Gallery management: tag/rename/album/sort/hide photos + videos.
-        frozenset({"my photo", "my photos", "my picture", "my pictures", "my video",
-                   "my videos", "my gallery", "to my gallery", "to my album", "album",
-                   "screenshot", "screenshots", "tag this photo", "tag this picture",
-                   "tag this video", "rename this photo", "sort my photos", "sort my pictures",
-                   "create an album", "move to album", "hide this photo"}):
-            {"manage_gallery", "manage_files"},
-        # Habit tracker + health/nutrition/training. Without this, "add a habit",
-        # "rename my habit", "give it an emoji", "log my lunch" missed
-        # manage_health (RAG ranked manage_notes higher) and the agent made a
-        # checklist note or searched the vault instead (#habit-tracker).
-        frozenset({"habit", "habits", "habit tracker", "streak", "streaks",
-                   "heatmap", "track a habit", "daily habit", "build a habit",
-                   "health", "weight", "weigh", "calorie", "calories", "kcal",
-                   "meal", "nutrition", "macros", "protein", "workout",
-                   "training", "exercise", "tdee", "bmr"}):
-            {"manage_health"},
-        frozenset({"book", "books", "ebook", "ebooks", "epub", "pdf", "reader",
-                   "e-reader", "ereader", "chapter", "page", "reading progress",
-                   "what i read", "where i stopped"}):
-            {"manage_books"},
         # Chat/session management. "rename" alone maps to documents below, so a
         # request like "rename the last 12 sessions/chats" needs these session
         # keywords to surface the right tools (NOT app_api — /api/sessions is
@@ -695,3 +619,23 @@ def reset_tool_index() -> None:
     global _tool_index, _last_attempt
     _tool_index = None
     _last_attempt = 0.0
+
+
+# ── Fork tool-index additions ──
+# Defined in src/tool_index_fork.py and merged here so upstream's
+# ALWAYS_AVAILABLE / ASSISTANT_ALWAYS_AVAILABLE / BUILTIN_TOOL_DESCRIPTIONS /
+# ToolIndex._KEYWORD_HINTS literals above stay byte-identical to upstream
+# (clean upstream merges). See docs/fork-additive-policy.md.
+from src.tool_index_fork import (  # noqa: E402
+    FORK_ALWAYS_AVAILABLE,
+    FORK_ASSISTANT_ALWAYS_AVAILABLE,
+    FORK_TOOL_DESCRIPTIONS,
+    FORK_DESCRIPTION_OVERRIDES,
+    FORK_KEYWORD_HINTS,
+)
+
+ALWAYS_AVAILABLE = ALWAYS_AVAILABLE | FORK_ALWAYS_AVAILABLE
+ASSISTANT_ALWAYS_AVAILABLE = ASSISTANT_ALWAYS_AVAILABLE | FORK_ASSISTANT_ALWAYS_AVAILABLE
+BUILTIN_TOOL_DESCRIPTIONS.update(FORK_TOOL_DESCRIPTIONS)
+BUILTIN_TOOL_DESCRIPTIONS.update(FORK_DESCRIPTION_OVERRIDES)
+ToolIndex._KEYWORD_HINTS = {**ToolIndex._KEYWORD_HINTS, **FORK_KEYWORD_HINTS}

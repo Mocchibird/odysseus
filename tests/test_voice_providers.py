@@ -154,7 +154,9 @@ def test_voice_endpoints_excluded_from_chat_models():
 
 
 def test_settings_have_elevenlabs_key():
-    src = (ROOT / "src" / "settings.py").read_text(encoding="utf-8")
+    # Fork settings defaults live in settings_fork.py, merged at import.
+    src = ((ROOT / "src" / "settings.py").read_text(encoding="utf-8")
+           + (ROOT / "src" / "settings_fork.py").read_text(encoding="utf-8"))
     assert '"elevenlabs_api_key"' in src
 
 

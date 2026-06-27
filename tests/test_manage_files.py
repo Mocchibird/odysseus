@@ -162,15 +162,24 @@ def test_write_file_tool_end_to_end_refusal():
 # ── Agent docs steer storing attachments to manage_files ─────────────────────
 
 def test_agent_docs_teach_storing_attachments():
+    # Fork tool schemas/descriptions live in *_fork.py modules and are merged
+    # into the upstream registries at import (see docs/fork-additive-policy.md).
+    # Assert on the assembled runtime registries so the guard is independent of
+    # where/how the schema dicts are formatted.
     assert '"action":"add"' in _read("src/agent_loop.py")
-    schemas = _read("src/tool_schemas.py")
-    assert '"add", "edit", "append", "retag", "autotag", "delete"' in schemas
-    assert "upload_id" in schemas.split('"manage_files"', 1)[1][:2600]
-    assert "STORE a user-attached/uploaded file" in _read("src/tool_index.py")
+    import src.agent_tools  # noqa: F401  (warms the import chain in order)
+    from src.tool_schemas import FUNCTION_TOOL_SCHEMAS
+    from src.tool_index import BUILTIN_TOOL_DESCRIPTIONS
+    mf = next(s["function"] for s in FUNCTION_TOOL_SCHEMAS
+              if s.get("function", {}).get("name") == "manage_files")
+    props = mf["parameters"]["properties"]
+    assert props["action"]["enum"] == ["add", "edit", "append", "retag", "autotag", "delete"]
+    assert "upload_id" in props
+    assert "STORE a user-attached/uploaded file" in BUILTIN_TOOL_DESCRIPTIONS["manage_files"]
 
 
 def test_file_tool_docs_steer_away_from_user_content():
-    idx = _read("src/tool_index.py")
+    idx = _read("src/tool_index.py") + _read("src/tool_index_fork.py")
     assert "NEVER for saving user content" in idx
     assert "manage_files (action=add" in idx
     assert "NEVER use this to save user content" in _read("src/agent_loop.py")

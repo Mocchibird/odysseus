@@ -78,11 +78,11 @@ TOOL_TAGS = {"bash", "python", "web_search", "web_fetch", "read_file", "write_fi
              "pipeline",
              "manage_session", "manage_memory", "list_models",
              "ui_control", "generate_image", "ask_user", "update_plan",
-             "manage_tasks", "api_call", "send_ping", "ask_teacher", "manage_skills",
+             "manage_tasks", "api_call", "ask_teacher", "manage_skills",
              "suggest_document",
              "manage_endpoints", "manage_mcp", "manage_webhooks",
              "manage_tokens", "manage_documents", "manage_settings",
-             "manage_notes", "manage_health", "search_files", "manage_files", "manage_gallery", "manage_calendar", "manage_books",
+             "manage_notes", "manage_calendar",
              "resolve_contact", "manage_contact", "list_email_accounts", "send_email", "list_emails",
              "read_email", "reply_to_email", "bulk_email", "archive_email",
              "delete_email", "mark_email_read",
@@ -103,6 +103,12 @@ TOOL_TAGS = {"bash", "python", "web_search", "web_fetch", "read_file", "write_fi
              # gallery, email folders, etc.) — agent uses this when
              # there's no named tool wrapper for the action.
              "app_api"}
+
+# ── Fork tool tags ──
+# Defined in src/agent_tools/_fork.py so the TOOL_TAGS literal above stays
+# byte-identical to upstream (clean merges). See docs/fork-additive-policy.md.
+from src.agent_tools._fork import FORK_TOOL_TAGS  # noqa: E402
+TOOL_TAGS |= FORK_TOOL_TAGS
 
 ToolBlock = namedtuple("ToolBlock", ["tool_type", "content"])
 
@@ -145,6 +151,9 @@ from src.tool_implementations import (  # noqa: E402, F401
     do_search_chats,
     do_manage_skills,
     do_manage_tasks,
-    do_manage_books,
     do_api_call,
 )
+
+# Fork-only tool implementation re-export (kept out of the upstream block above
+# so it stays byte-identical). See docs/fork-additive-policy.md.
+from src.tool_implementations import do_manage_books  # noqa: E402, F401

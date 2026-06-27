@@ -56,13 +56,6 @@ DEFAULT_SETTINGS = {
     "stt_provider": "disabled",
     "stt_model": "base",
     "stt_language": "",
-    # Azure AI Speech (one resource serves both TTS + STT). Used by the "azure"
-    # TTS/STT providers. Free tier (F0): ~5 audio hrs/mo STT + 0.5M chars/mo TTS.
-    "azure_speech_key": "",
-    "azure_speech_region": "",
-    # ElevenLabs (one key serves both TTS + STT-Scribe). Used by the
-    # "elevenlabs" TTS/STT providers. The TTS voice is the ElevenLabs voice id.
-    "elevenlabs_api_key": "",
     "search_provider": "searxng",
     # Default fallback chain — when the primary provider fails or
     # rate-limits, we try DuckDuckGo next. Free, no API key required, so
@@ -143,24 +136,6 @@ DEFAULT_SETTINGS = {
     "task_model": "",
     "default_endpoint_id": "",
     "default_model": "",
-    "default_persona": "Iris",
-    # Preferred output language for the assistant + notifications (en/ko).
-    # Per-user override via _PER_USER_KEYS; see src/i18n.py.
-    "language": "en",
-    # IANA timezone for displaying stored (UTC) times in background output —
-    # daily brief, evening wrap-up, reminders. Per-user override via
-    # _PER_USER_KEYS, auto-learned from the browser (x-tz-name). Empty = fall
-    # back to the server's local zone. See src/user_time.py.
-    "timezone": "",
-    # Admin-set GLOBAL allowlist of model ids that NON-ADMIN users may use for
-    # chat & agent. Empty = no restriction (every enabled endpoint's models show
-    # in their picker, current behavior). When non-empty: non-admins' model
-    # picker shows ONLY these, and the server rejects any other model at
-    # send-time. Lets the admin enable extra endpoints for backend roles
-    # (image / research / email-summary) WITHOUT exposing those models in users'
-    # chat picker. Admins are never restricted. Per-user `allowed_models`
-    # privileges still override this for individually-restricted accounts.
-    "chat_allowed_models": [],
     # Ordered fallback chain for the default chat model. Each entry is
     # {"endpoint_id": "...", "model": "..."}. If the primary model fails
     # before producing output (endpoint offline / errors), the chat
@@ -191,17 +166,6 @@ DEFAULT_SETTINGS = {
     "reminder_llm_synthesis": False,
     "reminder_llm_persona": "",
     "reminder_ntfy_topic": "Reminders",
-    # Optional explicit ntfy connection (integration id). Empty = auto-pick the
-    # connection whose `ntfy_topic` matches reminder_ntfy_topic, else the first.
-    "reminder_ntfy_integration_id": "",
-    # Quiet hours: during this window, reminders are NOT pushed (ntfy/email/
-    # webhook/browser) — they still land in the Pings feed so nothing is lost.
-    # Evaluated in server local time (TZ). Window may wrap midnight. Test
-    # reminders always bypass it.
-    "quiet_hours_enabled": False,
-    "quiet_hours_start": "22:00",
-    "quiet_hours_end": "07:00",
-    "reminder_email_account_id": "",
     "reminder_email_to": "",
     # Generic outbound webhook channel: pick any saved Integration as the
     # target and supply a JSON payload template. Use {{title}} and {{message}}
@@ -305,29 +269,21 @@ _PER_USER_KEYS = {
     # account inherited whatever the most-recent admin picked, which then
     # got injected into the chat composer on first open.
     "default_endpoint_id", "default_model", "default_model_fallbacks",
-    "default_persona",
-    # Assistant/notification language is personal (en/ko, see src/i18n.py).
-    "language",
-    # Display timezone is personal, auto-learned from the browser so the
-    # daily brief / reminders convert UTC to the user's local clock — and
-    # follow them when travelling. See src/user_time.py.
-    "timezone",
     "utility_endpoint_id", "utility_model", "utility_model_fallbacks",
     "research_endpoint_id", "research_model",
-    # Reminder delivery is personal: one user may want browser-only alerts,
-    # another may subscribe to a private ntfy topic (and, optionally, pin the
-    # specific ntfy connection whose token is scoped to that topic).
-    "reminder_channel", "reminder_llm_synthesis", "reminder_ntfy_topic",
-    "reminder_ntfy_integration_id",
-    "reminder_email_account_id", "reminder_email_to",
-    "quiet_hours_enabled", "quiet_hours_start", "quiet_hours_end",
 }
 
-_ALLOW_EMPTY_USER_KEYS = {
-    "reminder_email_account_id", "reminder_email_to",
-    "reminder_ntfy_integration_id",
-    "default_persona",
-}
+# ── Fork settings additions ──
+# Defined in src/settings_fork.py and merged here so upstream's DEFAULT_SETTINGS
+# and _PER_USER_KEYS literals above stay byte-identical to upstream (clean
+# upstream merges). See docs/fork-additive-policy.md.
+from src.settings_fork import (  # noqa: E402
+    FORK_DEFAULT_SETTINGS,
+    FORK_PER_USER_KEYS,
+    FORK_ALLOW_EMPTY_USER_KEYS as _ALLOW_EMPTY_USER_KEYS,
+)
+DEFAULT_SETTINGS.update(FORK_DEFAULT_SETTINGS)
+_PER_USER_KEYS |= FORK_PER_USER_KEYS
 
 
 def get_user_setting(key: str, owner: str = "", default: Any = None) -> Any:

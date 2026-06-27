@@ -13,7 +13,10 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_settings_have_azure_speech_keys():
-    src = (ROOT / "src" / "settings.py").read_text(encoding="utf-8")
+    # Fork settings defaults live in settings_fork.py and are merged into
+    # DEFAULT_SETTINGS at import (see docs/fork-additive-policy.md).
+    src = ((ROOT / "src" / "settings.py").read_text(encoding="utf-8")
+           + (ROOT / "src" / "settings_fork.py").read_text(encoding="utf-8"))
     assert '"azure_speech_key"' in src
     assert '"azure_speech_region"' in src
 

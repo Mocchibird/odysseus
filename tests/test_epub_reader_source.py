@@ -141,17 +141,18 @@ def test_books_has_dedicated_reader_ui_hooks():
 
 
 def test_agent_tool_registration_for_books():
-    # upstream #3435 moved tool execution into the src/agent_tools/ package
-    # (agent_tools.py -> agent_tools/__init__.py); the manage_books tag lives there.
-    agent_tools = (ROOT / "src" / "agent_tools" / "__init__.py").read_text(encoding="utf-8")
-    schemas = (ROOT / "src" / "tool_schemas.py").read_text(encoding="utf-8")
+    # The fork's tool-registry additions live in *_fork.py modules and merge
+    # into the upstream registries at import (see docs/fork-additive-policy.md),
+    # so assert on the assembled runtime registries rather than file source.
+    import src.agent_tools as at
+    from src.tool_schemas import FUNCTION_TOOL_SCHEMAS
+    from src.tool_index import BUILTIN_TOOL_DESCRIPTIONS
     execution = (ROOT / "src" / "tool_execution.py").read_text(encoding="utf-8")
-    index = (ROOT / "src" / "tool_index.py").read_text(encoding="utf-8")
 
-    assert '"manage_books"' in agent_tools
-    assert '"name": "manage_books"' in schemas
+    assert "manage_books" in at.TOOL_TAGS
+    assert any(s.get("function", {}).get("name") == "manage_books" for s in FUNCTION_TOOL_SCHEMAS)
     assert "do_manage_books" in execution
-    assert "manage_books" in index
+    assert "manage_books" in BUILTIN_TOOL_DESCRIPTIONS
 
 
 def test_markdown_hidden_answer_quiz_syntax_exists():

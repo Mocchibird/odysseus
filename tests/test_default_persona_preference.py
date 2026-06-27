@@ -5,7 +5,10 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_default_persona_is_user_scoped_setting():
-    source = (ROOT / "src/settings.py").read_text(encoding="utf-8")
+    # Fork settings defaults/per-user keys live in settings_fork.py and merge
+    # into settings.py at import (see docs/fork-additive-policy.md).
+    source = ((ROOT / "src/settings.py").read_text(encoding="utf-8")
+              + (ROOT / "src/settings_fork.py").read_text(encoding="utf-8"))
 
     assert '"default_persona": "Iris"' in source
     assert '"default_persona",' in source
