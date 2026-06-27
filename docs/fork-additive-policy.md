@@ -114,10 +114,30 @@ full pytest green). Upstream literals are now byte-identical to upstream:
 | `src/tool_index.py` | 81/5 | 20/0 (1 EOF append) | `src/tool_index_fork.py` |
 | `src/tool_schemas.py` | 158/5 | 14/5 | `src/tool_schemas_fork.py` |
 | `src/agent_tools/__init__.py` | 12/2 | 10/0 | `src/agent_tools/_fork.py` |
-| `core/platform_compat.py` | 0/23 (deletion) | 0/0 (reverted to upstream) | — |
+| `core/platform_compat.py` | 0/23 (deletion) | 0/1 (restored upstream helpers; kept only the unused-import trim) | — |
+| `src/chat_processor.py` | 32/0 | 6/0 | `src/fork_chat_prompt.py` |
+| `app.py` | ~200/18 | 96/18 | `src/gallery_thumbs.py` |
 
 This eliminated the recurring "both sides add a settings key / tool tag / tool
-schema / tool description / always-available entry" conflict cluster.
+schema / tool description / always-available entry" conflict cluster, and moved
+~870 lines of fork code out of upstream files into sibling fork modules.
+
+### Lesson: route files are NOT mechanical relocations
+Relocating route handlers (`document_routes.py`, `calendar_routes.py`) was
+attempted and **reverted** — they are entangled in ways pure helper moves are not:
+- Their **test harnesses inject a test DB by monkeypatching the module-global
+  `SessionLocal`** (e.g. `document_routes.SessionLocal = _TS`, with ~11 restore
+  sites). Move a handler to another module and it reads *that* module's
+  `SessionLocal`, so the injection misses it → the endpoint hits the real DB.
+- They **re-export symbols** other modules/tests import from them (e.g.
+  `set_user_tz_offset` actually lives in `src/user_time.py` but is imported
+  `from routes.calendar_routes`), and tests patch internal helpers on the module
+  (`_validate_ics_feed_url`, `_ics_block_private_ips`).
+
+So a route relocation must ALSO update the test harness (patch the fork module's
+`SessionLocal`; restore it) and re-export the symbols other code imports — a
+larger, riskier change than "move the functions." Do it deliberately, not as a
+batch mechanical pass.
 
 ---
 
@@ -127,16 +147,14 @@ Prioritise APPENDED + CONFIG in churned areas; they are mechanical and
 behaviour-safe. Skip FORK_OWNED.
 
 **APPENDED → relocate to a fork module + one merge/registration seam**
-- `routes/document_routes.py` (478/14) → wiki-link/related/RAG helpers + 4 routes → `routes/_fork_document_extras.py`
-- `core/database.py` (492/6) → new `_migrate_*` fns + net-new model classes → `core/fork_models.py` / `core/fork_migrations.py` (keep new *columns* on upstream models inline; **bump SCHEMA_VERSION** on any added migration — see [migration-schema-version-gate])
-- `routes/calendar_routes.py` (371/125) → ICS-feed helpers + `/today` → `src/ics_feeds.py` + small fork router
+- `core/database.py` (492/6) → new `_migrate_*` fns + net-new model classes → `core/fork_models.py` / `core/fork_migrations.py` (keep new *columns* on upstream models inline; **bump SCHEMA_VERSION** on any added migration — see [migration-schema-version-gate]). ORM registration order is delicate — do carefully.
+- `routes/document_routes.py` (478/14) → wiki-link/related/RAG helpers + 4 routes → `routes/_fork_document_extras.py`. ⚠️ needs the test-harness update (see "route files are NOT mechanical" above): `test_document_obsidian_extras.py` patches `document_routes.SessionLocal`, so relocated endpoints must read that binding or the harness must patch the fork module too.
+- `routes/calendar_routes.py` (371/125) → ICS-feed helpers + `/today` → `src/ics_feeds.py` + small fork router. ⚠️ re-export `set_user_tz_offset` and keep `_validate_ics_feed_url`/`_ics_block_private_ips` patchable from `calendar_routes` (tests reference them there), and update `test_ics_links_are_persistent_subscriptions_in_source` (reads source text).
 - `static/js/presets.js` → Iris persona roster → `static/js/fork/personas.js`; persona machinery → fork module
 - `static/js/document.js` (534/82) → wiki-link AC / split-view / related-notes / list-continue → `static/js/docMarkdownExtras.js`
 - `static/js/sessions.js` → history-virtualization layer → `static/js/sessions-history-virtual.js`
 - `routes/chat_routes.py` → `_link_meal_photo`/`_link_training_photo` → `src/photo_linking.py`
-- `src/chat_processor.py` (0 deletions) → language-directive + quiz-spoiler prefaces → fork helpers, `preface.extend(...)`
-- `routes/email_routes.py` + `routes/email_helpers.py` → proton-bridge presets/helpers (`_proton_bridge_preset`, `_tcp_status`, `_open_smtp_connection`, …) → fork module
-- `app.py` → inline `_generate_gallery_thumb` / `_generate_video_poster` + placeholder SVG → `src/gallery_thumbs.py`
+- `routes/email_routes.py` + `routes/email_helpers.py` → proton-bridge presets/helpers (`_proton_bridge_preset`, `_tcp_status`, `_open_smtp_connection`, …) → fork module. NOTE: email is untestable locally (Proton Bridge) — verify after deploy.
 - `static/style.css` (710/83) → fork-only rule blocks (`#health/#habits/#books/#pings/#today`, `#rail-pings`, doclib scrollbars, gallery cascade) → `static/fork.css` (already loaded after style.css); leave in-place upstream-selector tweaks (safe-area-inset, etc.)
 - `src/tool_execution.py` → migrate the 6 fork tool dispatch `elif` arms onto upstream's `TOOL_HANDLERS` registry (upstream #3629/#4445); relocate `app_store_write_guard`
 - `static/js/escMenuStack.js` → `topPopupZ` → `static/js/fork/zorder.js`, re-point importers

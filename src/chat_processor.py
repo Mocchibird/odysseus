@@ -198,16 +198,9 @@ class ChatProcessor:
                 "role": "system",
                 "content": preset_system_prompt
             })
-        # Per-user answering language (stable per user, so KV-cache safe).
-        # Agent mode gets the directive inside its own assembled prompt.
-        if not agent_mode:
-            try:
-                from src.i18n import get_user_language, language_directive
-                _lang_line = language_directive(get_user_language(owner))
-            except Exception:
-                _lang_line = ""
-            if _lang_line:
-                preface.append({"role": "system", "content": _lang_line})
+        # Fork: per-user answering-language directive (see src/fork_chat_prompt.py).
+        from src.fork_chat_prompt import fork_language_preface
+        preface.extend(fork_language_preface(owner, agent_mode))
         preface.append({
             "role": "system",
             "content": UNTRUSTED_CONTEXT_POLICY,
@@ -328,28 +321,9 @@ class ChatProcessor:
             except Exception as e:
                 logger.debug(f"Skills index unavailable: {e}")
                 idx = []
-            try:
-                from services.memory.skills import QUIZ_SPOILER_MARKDOWN_SKILL_NAME
-                relevant_skills = self.skills_manager.get_relevant_skills(
-                    message,
-                    self.skills_manager.load(owner=owner),
-                    max_items=3,
-                    owner=owner,
-                )
-            except Exception as e:
-                logger.debug(f"Relevant skills unavailable: {e}")
-                relevant_skills = []
-            if any(s.get("name") == QUIZ_SPOILER_MARKDOWN_SKILL_NAME for s in relevant_skills):
-                preface.append({
-                    "role": "system",
-                    "content": (
-                        "Built-in skill quiz-spoiler-markdown is relevant. "
-                        "For quiz/self-test answers, write Iris reveal syntax directly: "
-                        "`{{answer}}` for a hidden answer, `||spoiler text||` for inline spoilers, "
-                        "and `[[front::back]]` for flashcards. Never write the skill name as visible "
-                        "text or as a pseudo-call such as `quiz-spoiler-markdown: **C) Saul**`."
-                    ),
-                })
+            # Fork: quiz-spoiler-markdown skill-relevance directive (see src/fork_chat_prompt.py).
+            from src.fork_chat_prompt import fork_quiz_spoiler_preface
+            preface.extend(fork_quiz_spoiler_preface(message, self.skills_manager, owner))
             if idx:
                 by_cat: Dict[str, list] = {}
                 for s in idx:
