@@ -23,6 +23,7 @@ itself wasn't confident about.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 from typing import Any, Dict, List, Optional, Tuple
@@ -365,6 +366,193 @@ def _format_trace(tool_results: List[Dict[str, Any]], agent_reply: str) -> str:
     return f"<<<UNTRUSTED_TRACE>>>\n{trace}\n<<<END_UNTRUSTED_TRACE>>>"
 
 
+_EVALUATE_TURN_LLM_PROMPT = """\
+You are an independent auditor evaluating a student AI agent's turn.
+Given the original request, the trace of tool calls and results, and the agent's final reply, determine whether the agent failed, gave up because it lacks the tools/capability/information, or encountered an error.
+
+Respond with exactly one of these two words:
+- "failure" if the agent failed, gave up, encountered an error, or asked the user for clarification/missing tools.
+- "ok" if the agent successfully completed the task or is making correct progress.
+
+ORIGINAL USER REQUEST:
+{user_request}
+
+AGENT TRACE:
+{trace}
+
+AGENT REPLY:
+{agent_reply}
+
+EVALUATION:"""
+
+
+async def evaluate_turn_llm(
+    user_request: str,
+    tool_results: List[Dict[str, Any]],
+    agent_reply: str,
+    student_endpoint_url: str,
+    owner: Optional[str] = None,
+) -> Tuple[str, Optional[str]]:
+    """Use a fast LLM (resolved via utility endpoint) to evaluate a turn."""
+    from src.endpoint_resolver import resolve_endpoint
+    from src.llm_core import llm_call_async
+
+    # Resolve utility model (falls back to default model, then student_endpoint_url)
+    url, model, headers = resolve_endpoint(
+        "utility",
+        fallback_url=student_endpoint_url,
+        owner=owner
+    )
+    if not url or not model:
+        return ("ok", None)
+
+    trace_str = _format_trace(tool_results, agent_reply)
+    prompt = _EVALUATE_TURN_LLM_PROMPT.format(
+        user_request=user_request or "(no user request)",
+        trace=trace_str,
+        agent_reply=agent_reply or "(no agent reply)",
+    )
+
+    try:
+        response = await llm_call_async(
+            url, model,
+            [{"role": "user", "content": prompt}],
+            headers=headers,
+            timeout=20,
+        )
+        if response:
+            cleaned_response = response.strip().strip("'\"").lower()
+            if cleaned_response == "failure":
+                return ("failure", f"LLM evaluation flagged failure: {response.strip()}")
+    except Exception as e:
+        logger.warning(f"Tier 2 LLM self-eval failed: {e}")
+
+    return ("ok", None)
+
+
+
+async def escalate_and_learn(
+    user_request: str,
+    tool_results: List[Dict[str, Any]],
+    agent_reply: str,
+    failure_reason: str,
+    owner: Optional[str] = None,
+) -> Optional[str]:
+    """Call the teacher, evaluate ITS attempt, save a skill on success.
+
+    Returns the saved skill name (or None if the teacher couldn't
+    write one). Logs but doesn't raise — escalation is best-effort.
+    """
+    from src.settings import get_setting
+    teacher_spec = (get_setting("teacher_model", "") or "").strip()
+    if not teacher_spec:
+        return None
+
+    prompt = _TEACHER_ESCALATION_PROMPT.format(
+        user_request=user_request or "(no user request captured)",
+        failure_reason=failure_reason or "(failure reason not captured)",
+        untrusted_trace_guard=_UNTRUSTED_TRACE_GUARD,
+        trace=_format_trace(tool_results, agent_reply),
+    )
+    response = await _call_teacher(teacher_spec, prompt, owner=owner)
+    if not response:
+        return None
+
+    skill = _extract_skill_json(response)
+    if not skill:
+        # Teacher chose not to write a skill — see prompt contract.
+        logger.info("teacher declined to write a skill for this failure")
+        return None
+
+    # Same regex eval applied to the teacher's response — if the
+    # teacher itself sounded uncertain ("I don't have a tool"), drop
+    # the skill rather than persist a sketchy one.
+    status, reason = evaluate_turn_regex([], response)
+    if status == "failure":
+        logger.info(f"teacher response failed eval, skipping skill save: {reason}")
+        return None
+
+    # Tag the skill with the escalation source for auditability.
+    skill.setdefault("source", "teacher-escalation")
+    skill.setdefault("teacher_model", teacher_spec)
+    # Force action=add regardless of what the teacher wrote.
+    skill["action"] = "add"
+
+    import json
+    from src.tool_implementations import do_manage_skills
+    try:
+        result = await do_manage_skills(json.dumps(skill), owner=owner)
+        if isinstance(result, dict) and not result.get("error"):
+            logger.info(f"teacher wrote skill: {skill.get('name')}")
+            return skill.get("name")
+        logger.warning(f"skill save failed: {result}")
+    except Exception as e:
+        logger.warning(f"skill save raised: {e}")
+    return None
+
+
+def maybe_escalate(
+    *,
+    student_endpoint_url: str,
+    mode: str,
+    user_request: str,
+    tool_results: List[Dict[str, Any]],
+    agent_reply: str,
+    owner: Optional[str] = None,
+) -> Optional[asyncio.Task]:
+    """Fire-and-forget entrypoint called by the agent loop end-of-turn.
+
+    Returns the created asyncio.Task (so tests can await it) or None
+    if escalation didn't fire. Safe to call unconditionally — does
+    its own gating.
+    """
+    # Gate 1: only in agent mode.
+    if mode != "agent":
+        return None
+
+    # Gate 2: feature is enabled AND a teacher endpoint is configured.
+    # (No self-hosted-only gate — users run cheap cloud students like
+    # deepseek-v4-flash with a SOTA teacher; the toggle is the control.)
+    try:
+        from src.settings import get_setting
+        if not get_setting("teacher_enabled", False):
+            return None
+        if not (get_setting("teacher_model", "") or "").strip():
+            return None
+    except Exception:
+        return None
+
+    # Gate 3: regex eval — only escalate on detected failure.
+    status, reason = evaluate_turn_regex(tool_results, agent_reply)
+    if status == "failure":
+        # Fire async — don't block the user's chat.
+        return asyncio.create_task(
+            escalate_and_learn(user_request, tool_results, agent_reply, reason or "", owner),
+            name="teacher_escalation",
+        )
+
+    # Gate 4: Tier 2 LLM self-evaluation requires teacher_tier2_enabled
+    if not get_setting("teacher_tier2_enabled", False):
+        return None
+
+    # Tier 2: LLM self-evaluation background task
+    async def evaluate_and_maybe_escalate():
+        llm_status, llm_reason = await evaluate_turn_llm(
+            user_request=user_request,
+            tool_results=tool_results,
+            agent_reply=agent_reply,
+            student_endpoint_url=student_endpoint_url,
+            owner=owner,
+        )
+        if llm_status == "failure":
+            await escalate_and_learn(user_request, tool_results, agent_reply, llm_reason or "", owner)
+
+    return asyncio.create_task(
+        evaluate_and_maybe_escalate(),
+        name="teacher_escalation_tier2",
+    )
+
+
 # ── Inline teacher takeover (visible in chat stream) ───────────────
 
 async def run_teacher_inline(
@@ -397,10 +585,6 @@ async def run_teacher_inline(
     except Exception:
         return
 
-    status, reason = evaluate_turn_regex(student_tool_events, student_reply)
-    if status != "failure":
-        return
-
     # Extract original user request — last user-role message
     user_request = ""
     for m in reversed(student_messages):
@@ -416,6 +600,21 @@ async def run_teacher_inline(
                 "",
             )
         break
+
+    status, reason = evaluate_turn_regex(student_tool_events, student_reply)
+    if status != "failure":
+        # Tier 2: LLM self-evaluation check requires teacher_tier2_enabled
+        if not get_setting("teacher_tier2_enabled", False):
+            return
+        status, reason = await evaluate_turn_llm(
+            user_request=user_request,
+            tool_results=student_tool_events,
+            agent_reply=student_reply,
+            student_endpoint_url=student_endpoint_url,
+            owner=owner,
+        )
+        if status != "failure":
+            return
 
     # Resolve teacher endpoint
     try:

@@ -68,7 +68,9 @@ def test_agent_loop_persists_round_reasoning_for_reload():
     a <think> block so the fold the user saw live survives a history reload."""
     loop = _read("src/agent_loop.py")
     assert '"<think>" + round_reasoning.strip() + "</think>' in loop
-    # the completion checks judge real content only (think stripped)
+    # the completion checks judge real content only (think stripped) — via
+    # _strip_think_blocks(), the documented linear-time equivalent of
+    # _THINK_RE.sub("", ...) (upstream merge #13 swapped the helper in).
     idx = loop.index('"<think>" + round_reasoning.strip()')
     after = loop[idx:idx + 2000]
-    assert '_THINK_RE.sub("", cleaned_round)' in after
+    assert '_strip_think_blocks(cleaned_round)' in after
