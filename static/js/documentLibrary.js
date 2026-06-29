@@ -61,8 +61,6 @@ let _docsVisibleLimit = 20;  // chunked reveal (matches the Chats tab's 20)
 let _libraryLanguages = {};
 let _librarySessionCount = 0;
 let _libraryActiveLanguage = null;
-let _libraryActiveTag = null;     // active tag filter (null = all)
-let _libraryTags = {};            // tag → count facet from the library response
 let _librarySort = 'recent';
 let _librarySearch = '';
 let _librarySearchDebounce = null;
@@ -345,7 +343,7 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
   // The reopen cache only trusts the default view (no search/tag/language, sort
   // by recent, not archived) — that's the state openLibrary resets to on open.
   function _libraryFiltersAreDefault() {
-    return !_librarySearch && !_libraryActiveTag && !_libraryActiveLanguage &&
+    return !_librarySearch && !_libraryActiveLanguage &&
            _librarySort === 'recent' && !_libraryArchivedView;
   }
 
@@ -362,7 +360,6 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
     });
     if (_librarySearch) params.set('search', _librarySearch);
     if (_libraryActiveLanguage) params.set('language', _libraryActiveLanguage);
-    if (_libraryActiveTag) params.set('tag', _libraryActiveTag);
     if (_libraryArchivedView) params.set('archived', 'true');
 
     try {
@@ -379,14 +376,12 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
       }
       _libraryTotal = data.total;
       _libraryLanguages = data.languages;
-      _libraryTags = data.tags || {};
       _librarySessionCount = data.session_count;
       // Mark the cache fresh only when this is a full default-view load; a
       // filtered/paged result can't stand in for the next default-view open.
       _libraryFetchedAt = (!append && _libraryFiltersAreDefault()) ? Date.now() : 0;
 
       libraryRenderStats();
-      libraryRenderTagChips();
       libraryRenderLangChips();
       libraryRenderGrid();
       libraryRenderLoadMore();
@@ -403,93 +398,6 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
       el.textContent = `${_libraryTotal} of ${totalAll} document${totalAll !== 1 ? 's' : ''}`;
     } else {
       el.textContent = `${totalAll} document${totalAll !== 1 ? 's' : ''}`;
-    }
-  }
-
-  // Tag editor: a comma-separated prompt pre-filled with the doc's current tags.
-  // Multi-tag; replaces the whole set via POST /tags.
-  function libraryEditTags(doc) {
-    const next = prompt('Tags (comma-separated):', (doc.tags || []).join(', '));
-    if (next !== null) librarySetDocTags(doc, next);
-  }
-
-  async function librarySetDocTags(doc, tagsStr) {
-    try {
-      const res = await fetch(`${API_BASE}/api/document/${doc.id}/tags?tags=${encodeURIComponent(tagsStr || '')}`, { method: 'POST', credentials: 'same-origin' });
-      if (!res.ok) throw new Error('failed');
-      const data = await res.json();
-      const oldTags = Array.isArray(doc.tags) ? doc.tags.slice() : [];
-      const newTags = Array.isArray(data.tags) ? data.tags : [];
-      doc.tags = newTags;
-      if (uiModule) uiModule.showToast(newTags.length ? `Tagged: ${newTags.join(', ')}` : 'Tags cleared');
-      if (_libraryActiveTag || _librarySearch || _libraryActiveLanguage) {
-        // A filtered view's membership may have changed — re-fetch to be safe.
-        libraryFetch(false);
-      } else {
-        // Default view: apply the facet delta locally and re-render — the POST
-        // already returned the authoritative tag set, so no round-trip needed.
-        const facet = _libraryTags || (_libraryTags = {});
-        for (const t of oldTags) if (!newTags.includes(t)) { facet[t] = Math.max(0, (facet[t] || 0) - 1); if (!facet[t]) delete facet[t]; }
-        for (const t of newTags) if (!oldTags.includes(t)) { facet[t] = (facet[t] || 0) + 1; }
-        libraryRenderTagChips();
-        libraryRenderGrid();
-      }
-    } catch { if (uiModule) uiModule.showError('Failed to set tags'); }
-  }
-
-  // AI suggest-and-confirm: ask for 1-3 tags, then pre-fill the tag prompt with
-  // the doc's current tags + suggestions merged, so the user confirms/edits
-  // before anything is applied. Falls back to manual editing if no suggestion.
-  async function librarySuggestTags(doc) {
-    if (uiModule) uiModule.showToast('Suggesting tags…');
-    let data = null;
-    try {
-      const res = await fetch(`${API_BASE}/api/document/${doc.id}/suggest-tags`, { credentials: 'same-origin' });
-      if (res.ok) data = await res.json();
-    } catch { /* fall through to manual */ }
-
-    const sugg = data && Array.isArray(data.suggestions) ? data.suggestions : [];
-    if (!sugg.length) {
-      if (uiModule) uiModule.showToast(data && data.reason ? `No suggestion: ${data.reason}` : 'No suggestion — add tags manually');
-      libraryEditTags(doc);
-      return;
-    }
-    const seen = new Set(), merged = [];
-    for (const t of [...(doc.tags || []), ...sugg]) {
-      const k = String(t).toLowerCase();
-      if (t && !seen.has(k)) { seen.add(k); merged.push(t); }
-    }
-    const reason = (data.reason || '').slice(0, 80);
-    const next = prompt(`Suggested: ${sugg.join(', ')}${reason ? '\n(' + reason + ')' : ''}\n\nTags (comma-separated):`, merged.join(', '));
-    if (next !== null) librarySetDocTags(doc, next);
-  }
-
-  function libraryRenderTagChips() {
-    const wrap = document.getElementById('doclib-tag-chips');
-    if (!wrap) return;
-    wrap.querySelectorAll('.memory-cat-chip').forEach(c => c.remove());
-    // Tags are their own axis; don't show them in the Archived view.
-    if (_libraryArchivedView) return;
-
-    const counts = _libraryTags || {};
-    // Only tags that actually exist, most-used first — no forced seeds, so the
-    // chip row stays short (and absent until you've tagged something).
-    const names = Object.keys(counts).sort((a, b) => (counts[b] - counts[a]) || a.localeCompare(b));
-    if (!names.length) return;
-    const totalAll = Object.values(counts).reduce((a, b) => a + b, 0);
-
-    const allChip = document.createElement('button');
-    allChip.className = 'memory-cat-chip' + (!_libraryActiveTag ? ' active' : '');
-    allChip.textContent = `all (${totalAll})`;
-    allChip.addEventListener('click', () => { _libraryActiveTag = null; libraryFetch(false); });
-    wrap.appendChild(allChip);
-
-    for (const name of names) {
-      const chip = document.createElement('button');
-      chip.className = 'memory-cat-chip' + (_libraryActiveTag === name ? ' active' : '');
-      chip.textContent = `${name} (${counts[name]})`;
-      chip.addEventListener('click', () => { _libraryActiveTag = name; libraryFetch(false); });
-      wrap.appendChild(chip);
     }
   }
 
@@ -884,31 +792,6 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
       } catch { if (uiModule) uiModule.showError('Failed to ' + (toArchived ? 'archive' : 'restore')); }
     });
     dropdown.appendChild(archiveItem);
-
-    // Edit tags — comma-separated prompt pre-filled with the doc's current tags.
-    if (!_libraryArchivedView) {
-      const _tagIco = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>';
-      const tagItem = document.createElement('button');
-      tagItem.className = 'dropdown-item-compact';
-      tagItem.style.cssText = 'background:none;border:none;width:100%;';
-      tagItem.innerHTML = _di(_tagIco) + '<span>Edit tags</span>';
-      tagItem.addEventListener('click', (e) => {
-        e.stopPropagation();
-        hideCardDropdown();
-        libraryEditTags(doc);
-      });
-      dropdown.appendChild(tagItem);
-
-      // Suggest tags (AI) — suggest-and-confirm: asks the model for 1-3 tags,
-      // then pre-fills the tag prompt with current + suggested. Never auto-applies.
-      const _aiIco = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0l2.6 8.4L23 11l-8.4 2.6L12 22l-2.6-8.4L1 11l8.4-2.6z"/></svg>';
-      const aiItem = document.createElement('button');
-      aiItem.className = 'dropdown-item-compact';
-      aiItem.style.cssText = 'background:none;border:none;width:100%;';
-      aiItem.innerHTML = _di(_aiIco) + '<span>Suggest tags (AI)</span>';
-      aiItem.addEventListener('click', (e) => { e.stopPropagation(); hideCardDropdown(); librarySuggestTags(doc); });
-      dropdown.appendChild(aiItem);
-    }
 
     // Delete
     const _deleteIco = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>';
@@ -1790,7 +1673,6 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
     _librarySelectedIds.clear();
     _librarySearch = '';
     _libraryActiveLanguage = null;
-    _libraryActiveTag = null;
     _librarySort = 'recent';
     _libraryOffset = 0;
     // Keep the resident list if the reopen cache is still warm (rendered from it
@@ -1949,7 +1831,6 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
                 <button class="memory-toolbar-btn" id="doclib-tidy-btn" aria-label="Tidy documents" title="Tidy: remove empty / junk / duplicate documents">Tidy</button>
               </div>
               <input type="text" id="doclib-search" placeholder="Search titles &amp; content\u2026" class="memory-search-input" />
-              <div id="doclib-tag-chips" class="doclib-lang-chips"></div>
               <div id="doclib-chips" class="doclib-lang-chips"></div>
             </div>
             <input type="file" id="doclib-file-input" multiple style="display:none" />
@@ -3991,7 +3872,6 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
     // else fetch. Either way the freshly-built grid still needs rendering.
     if (Date.now() - _libraryFetchedAt < _LIBRARY_CACHE_TTL && _libraryDocs.length) {
       libraryRenderStats();
-      libraryRenderTagChips();
       libraryRenderLangChips();
       libraryRenderGrid();
       libraryRenderLoadMore();

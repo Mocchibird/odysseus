@@ -18,6 +18,7 @@ import sessionModule from './sessions.js';
 import uiModule from './ui.js';
 import { langIcon } from './langIcons.js';
 import { attachMdShortcuts } from './mdShortcuts.js?v=478';
+import { bindMenuDismiss, dismissOrRemove, topPopupZ } from './escMenuStack.js';
 
 let API_BASE = '';
 let _open = false;
@@ -28,6 +29,9 @@ let _activeDocId = null;        // doc currently open in the centre editor
 let _searchTimer = null;        // debounce for the search box
 let _refreshTimer = null;       // debounce for documents-refresh re-fetch
 let _listReqSeq = 0;            // guards against out-of-order list fetches
+let _knownTags = new Set();     // user-created tag paths (incl. empty folders), persisted via /api/prefs
+let _tagMenuEl = null;          // body-appended folder-actions menu (swept on every re-render)
+let _tagInputMode = null;       // { action: 'create'|'subtag'|'rename', path } for the New-tag bar
 
 // ---- icons ----------------------------------------------------------------
 
@@ -40,6 +44,8 @@ const _ICON_CHAT = _icon('<path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1
 const _ICON_BACK = _icon('<line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/>');
 // Chat bubble with a plus — starts a NEW chat.
 const _ICON_NEWCHAT = _icon('<path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/><line x1="12" y1="8.5" x2="12" y2="14.5"/><line x1="9" y1="11.5" x2="15" y2="11.5"/>');
+// Folder with a plus — creates a new tag (folder).
+const _ICON_NEWTAG = _icon('<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><line x1="12" y1="10" x2="12" y2="16"/><line x1="9" y1="13" x2="15" y2="13"/>', 14);
 // Generic document glyph — mirrors the library card's fallback icon.
 const _GEN_DOC_ICON = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:4px;opacity:0.4;flex-shrink:0;"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>';
 
@@ -57,6 +63,10 @@ function _buildShell() {
         <button class="icon-rail-btn dw-back" id="dw-back" title="Exit workspace" aria-label="Exit workspace">${_ICON_BACK}</button>
         <input type="text" id="dw-search" class="memory-search-input" placeholder="Search documents…" autocomplete="off" />
         <button class="icon-rail-btn dw-new-btn" id="dw-new" title="New document" aria-label="New document">${_icon('<line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>')}</button>
+      </div>
+      <div class="dw-tagbar">
+        <button class="memory-toolbar-btn dw-newtag" id="dw-newtag" type="button" title="New tag (folder)">${_ICON_NEWTAG}<span>New tag</span></button>
+        <input type="text" id="dw-tag-input" class="memory-search-input dw-tag-input hidden" placeholder="tag name (use / to nest)" autocomplete="off" />
       </div>
       <div class="dw-list" id="dw-list" role="list"></div>
     </div>
@@ -105,6 +115,16 @@ function _buildShell() {
     _searchTimer = setTimeout(() => _loadList(searchEl.value.trim()), 200);
   });
   el.querySelector('#dw-new').addEventListener('click', () => _newDoc());
+
+  // New-tag bar: the button opens an inline input that also serves the
+  // per-folder "Add subtag" / "Rename" actions (one input, mode-driven).
+  el.querySelector('#dw-newtag').addEventListener('click', () => _beginTagInput('create'));
+  const tagInput = el.querySelector('#dw-tag-input');
+  tagInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); _commitTagInput(); }
+    else if (e.key === 'Escape') { e.preventDefault(); _endTagInput(); }
+  });
+  tagInput.addEventListener('blur', () => _endTagInput());
   return el;
 }
 
@@ -156,7 +176,22 @@ function _toggleFolder(key) {
   _renderList();
 }
 
+// Resolve (creating as needed) the nested node for a "parent/child" tag path.
+function _ensurePath(root, fullPath) {
+  const segs = String(fullPath || '').split('/').map(s => s.trim()).filter(Boolean);
+  if (!segs.length) return null;
+  let node = root, path = '';
+  for (const seg of segs) {
+    path = path ? path + '/' + seg : seg;
+    if (!node.children.has(seg)) node.children.set(seg, { name: seg, fullPath: path, children: new Map(), docs: [], _ids: new Set() });
+    node = node.children.get(seg);
+  }
+  return node;
+}
+
 // Build a nested tag tree by splitting each tag on "/" (StandardNotes nesting).
+// Known (user-created) tags are seeded too, so an empty folder you just made
+// still shows up before any document carries it.
 function _buildTagTree(docs) {
   const root = { children: new Map(), docs: [], _ids: new Set() };
   const untagged = [];
@@ -164,17 +199,11 @@ function _buildTagTree(docs) {
     const tags = (Array.isArray(doc.tags) ? doc.tags : []).filter(t => (t || '').trim());
     if (!tags.length) { untagged.push(doc); continue; }
     for (const tag of tags) {
-      const segs = tag.split('/').map(s => s.trim()).filter(Boolean);
-      if (!segs.length) continue;
-      let node = root, path = '';
-      for (const seg of segs) {
-        path = path ? path + '/' + seg : seg;
-        if (!node.children.has(seg)) node.children.set(seg, { name: seg, fullPath: path, children: new Map(), docs: [], _ids: new Set() });
-        node = node.children.get(seg);
-      }
-      if (!node._ids.has(doc.id)) { node._ids.add(doc.id); node.docs.push(doc); }
+      const node = _ensurePath(root, tag);
+      if (node && !node._ids.has(doc.id)) { node._ids.add(doc.id); node.docs.push(doc); }
     }
   }
+  for (const t of _knownTags) _ensurePath(root, t);
   return { root, untagged };
 }
 function _countNode(node) {
@@ -231,6 +260,21 @@ function _fileRow(doc, depth, opts = {}) {
   } else {
     row.addEventListener('click', () => _openDoc(doc));
     row.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); _openDoc(doc); } });
+    // Drag a note onto a tag folder (or "Untagged") to (re)assign its tags.
+    row.draggable = true;
+    row.addEventListener('dragstart', (e) => {
+      try { e.dataTransfer.setData('text/plain', doc.id); } catch (_) {}
+      e.dataTransfer.effectAllowed = 'copy';
+      row.classList.add('dragging');
+      if (_shell) _shell.classList.add('dw-dragging');
+    });
+    row.addEventListener('dragend', () => {
+      row.classList.remove('dragging');
+      if (_shell) {
+        _shell.classList.remove('dw-dragging');
+        _shell.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over'));
+      }
+    });
   }
   return row;
 }
@@ -238,7 +282,9 @@ function _fileRow(doc, depth, opts = {}) {
 function _renderNode(parent, node, depth) {
   const key = 't:' + node.fullPath;
   const folder = _folderRow(node.name, key, node.count, depth);
-  folder.addEventListener('click', () => _toggleFolder(key));
+  _makeDropTarget(folder, node.fullPath);    // drop a note here → tag it with this path
+  _attachFolderActions(folder, node);        // hover … menu: add subtag / rename / delete
+  folder.addEventListener('click', (e) => { if (e.target.closest('.dw-folder-actions')) return; _toggleFolder(key); });
   folder.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); _toggleFolder(key); } });
   parent.appendChild(folder);
   if (!_expanded.has(key)) return;
@@ -249,6 +295,7 @@ function _renderNode(parent, node, depth) {
 function _renderList() {
   const list = _shell && _shell.querySelector('#dw-list');
   if (!list) return;
+  _closeFolderMenu();   // a body-appended folder menu can't outlive the rows it anchors to
   list.innerHTML = '';
   list.className = 'dw-list notes-vault-list notes-vault-tree';
   const q = _currentSearch();
@@ -272,6 +319,7 @@ function _renderList() {
   if (untagged.length) {
     const key = 'untagged';
     const f = _folderRow('Untagged', key, untagged.length, 0);
+    _makeDropTarget(f, null);   // drop a note here → clear all its tags
     f.addEventListener('click', () => _toggleFolder(key));
     frag.appendChild(f);
     if (_expanded.has(key)) for (const doc of untagged) frag.appendChild(_fileRow(doc, 1));
@@ -318,6 +366,216 @@ async function _restoreDoc(id) {
     console.error('Workspace: restore failed', e);
     if (uiModule) uiModule.showError('Restore failed');
   }
+}
+
+// ---- tags: persistence / assign (drag-drop) / create / rename / delete ----
+
+async function _loadKnownTags() {
+  try {
+    const res = await fetch(`${API_BASE}/api/prefs/dw_known_tags`, { credentials: 'same-origin' });
+    if (res.ok) {
+      const v = (await res.json()).value;
+      if (Array.isArray(v)) _knownTags = new Set(v.map(t => String(t || '').trim()).filter(Boolean));
+    }
+  } catch (_) { /* prefs unavailable → empty folders just won't persist across reloads */ }
+}
+function _saveKnownTags() {
+  try {
+    fetch(`${API_BASE}/api/prefs/dw_known_tags`, {
+      method: 'PUT',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ value: [..._knownTags] }),
+    });
+  } catch (_) { /* best-effort */ }
+}
+
+// Drop a dragged note onto `el` to (re)tag it: tagPath = the folder's path, or
+// null for the "Untagged" bin (which clears the note's tags).
+function _makeDropTarget(el, tagPath) {
+  el.addEventListener('dragover', (e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; el.classList.add('drag-over'); });
+  el.addEventListener('dragleave', () => el.classList.remove('drag-over'));
+  el.addEventListener('drop', (e) => {
+    e.preventDefault();
+    el.classList.remove('drag-over');
+    let id = '';
+    try { id = e.dataTransfer.getData('text/plain'); } catch (_) {}
+    if (id) _assignTag(id, tagPath);
+  });
+}
+
+async function _postTags(doc, next) {
+  const res = await fetch(`${API_BASE}/api/document/${doc.id}/tags?tags=${encodeURIComponent(next.join(','))}`, { method: 'POST', credentials: 'same-origin' });
+  if (!res.ok) throw new Error(res.statusText);
+  const data = await res.json();
+  doc.tags = Array.isArray(data.tags) ? data.tags : next;
+  return doc.tags;
+}
+
+async function _assignTag(docId, tagPath) {
+  const doc = _docs.find(d => d.id === docId);
+  if (!doc) return;
+  const cur = Array.isArray(doc.tags) ? doc.tags.slice() : [];
+  let next;
+  if (tagPath === null) {
+    if (!cur.length) return;                                              // already untagged
+    next = [];
+  } else {
+    if (cur.some(t => t.toLowerCase() === tagPath.toLowerCase())) return;  // already has this tag
+    next = [...cur, tagPath];
+  }
+  try {
+    await _postTags(doc, next);
+    if (uiModule) uiModule.showToast(tagPath === null ? 'Tags cleared' : `Tagged “${doc.title || 'Untitled'}” → ${tagPath}`);
+    _renderList();
+  } catch (e) {
+    console.error('Workspace: assign tag failed', e);
+    if (uiModule) uiModule.showError('Failed to assign tag');
+  }
+}
+
+// ---- folder actions menu (… on hover) ------------------------------------
+
+function _closeFolderMenu() {
+  if (!_tagMenuEl) return;
+  try { dismissOrRemove(_tagMenuEl); } catch (_) { try { _tagMenuEl.remove(); } catch (__) {} }
+  _tagMenuEl = null;
+}
+
+function _attachFolderActions(folder, node) {
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'memory-item-btn dw-folder-actions';
+  btn.title = 'Tag actions';
+  btn.setAttribute('aria-label', 'Tag actions');
+  btn.innerHTML = _icon('<circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/>', 14);
+  btn.addEventListener('click', (e) => { e.stopPropagation(); _showFolderMenu(btn, node); });
+  folder.appendChild(btn);
+}
+
+function _showFolderMenu(anchor, node) {
+  _closeFolderMenu();
+  const menu = document.createElement('div');
+  menu.className = 'dw-folder-menu';
+  menu.innerHTML =
+    '<button type="button" data-act="subtag">Add subtag</button>'
+    + '<button type="button" data-act="rename">Rename</button>'
+    + '<button type="button" data-act="delete" class="dw-folder-menu-del">Delete tag</button>';
+  document.body.appendChild(menu);
+  const r = anchor.getBoundingClientRect();
+  menu.style.position = 'fixed';
+  menu.style.top = `${Math.round(r.bottom + 4)}px`;
+  menu.style.left = `${Math.round(Math.min(r.left, window.innerWidth - 168))}px`;
+  menu.style.zIndex = String(topPopupZ());
+  const close = bindMenuDismiss(menu, () => { try { menu.remove(); } catch (_) {} if (_tagMenuEl === menu) _tagMenuEl = null; });
+  _tagMenuEl = menu;
+  menu.querySelectorAll('button').forEach(b => b.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const act = b.dataset.act;
+    close();
+    if (act === 'subtag') _beginTagInput('subtag', node.fullPath);
+    else if (act === 'rename') _beginTagInput('rename', node.fullPath);
+    else if (act === 'delete') _deleteTag(node);
+  }));
+}
+
+// ---- New-tag bar (create / add-subtag / rename share one inline input) ----
+
+function _beginTagInput(action, path) {
+  if (!_shell) return;
+  const input = _shell.querySelector('#dw-tag-input');
+  if (!input) return;
+  _tagInputMode = { action, path: path || '' };
+  if (action === 'subtag') { input.value = ''; input.placeholder = `new subtag under “${path}”`; }
+  else if (action === 'rename') { input.value = (path.split('/').pop() || ''); input.placeholder = `rename “${path}”`; }
+  else { input.value = ''; input.placeholder = 'tag name (use / to nest)'; }
+  input.classList.remove('hidden');
+  input.focus();
+  input.select();
+}
+
+function _endTagInput() {
+  if (_shell) {
+    const input = _shell.querySelector('#dw-tag-input');
+    if (input) { input.classList.add('hidden'); input.value = ''; input.placeholder = 'tag name (use / to nest)'; }
+  }
+  _tagInputMode = null;
+}
+
+function _commitTagInput() {
+  if (!_shell) return;
+  const input = _shell.querySelector('#dw-tag-input');
+  const raw = input ? (input.value || '').trim() : '';
+  const mode = _tagInputMode;
+  _endTagInput();
+  if (!raw || !mode) return;
+  if (mode.action === 'create') _createTag(raw);
+  else if (mode.action === 'subtag') _createTag(mode.path + '/' + raw);
+  else if (mode.action === 'rename') _renameTag(mode.path, raw);
+}
+
+function _normPath(p) {
+  return String(p || '').split('/').map(s => s.trim()).filter(Boolean).join('/');
+}
+
+function _createTag(path) {
+  const clean = _normPath(path);
+  if (!clean) return;
+  _knownTags.add(clean);
+  // Expand every ancestor so the new (possibly nested) folder is visible.
+  let p = '';
+  for (const seg of clean.split('/')) { p = p ? p + '/' + seg : seg; _expanded.add('t:' + p); }
+  _persistExpanded();
+  _saveKnownTags();
+  _renderList();
+}
+
+// Rename a tag's LEAF segment → re-prefix that tag (and its subtags) on every
+// doc that carries it, plus the known-tags list.
+async function _renameTag(oldPath, newLeaf) {
+  const leaf = _normPath(newLeaf);
+  if (!leaf) return;
+  const parts = oldPath.split('/');
+  parts.splice(parts.length - 1, 1, ...leaf.split('/'));
+  const newPath = _normPath(parts.join('/'));
+  if (!newPath || newPath === oldPath) return;
+  const _re = (t) => (t === oldPath || t.startsWith(oldPath + '/')) ? newPath + t.slice(oldPath.length) : t;
+  _knownTags = new Set([..._knownTags].map(_re));
+  _saveKnownTags();
+  const affected = _docs.filter(d => (d.tags || []).some(t => t === oldPath || t.startsWith(oldPath + '/')));
+  try {
+    for (const d of affected) await _postTags(d, (d.tags || []).map(_re));
+    if (uiModule) uiModule.showToast(`Renamed → ${newPath}`);
+  } catch (e) {
+    console.error('Workspace: rename tag failed', e);
+    if (uiModule) uiModule.showError('Rename failed');
+  }
+  await _loadList(_currentSearch());
+}
+
+// Delete a tag (and its subtags): strip it from every doc + the known list.
+// The documents themselves are untouched — only the tag is removed.
+async function _deleteTag(node) {
+  const path = node.fullPath;
+  const n = node.count || 0;
+  const msg = n
+    ? `Delete tag “${path}”? It will be removed from ${n} document${n === 1 ? '' : 's'} (the documents stay).`
+    : `Delete empty tag “${path}”?`;
+  if (!window.confirm(msg)) return;
+  const _hit = (t) => t === path || t.startsWith(path + '/');
+  _knownTags = new Set([..._knownTags].filter(t => !_hit(t)));
+  _saveKnownTags();
+  const affected = _docs.filter(d => (d.tags || []).some(_hit));
+  try {
+    for (const d of affected) await _postTags(d, (d.tags || []).filter(t => !_hit(t)));
+    if (uiModule) uiModule.showToast(`Deleted tag “${path}”`);
+  } catch (e) {
+    console.error('Workspace: delete tag failed', e);
+    if (uiModule) uiModule.showError('Delete failed');
+  }
+  for (const k of [..._expanded]) if (k === 't:' + path || k.startsWith('t:' + path + '/')) _expanded.delete(k);
+  _persistExpanded();
+  await _loadList(_currentSearch());
 }
 
 function _highlightActive() {
@@ -425,6 +683,7 @@ export async function openWorkspace(docId) {
   // assistant for the doc, instead of the doc's stale prior conversation.
   if (wasClosed) { try { await window.__odysseusStartDefaultChat?.(); } catch (_) {} }
   _relocateChat();
+  await _loadKnownTags();
   await _loadList(_currentSearch());
   if (docId) {
     // Explicit doc (e.g. opened from the Library) — open it in the centre.
@@ -442,6 +701,8 @@ export async function openWorkspace(docId) {
 export function closeWorkspace() {
   if (!_open || !_shell) return;
   _open = false;
+  _closeFolderMenu();
+  _endTagInput();
   // Restore the chat to its home BEFORE hiding the shell so it's back in the
   // normal app view, then tear down the workspace editor.
   _restoreChat();

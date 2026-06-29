@@ -215,21 +215,32 @@ async def test_suggest_tags_fallback_without_model(monkeypatch):
         droutes.SessionLocal = previous
 
 
-def test_document_library_tag_ui_wiring_present():
-    """Guard the Library tag UI hooks so a refactor can't drop them."""
+def test_workspace_tag_wiring_present():
+    """Tagging now lives in the Documents Workspace (StandardNotes-style folders):
+    create tag/subtag, rename/delete, and drag-drop a note onto a folder to
+    assign its tag — with empty folders persisted server-side via /api/prefs.
+    Guard those hooks, and guard that the OLD Library documents-tagging UI
+    (chips facet + per-doc edit/suggest) stays removed."""
     from pathlib import Path
 
     root = Path(__file__).resolve().parents[1]
+    ws = (root / "static" / "js" / "documentWorkspace.js").read_text(encoding="utf-8")
     lib = (root / "static" / "js" / "documentLibrary.js").read_text(encoding="utf-8")
-    assert "doclib-tag-chips" in lib
-    assert "libraryRenderTagChips" in lib
-    assert "librarySetDocTags" in lib
-    assert "/api/document/${doc.id}/tags" in lib
-    assert "_libraryActiveTag" in lib
-    # AI suggest-and-confirm tag action.
-    assert "librarySuggestTags" in lib
-    assert "/api/document/${doc.id}/suggest-tags" in lib
-    assert "Suggest tags" in lib
+
+    # Workspace tag CRUD + drag-drop-to-assign, empty folders persisted.
+    assert "/api/prefs/dw_known_tags" in ws          # known/empty tags persist per-user
+    assert "_makeDropTarget" in ws                    # folders are drop targets...
+    assert "draggable = true" in ws                   # ...and note rows are draggable
+    assert "/api/document/${doc.id}/tags" in ws       # drop assigns via the tags endpoint
+    assert "_createTag" in ws and "_renameTag" in ws and "_deleteTag" in ws
+    assert "drag-over" in ws                          # drop-target highlight
+
+    # The old Library documents-tagging UI is gone (it moved to the workspace).
+    assert "doclib-tag-chips" not in lib
+    assert "libraryRenderTagChips" not in lib
+    assert "librarySetDocTags" not in lib
+    assert "librarySuggestTags" not in lib
+    assert "_libraryActiveTag" not in lib
 
 
 def test_obsidian_extras_frontend_wiring_present():

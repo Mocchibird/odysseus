@@ -2246,6 +2246,55 @@ body.doc-workspace-open #icon-rail { display: none; }
 /* Zero the search input's baked-in margin-top:6px so it sits centred in the head. */
 #doc-workspace .dw-left-head .memory-search-input { margin-top: 0; }
 #doc-workspace .dw-back { flex: 0 0 auto; }
+
+/* --- tag CRUD + drag-drop (StandardNotes-style folders) ------------------ */
+/* New-tag bar above the tree: a "New tag" button + an inline input shared by
+   create / add-subtag / rename (mode-driven). */
+#doc-workspace .dw-tagbar {
+  display: flex; align-items: center; gap: 6px;
+  padding: 6px 8px; border-bottom: 1px solid var(--border);
+}
+#doc-workspace .dw-tagbar .dw-newtag {
+  flex: 0 0 auto; display: inline-flex; align-items: center; gap: 5px;  /* memory-toolbar-btn isn't flex (trap B.2) */
+}
+#doc-workspace .dw-tagbar .dw-tag-input { flex: 1; min-width: 0; margin-top: 0; }  /* zero the baked-in 6px (trap B.1) */
+#doc-workspace .dw-tagbar .dw-tag-input.hidden { display: none; }
+
+/* Drag a note (.dw-file) and drop it on a folder (or Untagged) to (re)tag it. */
+#doc-workspace .dw-file.dragging { opacity: 0.5; }
+#doc-workspace .dw-folder.drag-over {
+  border-color: var(--accent-primary, var(--red));
+  background: color-mix(in srgb, var(--accent-primary, var(--red)) 10%, transparent);
+}
+
+/* Per-folder hover actions (the … button) — absolutely positioned over the
+   count so the folder's grid layout is untouched. */
+#doc-workspace .dw-folder { position: relative; }
+#doc-workspace .dw-folder-actions {
+  position: absolute; right: 6px; top: 50%; transform: translateY(-50%);
+  opacity: 0; transition: opacity 0.12s;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+#doc-workspace .dw-folder:hover .dw-folder-actions,
+#doc-workspace .dw-folder:focus-within .dw-folder-actions { opacity: 1; }
+#doc-workspace .dw-folder:hover .notes-vault-folder-count { opacity: 0; }
+
+/* Folder actions menu — body-appended (escapes the list overflow), z set via
+   topPopupZ() in JS; swept on every list re-render. Panel/border vars only. */
+.dw-folder-menu {
+  background: var(--panel); border: 1px solid var(--border);
+  border-radius: 6px; padding: 4px; min-width: 150px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+}
+.dw-folder-menu button {
+  display: block; width: 100%; text-align: left;
+  background: none; border: 0; color: var(--fg);
+  padding: 6px 10px; border-radius: 4px; font: inherit; font-size: 12px; cursor: pointer;
+}
+.dw-folder-menu button:hover {
+  background: color-mix(in srgb, var(--accent-primary, var(--red)) 14%, transparent);
+}
+.dw-folder-menu button.dw-folder-menu-del { color: var(--accent-primary, var(--red)); }
 /* Controls. Desktop: exit = the list-head back arrow (.dw-back). The floating
    bubble (.dw-chat-toggle) OPENS the assistant and only shows while it's
    collapsed; the assistant's own × (.dw-ai-hide, in .dw-ai-head) HIDES it.
@@ -2285,6 +2334,11 @@ body.doc-workspace-open #icon-rail { display: none; }
     grid-template-columns: 1fr;
     grid-template-rows: auto minmax(0, 1fr);
   }
+  /* The desktop dw-chat-collapsed grid (#doc-workspace.dw-chat-collapsed, set on
+     every open) out-specifies the bare #doc-workspace above, so its 3-column
+     template would survive on mobile and leave the empty centre track as a dead
+     strip beside the list. Collapse it to one column here too. */
+  #doc-workspace.dw-chat-collapsed { grid-template-columns: 1fr; }
   #doc-workspace .dw-mobile-switch {
     display: flex;
     grid-row: 1;
