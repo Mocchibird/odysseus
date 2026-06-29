@@ -13,7 +13,7 @@
 // Opened from the Documents rail button and the /workspace deep link.
 // ============================================
 
-import documentModule from './document.js?v=505';
+import documentModule from './document.js?v=506';
 import sessionModule from './sessions.js';
 import uiModule from './ui.js';
 import { langIcon } from './langIcons.js';
@@ -599,6 +599,9 @@ async function _deleteDoc(doc) {
   try {
     const res = await fetch(`${API_BASE}/api/document/${doc.id}`, { method: 'DELETE', credentials: 'same-origin' });
     if (!res.ok) throw new Error(res.statusText);
+    // Close the editor tab if this doc is open — otherwise it lingers as a live,
+    // editable tab whose autosave would silently resurrect the just-trashed doc.
+    try { documentModule.closeTab(doc.id); } catch (_) {}
     if (uiModule) uiModule.showToast('Moved to Trash');
     _trashDocs = null;                                   // invalidate the trash cache
     if (_expanded.has('trash')) await _loadTrash();

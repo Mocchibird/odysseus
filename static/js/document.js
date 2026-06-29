@@ -3845,6 +3845,7 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
   }
 
   async function closeTab(docId) {
+    if (!docs.has(docId)) return;   // not an open tab → nothing to close (safe no-op for external callers)
     // Save current editor content to map so the check below uses fresh data
     saveCurrentToMap();
     if (_workspaceMode) {
@@ -10558,6 +10559,7 @@ const documentModule = {
   isDiffModeActive,
   getCurrentDocId,
   updateTitle,
+  closeTab,
   findEmailDocId,
   getSelectionContext,
   clearSelection,

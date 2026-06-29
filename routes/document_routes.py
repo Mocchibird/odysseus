@@ -913,6 +913,12 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
             if not doc:
                 raise HTTPException(404, "Document not found")
             _verify_doc_owner(db, doc, user)
+            if not doc.is_active:
+                # A soft-deleted doc lives only in the Trash. Refuse edits so a
+                # stale editor tab's autosave can't silently resurrect it (re-index
+                # it into RAG / bump versions) while it still reads as trashed.
+                # Callers must POST /restore first.
+                raise HTTPException(404, "Document not found")
 
             # Skip if content is identical
             if doc.current_content == req.content:
