@@ -2204,11 +2204,19 @@ label.ask-user-option .ask-user-option-desc { flex-basis: 100%; }
    existing vars only; no new palette. */
 #doc-workspace {
   position: fixed;
-  inset: 0 0 0 var(--icon-rail-w, 64px);
+  /* Full-window: cover the icon rail too (it's hidden while the workspace is
+     open). The list-head chevron reveals the sidebar as a drawer on demand. */
+  inset: 0;
   z-index: 160;
   display: grid;
   grid-template-columns: 280px minmax(0, 1fr) 360px;
+  /* Cap the single implicit row at the fixed container height (it defaulted to
+     `auto` = content-height, which left the editor + chat with no bounded
+     height to scroll within). Mirrors the mobile block below. */
+  grid-template-rows: minmax(0, 1fr);
   background: var(--bg);
+  /* Slide the AI panel column in/out smoothly. */
+  transition: grid-template-columns 0.16s ease;
 }
 #doc-workspace.hidden { display: none; }
 #doc-workspace.dw-chat-collapsed { grid-template-columns: 280px minmax(0, 1fr) 0; }
@@ -2229,20 +2237,33 @@ label.ask-user-option .ask-user-option-desc { flex-basis: 100%; }
 #doc-workspace .dw-left-head .memory-search-input { flex: 1; min-width: 0; }
 #doc-workspace .dw-new-btn { flex: 0 0 auto; }
 #doc-workspace .dw-list { flex: 1; overflow-y: auto; padding: 6px; }
-#doc-workspace .dw-center { min-width: 0; display: flex; position: relative; }
-#doc-workspace .dw-right { min-width: 0; border-left: 1px solid var(--border); position: relative; overflow: hidden; }
+#doc-workspace .dw-center { min-width: 0; min-height: 0; overflow: hidden; display: flex; position: relative; }
+#doc-workspace .dw-right { min-width: 0; min-height: 0; display: flex; flex-direction: column; border-left: 1px solid var(--border); position: relative; overflow: hidden; }
 #doc-workspace.dw-chat-collapsed .dw-right { border-left: none; }
 /* The real #chat-container is *relocated* into the right pane (never cloned).
    Neutralize its main-view sidebar offset so it fills the column. */
 #doc-workspace .dw-right > #chat-container {
   position: relative;
   left: auto; right: auto;
-  width: 100%; height: 100%;
+  width: 100%;
+  flex: 1; min-height: 0;          /* fill the column below the AI-panel head */
   max-width: none; margin: 0;
 }
 /* The global sidebar-expand hamburger floats above everything (z:210) and is
    redundant inside the full-window workspace — it would overlap the search. */
 body.doc-workspace-open #hamburger-btn { display: none; }
+/* Full-window: hide the app icon rail. The list-head chevron (.dw-nav-toggle)
+   reveals the full sidebar as a left drawer OVER the document list on demand —
+   lifting the rail + sidebar above the workspace with a dismissable backdrop. */
+body.doc-workspace-open #icon-rail { display: none; }
+body.doc-workspace-open.dw-nav-open #icon-rail {
+  display: flex; position: fixed; left: 0; top: 0; bottom: 0; z-index: 201;
+}
+body.doc-workspace-open.dw-nav-open #sidebar { z-index: 201; }
+#dw-nav-backdrop { position: fixed; inset: 0; z-index: 200; background: rgba(0, 0, 0, 0.45); }
+#doc-workspace .dw-nav-toggle { flex: 0 0 auto; }
+#doc-workspace .dw-nav-toggle svg { transition: transform 0.15s ease; }
+body.dw-nav-open #doc-workspace .dw-nav-toggle svg { transform: rotate(90deg); }
 /* Neutralize the editor's chat-docked chrome inside the workspace centre. */
 #doc-workspace .dw-center .doc-editor-pane,
 #doc-workspace .dw-center #doc-editor-pane {
@@ -2254,6 +2275,11 @@ body.doc-workspace-open #hamburger-btn { display: none; }
   box-shadow: none;
   transform: none;
 }
+/* Distraction-free editor: the left list is the navigation, so hide the
+   chat-style tab bar; centre the body to a comfortable reading measure
+   (the wrap already caps at 820px in style.css). */
+#doc-workspace .dw-center #doc-tab-bar { display: none; }
+#doc-workspace .dw-center #doc-editor-wrap { margin-inline: auto; }
 /* Left-pane rows reuse the library card vocabulary (.doclib-card.memory-item),
    stacked full-width with an active highlight for the open document. Values
    mirror the library card's meta line — no new spacing/colour invented. */
@@ -2271,9 +2297,42 @@ body.doc-workspace-open #hamburger-btn { display: none; }
   display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
 }
 #doc-workspace .dw-empty { padding: 24px 12px; text-align: center; opacity: 0.5; font-size: 12px; }
-#doc-workspace .dw-close { position: absolute; top: 8px; right: 8px; z-index: 3; }
-#doc-workspace .dw-chat-toggle { position: absolute; top: 8px; right: 44px; z-index: 3; }
+/* Zero the search input's baked-in margin-top:6px so it sits centred in the head. */
+#doc-workspace .dw-left-head .memory-search-input { margin-top: 0; }
+#doc-workspace .dw-back { flex: 0 0 auto; }
+/* Controls. Desktop: exit = the list-head back arrow (.dw-back). The floating
+   bubble (.dw-chat-toggle) OPENS the assistant and only shows while it's
+   collapsed; the assistant's own × (.dw-ai-hide, in .dw-ai-head) HIDES it.
+   .dw-close is the mobile-only exit (hidden on desktop). */
+#doc-workspace .dw-chat-toggle { position: absolute; top: 8px; right: 8px; z-index: 3; }
+#doc-workspace:not(.dw-chat-collapsed) .dw-chat-toggle { display: none; }
+#doc-workspace .dw-close { display: none; }
+/* Assistant (right pane) header: title + new-chat + hide ×. */
+#doc-workspace .dw-ai-head {
+  display: flex; align-items: center; gap: 6px; padding: 8px 9px;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--fg) 4%, transparent);
+  flex: 0 0 auto;
+}
+#doc-workspace .dw-ai-title { font-size: 10px; opacity: 0.55; margin-right: auto; }
+#doc-workspace.dw-chat-collapsed .dw-ai-head { display: none; }
 #doc-workspace .dw-mobile-switch { display: none; }
+/* Markdown "/" slash-insert menu (body-appended popover; mdShortcuts.js). */
+.md-slash-menu {
+  position: fixed; min-width: 184px; max-height: 280px; overflow-y: auto;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+  padding: 4px; display: flex; flex-direction: column; gap: 2px;
+}
+.md-slash-item {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  padding: 6px 8px; border: none; background: none; color: var(--fg);
+  font: inherit; font-size: 12px; text-align: left; border-radius: 6px;
+  cursor: pointer;
+}
+.md-slash-item:hover,
+.md-slash-item.active { background: color-mix(in srgb, var(--fg) 8%, transparent); }
+.md-slash-item svg { opacity: 0.7; flex-shrink: 0; }
 @media (max-width: 768px) {
   #doc-workspace {
     inset: 0;
@@ -2291,6 +2350,16 @@ body.doc-workspace-open #hamburger-btn { display: none; }
   /* The chat-collapse toggle is a desktop affordance; on mobile the tab switch
      replaces it, and it would overlap the Chat tab + close button. */
   #doc-workspace .dw-chat-toggle { display: none; }
+  /* Mobile: exit via the top-right close (the list-head back arrow is redundant,
+     so hide it); the assistant lives on the Chat tab, so re-show its head even
+     though the shell still carries the desktop dw-chat-collapsed class. */
+  #doc-workspace .dw-back { display: none; }
+  /* The sidebar-drawer chevron is a desktop affordance; mobile uses the tab
+     switch + the app's own mobile nav, so hide it (the drawer's overlay
+     mechanism differs on mobile). */
+  #doc-workspace .dw-nav-toggle { display: none; }
+  #doc-workspace .dw-close { display: inline-flex; position: absolute; top: 8px; right: 8px; z-index: 3; }
+  #doc-workspace[data-pane="right"] .dw-ai-head { display: flex; }
   #doc-workspace .dw-mtab {
     flex: 1;
     padding: 10px;
