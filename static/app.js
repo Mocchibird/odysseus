@@ -15,6 +15,7 @@ import searchModule from './js/search.js';
 import chatModule from './js/chat.js?v=463';
 import compareModule from './js/compare/index.js';
 import documentModule from './js/document.js?v=464';
+import documentWorkspaceModule from './js/documentWorkspace.js?v=472';
 import searchChatModule from './js/search-chat.js';
 import { makeWindowDraggable } from './js/windowDrag.js';
 import markdownModule from './js/markdown.js';
@@ -1095,6 +1096,7 @@ function initializeEventListeners() {
         setTimeout(_go, 200);
       }
     },
+    '/workspace': () => { _collapseSidebarToRail(); documentWorkspaceModule?.openWorkspace(); },
     '/books':    () => booksModule?.openBooksPanel && booksModule.openBooksPanel(),
     '/calendar': () => calendarModule && calendarModule.openCalendar(),
     '/cookbook': () => document.getElementById('tool-cookbook-btn')?.click(),
@@ -3480,6 +3482,7 @@ function startOdysseusApp() {
     compareModule.init(API_BASE);
   }
   researchPanelModule.init(API_BASE, markdownModule, sessionModule);
+  if (documentWorkspaceModule) documentWorkspaceModule.init(API_BASE);
   // Initialize document editor module
   if (documentModule) {
     documentModule.init(API_BASE);
@@ -3546,12 +3549,11 @@ function startOdysseusApp() {
     });
   }
 
-  // Rail documents — toggle doc panel on/off (not library)
+  // Rail documents — open the full-window Documents workspace.
   const _railDocsBtn = el('rail-documents');
   if (_railDocsBtn) {
     _railDocsBtn.addEventListener('click', () => {
-      const ob = el('overflow-doc-btn');
-      if (ob) ob.click();
+      if (documentWorkspaceModule) documentWorkspaceModule.openWorkspace();
     });
   }
 
@@ -3591,7 +3593,7 @@ function startOdysseusApp() {
     const hasChatNotif = el('rail-chats')?.classList.contains('rail-notify');
 
     const _show = (id, visible) => { const b = el(id); if (b) b.style.display = visible ? '' : 'none'; };
-    _show('rail-documents', docOpen);
+    // rail-documents is now an always-visible workspace launcher (not dynamic).
     _show('rail-chats', !!hasChatNotif);
   }
   window._syncRailDynamic = _syncRailDynamic;
