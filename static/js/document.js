@@ -3684,11 +3684,14 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
     // Save current doc state before switching
     saveCurrentToMap();
 
-    // Auto-delete the doc we're leaving if it's completely empty
+    // Auto-clean the doc we're leaving ONLY if it's a fresh blank that never
+    // held content — a brand-new untouched doc. A doc that was ever loaded or
+    // had content (_everHadContent) is NEVER auto-deleted, even if the editor is
+    // momentarily empty mid open/switch — that race was vanishing real notes.
     const prevId = activeDocId;
     if (prevId && prevId !== docId && docs.has(prevId)) {
       const prev = docs.get(prevId);
-      if (!(prev.content || '').trim() && !(prev.title || '').trim()) {
+      if (!prev._everHadContent && !(prev.content || '').trim() && !(prev.title || '').trim()) {
         fetch(`${API_BASE}/api/document/${prevId}`, { method: 'DELETE' }).catch(() => {});
         docs.delete(prevId);
         _syncDocIndicator();
@@ -3947,6 +3950,7 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
         doc.content = textarea.value;
       }
     }
+    if ((doc.content || '').trim() || (doc.title || '').trim()) doc._everHadContent = true;
   }
 
   // ---- Panel open/close ----
@@ -6515,6 +6519,14 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
       version: doc.version_count || 1,
       sessionId: sessionId || doc.session_id,
       userSetLanguage: !!doc.language,
+      // Sticky "this is a real note" marker — true once a doc is loaded with
+      // content/title (or has been before). A doc with this set is NEVER
+      // auto-deleted on switch nor blanked by an autosave, even if the editor
+      // is momentarily empty mid open/switch (which used to vanish real notes).
+      _everHadContent: !!(existing?._everHadContent
+        || (doc.current_content || '').trim()
+        || (doc.title || '').trim()
+        || (doc.version_count || 1) > 1),
       _composeAtts: existing?._composeAtts,
       // Provenance for the "Send signed reply" flow
       sourceEmailUid:       doc.source_email_uid || null,
@@ -8523,13 +8535,22 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
     if (!activeDocId) return;
     const textarea = document.getElementById('doc-editor-textarea');
     if (!textarea) return;
+    const content = textarea.value;
+    // Data-loss guard: never let an AUTOSAVE blank a real note. If the editor is
+    // empty but this doc has ever held content (loaded/typed), skip the silent
+    // save — this is almost always an open/switch race, not an intentional
+    // clear. An explicit (non-silent) save can still clear it on purpose.
+    if (silent && !content.trim() && docs.get(activeDocId)?._everHadContent) {
+      console.warn('Autosave skipped — refusing to overwrite a non-empty document with empty content:', activeDocId);
+      return;
+    }
 
     try {
       const res = await fetch(`${API_BASE}/api/document/${activeDocId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'same-origin',
-        body: JSON.stringify({ content: textarea.value }),
+        body: JSON.stringify({ content }),
       });
       if (!res.ok) throw new Error(`Document save failed: HTTP ${res.status}`);
       const doc = await res.json();
