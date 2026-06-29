@@ -1,10 +1,11 @@
 """Obsidian-like document extras (fork): the `/api/documents/titles` list that
-backs the `[[` autocomplete, and the `/api/document/{id}/related` See-also feed.
+backs the `[[` autocomplete, plus document tagging (set/normalize, the Library
+tag facet + filter, and AI tag suggestions) and the front-end wiring guards.
 
 Handlers are invoked directly with a fake request — the same direct-closure
 pattern the other document route tests use (no middleware spin-up). RAG is
-stubbed so the related endpoint's shaping logic (self-exclusion, dedup, snippet)
-is covered without a live vector store.
+stubbed where a handler queries it, so shaping logic is covered without a live
+vector store.
 """
 
 import tempfile
@@ -92,181 +93,6 @@ async def test_titles_lists_only_owner_active_unarchived_docs():
         assert alice_a in ids and bob not in ids
         assert res["count"] == len(res["titles"])
         assert all(set(t.keys()) == {"id", "title"} for t in res["titles"])
-    finally:
-        droutes.SessionLocal = previous
-
-
-@pytest.mark.asyncio
-async def test_related_excludes_self_dedups_and_shapes(monkeypatch):
-    previous = _bind_test_db()
-    try:
-        related_ep = _endpoint("GET", "/api/document/{doc_id}/related")
-        alice_a, _alice_archived, bob = _seed()
-        # Fake RAG hits: the doc itself, a duplicate of another, and that other —
-        # the endpoint must drop self, dedup by kb_id, and carry title/kind/snippet.
-        fake = [
-            {"kb_id": alice_a, "filename": "Alpha Notes", "kind": "document", "text": "self"},
-            {"kb_id": bob, "filename": "Bob Secret", "kind": "document", "text": "  bob   body   here  "},
-            {"kb_id": bob, "filename": "Bob Secret", "kind": "document", "text": "dup"},
-        ]
-        captured = {}
-
-        def _fake_search(owner, q, k=5, kinds=None):
-            captured["owner"], captured["kinds"] = owner, kinds
-            return list(fake)
-
-        monkeypatch.setattr(content_rag, "semantic_search", _fake_search)
-        res = await related_ep(_req("alice"), alice_a, k=6)
-        rel = res["related"]
-        ids = [r["id"] for r in rel]
-        assert alice_a not in ids                 # self excluded
-        assert ids.count(bob) == 1                # deduped
-        assert rel[0]["title"] == "Bob Secret"
-        assert rel[0]["kind"] == "document"
-        assert rel[0]["snippet"] == "bob body here"   # whitespace-collapsed
-        assert captured["owner"] == "alice"           # owner-scoped query
-        assert captured["kinds"] == ["document"]
-    finally:
-        droutes.SessionLocal = previous
-
-
-@pytest.mark.asyncio
-async def test_related_empty_when_rag_cold(monkeypatch):
-    # With RAG cold AND no title/link/session neighbours, the feed is empty.
-    # ("Alpha Notes" has no siblings; "Archived One" is archived, "Bob Secret"
-    # is another owner's — neither is a candidate.)
-    previous = _bind_test_db()
-    try:
-        related_ep = _endpoint("GET", "/api/document/{doc_id}/related")
-        alice_a, _archived, _bob = _seed()
-        monkeypatch.setattr(content_rag, "semantic_search", lambda *a, **k: [])
-        res = await related_ep(_req("alice"), alice_a, k=6)
-        assert res == {"related": []}
-    finally:
-        droutes.SessionLocal = previous
-
-
-@pytest.mark.asyncio
-async def test_related_surfaces_title_series_without_rag(monkeypatch):
-    """The reported bug: a lesson in a SERIES must surface its siblings even when
-    RAG is cold or the docs were never indexed — on pure title similarity."""
-    previous = _bind_test_db()
-    try:
-        related_ep = _endpoint("GET", "/api/document/{doc_id}/related")
-        l06, l07, l08, other = (str(uuid.uuid4()) for _ in range(4))
-        db = _TS()
-        try:
-            db.query(Document).delete()
-            db.add(_doc(l06, "Japanese A1.2 Lesson 06", "alice"))
-            db.add(_doc(l07, "Japanese A1.2 Lesson 07", "alice"))
-            db.add(_doc(l08, "Japanese A1.2 Lesson 08", "alice"))
-            db.add(_doc(other, "TileLang Ascend Notes", "alice"))
-            db.commit()
-        finally:
-            db.close()
-        monkeypatch.setattr(content_rag, "semantic_search", lambda *a, **k: [])  # RAG cold
-        res = await related_ep(_req("alice"), l07, k=6)
-        ids = [r["id"] for r in res["related"]]
-        assert l06 in ids and l08 in ids            # siblings surface without RAG
-        assert l07 not in ids                        # self excluded
-        assert other not in ids                      # unrelated title not pulled in
-        by_id = {r["id"]: r for r in res["related"]}
-        assert by_id[l06]["reason"] in ("series", "topic")
-    finally:
-        droutes.SessionLocal = previous
-
-
-@pytest.mark.asyncio
-async def test_related_includes_wikilinks_and_backlinks(monkeypatch):
-    """Manual override: outgoing ``[[links]]`` and backlinks rank at the top,
-    independent of RAG."""
-    previous = _bind_test_db()
-    try:
-        related_ep = _endpoint("GET", "/api/document/{doc_id}/related")
-        hub, target, backref = (str(uuid.uuid4()) for _ in range(3))
-        db = _TS()
-        try:
-            db.query(Document).delete()
-            db.add(_doc(hub, "Grammar Hub", "alice", content="See [[Particle Wa]] for the topic particle."))
-            db.add(_doc(target, "Particle Wa", "alice", content="The topic particle wa."))
-            db.add(_doc(backref, "Lesson Recap", "alice", content="A recap of [[Grammar Hub]]."))
-            db.commit()
-        finally:
-            db.close()
-        monkeypatch.setattr(content_rag, "semantic_search", lambda *a, **k: [])
-        res = await related_ep(_req("alice"), hub, k=6)
-        rel = {r["id"]: r for r in res["related"]}
-        assert target in rel                         # outgoing [[Particle Wa]]
-        assert backref in rel                        # backlink from "Lesson Recap"
-        assert rel[target]["reason"] == "linked"
-        assert rel[backref]["reason"] == "linked"
-    finally:
-        droutes.SessionLocal = previous
-
-
-def test_series_key_parses_trailing_number():
-    assert droutes._series_key("Japanese A1.2 Lesson 22") == ("japanese a1.2 lesson", 22)
-    assert droutes._series_key("Lesson 7") == ("lesson", 7)
-    assert droutes._series_key("Chapter   12  ") == ("chapter", 12)
-    assert droutes._series_key("No number here") == (None, None)
-    assert droutes._series_key("") == (None, None)
-
-
-@pytest.mark.asyncio
-async def test_related_orders_series_siblings_by_numeric_proximity(monkeypatch):
-    """For a lesson in a series, the nearest siblings rank first and in order:
-    Lesson 22 -> 21 then 23 (distance 1), ahead of 20 (distance 2). Title
-    similarity scores all three identically, so this guards the numeric-proximity
-    tiebreak (without it the two shown fell to DB insertion order)."""
-    previous = _bind_test_db()
-    try:
-        related_ep = _endpoint("GET", "/api/document/{doc_id}/related")
-        l20, l21, l22, l23 = (str(uuid.uuid4()) for _ in range(4))
-        db = _TS()
-        try:
-            db.query(Document).delete()
-            # Insert in a deliberately non-ascending order so a correct result
-            # can't come from DB insertion order alone.
-            db.add(_doc(l20, "Japanese A1.2 Lesson 20", "alice"))
-            db.add(_doc(l23, "Japanese A1.2 Lesson 23", "alice"))
-            db.add(_doc(l22, "Japanese A1.2 Lesson 22", "alice"))
-            db.add(_doc(l21, "Japanese A1.2 Lesson 21", "alice"))
-            db.commit()
-        finally:
-            db.close()
-        monkeypatch.setattr(content_rag, "semantic_search", lambda *a, **k: [])  # RAG cold
-        res = await related_ep(_req("alice"), l22, k=6)
-        ids = [r["id"] for r in res["related"]]
-        # The "Most relevant" strip is items[:2] in the UI — adjacent, in order.
-        assert ids[:2] == [l21, l23]
-        # The distance-2 sibling ranks below both adjacents.
-        assert ids.index(l20) > ids.index(l23)
-    finally:
-        droutes.SessionLocal = previous
-
-
-@pytest.mark.asyncio
-async def test_related_displays_selected_siblings_ascending(monkeypatch):
-    """Proximity SELECTS the nearest siblings, but they're DISPLAYED ascending.
-    Real-data case: Lesson 22 with only 20 and 23 present (no 21) shows
-    20 then 23 — not closest-first 23, 20."""
-    previous = _bind_test_db()
-    try:
-        related_ep = _endpoint("GET", "/api/document/{doc_id}/related")
-        l20, l22, l23 = (str(uuid.uuid4()) for _ in range(3))
-        db = _TS()
-        try:
-            db.query(Document).delete()
-            db.add(_doc(l23, "Japanese A1.2 Lesson 23", "alice"))
-            db.add(_doc(l20, "Japanese A1.2 Lesson 20", "alice"))
-            db.add(_doc(l22, "Japanese A1.2 Lesson 22", "alice"))
-            db.commit()
-        finally:
-            db.close()
-        monkeypatch.setattr(content_rag, "semantic_search", lambda *a, **k: [])
-        res = await related_ep(_req("alice"), l22, k=6)
-        ids = [r["id"] for r in res["related"]]
-        assert ids == [l20, l23]   # ascending display, not proximity-order 23, 20
     finally:
         droutes.SessionLocal = previous
 
@@ -421,18 +247,16 @@ def test_obsidian_extras_frontend_wiring_present():
     assert "resolveGalleryEmbeds" in markdown
     assert "/api/gallery/library?search=" in markdown
 
-    # document.js: gallery resolve hook, related panel, and `[[` autocomplete.
+    # document.js: gallery resolve hook and the `[[` autocomplete.
     assert "resolveGalleryEmbeds(preview)" in document
-    assert "_renderRelatedNotes" in document
-    assert "/api/document/${docId}/related" in document
     assert "_wikiACUpdate" in document and "_wikiACKeydown" in document
     assert "/api/documents/titles" in document
     assert "doc-wikilink-ac" in document
     # the cache-poison guard on the titles fetch (empty/failure must not stick)
     assert "_wikiTitlesPromise = null" in document
 
-    # fork.css: styles for all three (kept out of style.css for upstream alignment).
-    for sel in (".md-gallery-embed", ".doc-related-top", ".doc-related-foot", ".doc-wikilink-ac"):
+    # fork.css: styles for both (kept out of style.css for upstream alignment).
+    for sel in (".md-gallery-embed", ".doc-wikilink-ac"):
         assert sel in fork_css
 
 
