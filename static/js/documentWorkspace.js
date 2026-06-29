@@ -38,8 +38,6 @@ const _ICON_CLOSE = _icon('<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1=
 const _ICON_CHAT = _icon('<path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/>');
 // Back arrow — exits the workspace.
 const _ICON_BACK = _icon('<line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/>');
-// Chevron — reveals the app sidebar as a left drawer over the document list.
-const _ICON_CHEVRON = _icon('<polyline points="9 18 15 12 9 6"/>');
 // Chat bubble with a plus — starts a NEW chat.
 const _ICON_NEWCHAT = _icon('<path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/><line x1="12" y1="8.5" x2="12" y2="14.5"/><line x1="9" y1="11.5" x2="15" y2="11.5"/>');
 // Generic document glyph — mirrors the library card's fallback icon.
@@ -57,7 +55,6 @@ function _buildShell() {
     <div class="dw-left">
       <div class="dw-left-head">
         <button class="icon-rail-btn dw-back" id="dw-back" title="Exit workspace" aria-label="Exit workspace">${_ICON_BACK}</button>
-        <button class="icon-rail-btn dw-nav-toggle" id="dw-nav-toggle" title="Show sidebar" aria-label="Show sidebar">${_ICON_CHEVRON}</button>
         <input type="text" id="dw-search" class="memory-search-input" placeholder="Search documents…" autocomplete="off" />
         <button class="icon-rail-btn dw-new-btn" id="dw-new" title="New document" aria-label="New document">${_icon('<line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>')}</button>
       </div>
@@ -85,8 +82,6 @@ function _buildShell() {
   // top-right close). Both leave the document & chat intact.
   el.querySelector('#dw-back').addEventListener('click', () => closeWorkspace());
   el.querySelector('#dw-close').addEventListener('click', () => closeWorkspace());
-  // Chevron reveals the app sidebar as a left drawer over the list.
-  el.querySelector('#dw-nav-toggle').addEventListener('click', () => _toggleNav());
   // The floating bubble OPENS the assistant; the panel's own × HIDES it.
   el.querySelector('#dw-chat-toggle').addEventListener('click', () => el.classList.remove('dw-chat-collapsed'));
   el.querySelector('#dw-ai-hide').addEventListener('click', () => {
@@ -122,60 +117,6 @@ function _setMobilePane(pane) {
 function _currentSearch() {
   const s = _shell && _shell.querySelector('#dw-search');
   return s ? s.value.trim() : '';
-}
-
-// ---- sidebar drawer -------------------------------------------------------
-// The workspace is full-window (the app icon-rail is hidden). The chevron
-// reveals the REAL app sidebar (its expanded form) as a left drawer over the
-// document list — un-hide #sidebar so syncRailSide shows rail+sidebar, lift
-// them above the workspace via body.dw-nav-open, with a dismissable backdrop.
-
-let _navBackdrop = null;
-
-function _openNav() {
-  _wireNavClose();
-  const sb = document.getElementById('sidebar');
-  if (sb) { sb.classList.remove('hidden'); try { window.syncRailSide && window.syncRailSide(); } catch (_) {} }
-  document.body.classList.add('dw-nav-open');
-  if (!_navBackdrop) {
-    _navBackdrop = document.createElement('div');
-    _navBackdrop.id = 'dw-nav-backdrop';
-    _navBackdrop.addEventListener('click', _closeNav);
-    document.body.appendChild(_navBackdrop);
-  }
-  _navBackdrop.style.display = 'block';
-}
-
-function _closeNav() {
-  const sb = document.getElementById('sidebar');
-  // Re-collapse to the rail-hidden state the workspace runs in.
-  if (sb) { sb.classList.add('hidden'); try { window.syncRailSide && window.syncRailSide(); } catch (_) {} }
-  document.body.classList.remove('dw-nav-open');
-  if (_navBackdrop) _navBackdrop.style.display = 'none';
-}
-
-function _toggleNav() {
-  if (document.body.classList.contains('dw-nav-open')) _closeNav();
-  else _openNav();
-}
-
-// While the drawer is open, a click on a sidebar/rail action that opens a
-// DIFFERENT full-window view must leave the workspace (otherwise that view
-// renders hidden behind it). Overlay actions (search/theme/settings/user) and
-// new-chat render above or inside the workspace, so those just close the
-// drawer. Capture phase → runs before the app's own handler.
-let _navClickWired = false;
-function _wireNavClose() {
-  if (_navClickWired) return;
-  _navClickWired = true;
-  document.addEventListener('click', (e) => {
-    if (!_open || !document.body.classList.contains('dw-nav-open')) return;
-    const btn = e.target.closest && e.target.closest('#sidebar button, #sidebar a, #sidebar [role="button"], #icon-rail button');
-    if (!btn) return;
-    const label = (btn.getAttribute('title') || btn.textContent || '').trim().toLowerCase();
-    if (/search|theme|settings|^user|new chat/.test(label)) { _closeNav(); return; }
-    closeWorkspace();   // navigate away to a full-window view
-  }, true);
 }
 
 // ---- list -----------------------------------------------------------------
@@ -358,7 +299,6 @@ export async function openWorkspace() {
 export function closeWorkspace() {
   if (!_open || !_shell) return;
   _open = false;
-  _closeNav();   // dismiss the sidebar drawer + backdrop if it was open
   // Restore the chat to its home BEFORE hiding the shell so it's back in the
   // normal app view, then tear down the workspace editor.
   _restoreChat();

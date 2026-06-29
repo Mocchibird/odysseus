@@ -228,8 +228,8 @@
   </script>
   <link rel="stylesheet" href="/static/style.css?v=471">
   <!-- FORK: fork-only CSS, loaded after style.css so style.css stays aligned with upstream. -->
-  <link rel="stylesheet" href="/static/fork.css?v=481">
-  <link rel="modulepreload" href="/static/app.js?v=480">
+  <link rel="stylesheet" href="/static/fork.css?v=482">
+  <link rel="modulepreload" href="/static/app.js?v=482">
   <link rel="modulepreload" href="/static/js/chat.js?v=474">
   <link rel="modulepreload" href="/static/js/ui.js">
   <link rel="modulepreload" href="/static/js/sessions.js">
@@ -817,6 +817,11 @@
                i.e. the dot and + swap places when the dot appears. -->
           <span id="email-unread-dot" class="sidebar-notif-dot" style="display:none"></span>
         </div>
+      </div>
+
+      <div class="list-item" id="tool-workspace-btn" title="Open Documents workspace" style="padding:8px 8px;">
+        <svg class="sidebar-action-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="13" y2="17"/></svg>
+        <span class="grow">Workspace</span>
       </div>
 
       <div class="section" id="models-section">
@@ -2632,7 +2637,7 @@
 <script type="module" src="/static/js/spinner.js"></script>
 <script type="module" src="/static/js/tts-ai.js"></script>
 <script type="module" src="/static/js/document.js?v=474"></script>
-<script type="module" src="/static/js/documentWorkspace.js?v=480"></script>
+<script type="module" src="/static/js/documentWorkspace.js?v=482"></script>
 <script type="module" src="/static/js/gallery.js?v=471"></script>
 <script type="module" src="/static/js/chatRenderer.js"></script>
 <script type="module" src="/static/js/codeRunner.js"></script>
@@ -2647,7 +2652,7 @@
 <script type="module" src="/static/js/settings.js?v=469"></script>
 <script type="module" src="/static/js/admin.js?v=469"></script>
 <script type="module" src="/static/js/assistant.js"></script>
-<script type="module" src="/static/app.js?v=480"></script>  <!-- app.js must be LAST -->
+<script type="module" src="/static/app.js?v=482"></script>  <!-- app.js must be LAST -->
 <script type="module" src="/static/js/init.js"></script>
 <script type="module" src="/static/js/a11y.js"></script>
 <script nonce="{{CSP_NONCE}}">if('serviceWorker' in navigator){navigator.serviceWorker.register('/static/sw.js').catch(()=>{});}</script>

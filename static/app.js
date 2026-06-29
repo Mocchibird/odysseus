@@ -15,7 +15,7 @@ import searchModule from './js/search.js';
 import chatModule from './js/chat.js?v=474';
 import compareModule from './js/compare/index.js';
 import documentModule from './js/document.js?v=474';
-import documentWorkspaceModule from './js/documentWorkspace.js?v=480';
+import documentWorkspaceModule from './js/documentWorkspace.js?v=482';
 import searchChatModule from './js/search-chat.js';
 import { makeWindowDraggable } from './js/windowDrag.js';
 import markdownModule from './js/markdown.js';
@@ -882,6 +882,14 @@ function initializeEventListeners() {
         // Not registered yet → fresh open
         cookbookModule.open();
       }
+    });
+  }
+
+  // Documents workspace sidebar entry (peer of the rail's Documents button)
+  const toolWorkspaceBtn = el('tool-workspace-btn');
+  if (toolWorkspaceBtn) {
+    toolWorkspaceBtn.addEventListener('click', () => {
+      if (documentWorkspaceModule) documentWorkspaceModule.openWorkspace();
     });
   }
 

@@ -2252,18 +2252,9 @@ label.ask-user-option .ask-user-option-desc { flex-basis: 100%; }
 /* The global sidebar-expand hamburger floats above everything (z:210) and is
    redundant inside the full-window workspace — it would overlap the search. */
 body.doc-workspace-open #hamburger-btn { display: none; }
-/* Full-window: hide the app icon rail. The list-head chevron (.dw-nav-toggle)
-   reveals the full sidebar as a left drawer OVER the document list on demand —
-   lifting the rail + sidebar above the workspace with a dismissable backdrop. */
+/* Full-window: hide the app icon rail so the workspace owns the whole window.
+   Re-enter the workspace from the sidebar's "Workspace" entry or the rail. */
 body.doc-workspace-open #icon-rail { display: none; }
-body.doc-workspace-open.dw-nav-open #icon-rail {
-  display: flex; position: fixed; left: 0; top: 0; bottom: 0; z-index: 201;
-}
-body.doc-workspace-open.dw-nav-open #sidebar { z-index: 201; }
-#dw-nav-backdrop { position: fixed; inset: 0; z-index: 200; background: rgba(0, 0, 0, 0.45); }
-#doc-workspace .dw-nav-toggle { flex: 0 0 auto; }
-#doc-workspace .dw-nav-toggle svg { transition: transform 0.15s ease; }
-body.dw-nav-open #doc-workspace .dw-nav-toggle svg { transform: rotate(90deg); }
 /* Neutralize the editor's chat-docked chrome inside the workspace centre. */
 #doc-workspace .dw-center .doc-editor-pane,
 #doc-workspace .dw-center #doc-editor-pane {
@@ -2354,10 +2345,6 @@ body.dw-nav-open #doc-workspace .dw-nav-toggle svg { transform: rotate(90deg); }
      so hide it); the assistant lives on the Chat tab, so re-show its head even
      though the shell still carries the desktop dw-chat-collapsed class. */
   #doc-workspace .dw-back { display: none; }
-  /* The sidebar-drawer chevron is a desktop affordance; mobile uses the tab
-     switch + the app's own mobile nav, so hide it (the drawer's overlay
-     mechanism differs on mobile). */
-  #doc-workspace .dw-nav-toggle { display: none; }
   #doc-workspace .dw-close { display: inline-flex; position: absolute; top: 8px; right: 8px; z-index: 3; }
   #doc-workspace[data-pane="right"] .dw-ai-head { display: flex; }
   #doc-workspace .dw-mtab {
