@@ -13,7 +13,7 @@ import markdownModule from './markdown.js';
 import codeRunnerModule from './codeRunner.js';
 import { langIcon } from './langIcons.js';
 import spinnerModule from './spinner.js';
-import { openLibrary, closeLibrary, isLibraryOpen, initLibrary } from './documentLibrary.js?v=462';
+import { openLibrary, closeLibrary, isLibraryOpen, initLibrary } from './documentLibrary.js?v=483';
 import signatureModule from './signature.js';
 import * as Modals from './modalManager.js';
 import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
@@ -8975,8 +8975,6 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
     if (markdownModule && markdownModule.renderMermaid) markdownModule.renderMermaid(preview);
     // Fork (Obsidian-like): resolve ![[name]] gallery embeds against the gallery.
     if (markdownModule && markdownModule.resolveGalleryEmbeds) markdownModule.resolveGalleryEmbeds(preview);
-    // Fork (Obsidian-like): surface semantically-related docs (top strip + See also).
-    if (related) _renderRelatedNotes(preview, activeDocId);
     _bindDocPreviewClicks(preview);
   }
 
@@ -9002,13 +9000,6 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
             else if (uiModule) uiModule.showToast(`No document named “${title}”`);
           })
           .catch(() => { if (uiModule) uiModule.showError('Could not open link'); });
-        return;
-      }
-      const rel = t.closest && t.closest('.doc-related-item[data-doc-id]');
-      if (rel) {
-        ev.preventDefault();
-        const rid = rel.getAttribute('data-doc-id');
-        if (rid) loadDocument(rid);
         return;
       }
       const chk = t.closest && t.closest('.task-item .task-check');
@@ -9115,50 +9106,6 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
   function toggleMarkdownPreview() {
     const preview = document.getElementById('doc-md-preview');
     _setMarkdownPreviewActive(!(preview && preview.style.display !== 'none'));
-  }
-
-  // Fork (Obsidian-like "See also"): one related-doc row.
-  function _relItemHtml(d, isTop) {
-    const id = _escHtml(String(d.id || ''));
-    const title = _escHtml(d.title || 'Untitled');
-    const snip = (!isTop && d.snippet) ? `<span class="doc-related-item-snippet">${_escHtml(d.snippet)}</span>` : '';
-    return `<a href="#" class="doc-related-item${isTop ? ' doc-related-item-top' : ''}" data-doc-id="${id}" title="Open “${title}”">` +
-      `<span class="doc-related-item-title">${title}</span>${snip}</a>`;
-  }
-
-  // Fork (Obsidian-like): fetch docs semantically related to the open one and
-  // render them INTO the preview — the 1–2 most relevant as a strip at the top,
-  // the rest as a "See also" list at the bottom. Rebuilt on every preview render
-  // (innerHTML is wiped each time); a per-render token drops a stale fetch that
-  // resolves after the user has switched docs. Best-effort, never blocks.
-  function _renderRelatedNotes(preview, docId) {
-    if (!preview || !docId) return;
-    const token = String((preview.__relSeq = (preview.__relSeq || 0) + 1));
-    preview.dataset.relToken = token;
-    fetch(`${API_BASE}/api/document/${docId}/related?k=6`, { credentials: 'same-origin' })
-      .then(r => r.ok ? r.json() : null)
-      .then(data => {
-        if (preview.dataset.relToken !== token) return;            // superseded by a newer render
-        const items = (data && Array.isArray(data.related)) ? data.related : [];
-        if (!items.length) return;
-        const top = items.slice(0, 2);
-        const rest = items.slice(2);
-        if (top.length) {
-          const strip = document.createElement('div');
-          strip.className = 'doc-related-top';
-          strip.innerHTML = `<span class="doc-related-label">Most relevant</span>` +
-            top.map(d => _relItemHtml(d, true)).join('');
-          preview.insertBefore(strip, preview.firstChild);
-        }
-        if (rest.length) {
-          const foot = document.createElement('div');
-          foot.className = 'doc-related-foot';
-          foot.innerHTML = `<div class="doc-related-foot-title">See also</div>` +
-            `<div class="doc-related-list">${rest.map(d => _relItemHtml(d, false)).join('')}</div>`;
-          preview.appendChild(foot);
-        }
-      })
-      .catch(() => {});
   }
 
   // ── Fork (Obsidian-like): `[[` wiki-link autocomplete ───────────────────

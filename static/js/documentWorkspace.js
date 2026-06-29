@@ -13,7 +13,7 @@
 // Opened from the Documents rail button and the /workspace deep link.
 // ============================================
 
-import documentModule from './document.js?v=474';
+import documentModule from './document.js?v=483';
 import sessionModule from './sessions.js';
 import uiModule from './ui.js';
 import { langIcon } from './langIcons.js';
@@ -279,7 +279,7 @@ async function _newDoc() {
 
 export function init(apiBase) { API_BASE = apiBase || ''; }
 
-export async function openWorkspace() {
+export async function openWorkspace(docId) {
   _buildShell();
   _shell.classList.remove('hidden');
   if (!_open) {
@@ -289,11 +289,17 @@ export async function openWorkspace() {
   }
   _relocateChat();
   await _loadList(_currentSearch());
-  // Desktop shows all three panes at once, so pre-open the most recent document
-  // (the centre isn't blank on entry). On mobile the user lands on the list and
-  // taps to open — keeping the list as the entry point for fast switching.
-  if (!_activeDocId && _docs.length && window.innerWidth > 768) _openDoc(_docs[0]);
-  else _highlightActive();
+  if (docId) {
+    // Explicit doc (e.g. opened from the Library) — open it in the centre.
+    _openDoc(_docs.find(d => d.id === docId) || { id: docId });
+  } else if (!_activeDocId && _docs.length && window.innerWidth > 768) {
+    // Desktop shows all three panes at once, so pre-open the most recent document
+    // (the centre isn't blank on entry). On mobile the user lands on the list and
+    // taps to open — keeping the list as the entry point for fast switching.
+    _openDoc(_docs[0]);
+  } else {
+    _highlightActive();
+  }
 }
 
 export function closeWorkspace() {

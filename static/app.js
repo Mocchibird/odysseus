@@ -14,8 +14,8 @@ import presetsModule from './js/presets.js';
 import searchModule from './js/search.js';
 import chatModule from './js/chat.js?v=474';
 import compareModule from './js/compare/index.js';
-import documentModule from './js/document.js?v=474';
-import documentWorkspaceModule from './js/documentWorkspace.js?v=482';
+import documentModule from './js/document.js?v=483';
+import documentWorkspaceModule from './js/documentWorkspace.js?v=483';
 import searchChatModule from './js/search-chat.js';
 import { makeWindowDraggable } from './js/windowDrag.js';
 import markdownModule from './js/markdown.js';
@@ -3125,7 +3125,7 @@ function initializeEventListeners() {
       if (await _createDirectChatFromPreferredModel()) return;
       // No models at all — show welcome screen
       sessionModule.setCurrentSessionId(null);
-      if (documentModule && documentModule.isPanelOpen && documentModule.isPanelOpen()) documentModule.closePanel();
+      // Keep any open document mounted — it re-attaches to the next chat session.
       const docBtn3 = el('overflow-doc-btn');
       if (docBtn3) docBtn3.classList.remove('active', 'has-docs');
       const box = el('chat-history');
@@ -3170,7 +3170,7 @@ function initializeEventListeners() {
       if (await _createDirectChatFromPreferredModel()) return;
       // No models at all — show welcome screen
       sessionModule.setCurrentSessionId(null);
-      if (documentModule && documentModule.isPanelOpen && documentModule.isPanelOpen()) documentModule.closePanel();
+      // Keep any open document mounted — it re-attaches to the next chat session.
       const docBtn2 = el('overflow-doc-btn');
       if (docBtn2) docBtn2.classList.remove('active', 'has-docs');
       const box = el('chat-history');

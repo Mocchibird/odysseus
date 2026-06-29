@@ -1891,17 +1891,22 @@ export async function createDirectChat(url, modelId, endpointId) {
     el.classList.remove('active-session', 'active');
   });
 
-  // Close document panel — new chat has no docs
-  if (window.documentModule && window.documentModule.isPanelOpen()) {
-    window.documentModule.closePanel();
+  // Keep an open document OPEN across a new chat — it auto-attaches to the
+  // fresh session via active_doc_id on the next send (chat_routes rebinds the
+  // doc's session_id server-side). Only reset the doc chrome when no doc is
+  // staying open, so the indicator doesn't go stale under a still-mounted editor.
+  const _docStaysOpen = window.documentModule
+    && window.documentModule.isPanelOpen()
+    && window.documentModule.getCurrentDocId();
+  if (!_docStaysOpen) {
+    const docBtn = document.getElementById('overflow-doc-btn');
+    if (docBtn) {
+      docBtn.classList.remove('active', 'has-docs');
+      docBtn.style.display = ''; // show in overflow menu again
+    }
+    const docInd = document.getElementById('doc-indicator-btn');
+    if (docInd) docInd.classList.remove('visible', 'active');
   }
-  const docBtn = document.getElementById('overflow-doc-btn');
-  if (docBtn) {
-    docBtn.classList.remove('active', 'has-docs');
-    docBtn.style.display = ''; // show in overflow menu again
-  }
-  const docInd = document.getElementById('doc-indicator-btn');
-  if (docInd) docInd.classList.remove('visible', 'active');
 
   // Clear chat area and show welcome
   const box = document.getElementById('chat-history');

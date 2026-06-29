@@ -1978,56 +1978,6 @@ body.gallery-selecting .gallery-card-menu-btn,
 .md-gallery-pending { opacity: 0.6; }
 .md-gallery-missing { border-style: dashed; color: color-mix(in srgb, var(--fg) 55%, transparent); }
 
-/* Related "See also": the 1–2 most relevant as a top strip, the rest as a
-   bottom list. Both are rebuilt inside .doc-md-preview on every render. */
-.doc-related-top {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  margin: 0 0 14px;
-  padding-bottom: 10px;
-  border-bottom: 1px solid var(--border);
-}
-.doc-related-label,
-.doc-related-foot-title {
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  opacity: 0.55;
-}
-.doc-related-foot { margin-top: 22px; padding-top: 12px; border-top: 1px solid var(--border); }
-.doc-related-foot-title { display: block; margin-bottom: 8px; }
-.doc-related-list { display: flex; flex-direction: column; gap: 4px; }
-.doc-related-item {
-  display: inline-flex;
-  flex-direction: column;
-  max-width: 100%;
-  text-decoration: none;
-  color: var(--fg);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 4px 9px;
-  background: var(--panel);
-}
-.doc-related-item:hover { border-color: var(--accent, var(--red)); }
-.doc-related-item-top { flex-direction: row; align-items: center; }
-.doc-related-item-title {
-  color: var(--accent, var(--red));
-  font-weight: 600;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.doc-related-item-snippet {
-  font-size: 0.85em;
-  opacity: 0.6;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  margin-top: 2px;
-}
-
 /* `[[` autocomplete dropdown — fixed, anchored at the caret. */
 .doc-wikilink-ac {
   position: fixed;

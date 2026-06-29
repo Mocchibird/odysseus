@@ -1196,7 +1196,12 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
 
   async function libraryOpenDocument(doc) {
     closeLibrary();
-    // Orphaned doc (session deleted) — just open in editor without switching session
+    // Library opens now land in the full-window Documents workspace.
+    if (window.documentWorkspaceModule) {
+      window.documentWorkspaceModule.openWorkspace(doc.id);
+      return;
+    }
+    // Fallback (workspace module unavailable): the legacy chat-docked editor.
     if (!doc.session_id) {
       _loadDocument(doc.id);
       return;
@@ -1208,20 +1213,20 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
     _loadDocument(doc.id);
   }
 
-  /** Open a document in its linked session */
+  /** Open a document in the workspace (was: its linked chat-docked session) */
   async function libraryOpenInSession(doc) {
-    if (!doc.session_id) return;
     closeLibrary();
-
-    // Step 1: switch session if needed and wait for it to load
+    if (window.documentWorkspaceModule) {
+      window.documentWorkspaceModule.openWorkspace(doc.id);
+      return;
+    }
+    // Fallback (workspace module unavailable): the legacy chat-docked editor.
+    if (!doc.session_id) return;
     const currentSessionId = sessionModule && sessionModule.getCurrentSessionId();
     if (doc.session_id !== currentSessionId) {
       await sessionModule.selectSession(doc.session_id);
-      // Give the session UI a moment to settle
       await new Promise(r => setTimeout(r, 150));
     }
-
-    // Step 2: ensure doc is in tabs
     const docs = _getDocs();
     if (!docs.has(doc.id)) {
       const res = await fetch(`${API_BASE}/api/document/${doc.id}`);
@@ -1230,10 +1235,7 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
         _addDocToTabs(full, doc.session_id);
       }
     }
-
-    // Step 3: open panel (slide-in is handled by openPanel)
     if (!_isOpenFn()) _openPanel();
-
     _switchToDoc(doc.id);
     _syncDocIndicator();
   }
