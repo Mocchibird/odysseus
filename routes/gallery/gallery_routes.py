@@ -1,6 +1,7 @@
 """Gallery routes — browsable library for photos and AI-generated images."""
 
 import os
+import asyncio
 import hashlib
 import logging
 import re
@@ -15,6 +16,8 @@ from core.database import Session as DbSession
 from src.auth_helpers import get_current_user, owner_filter, require_privilege
 from src.upload_limits import (
     read_upload_limited,
+    stream_upload_to_path,
+    stream_request_to_path,
     GALLERY_UPLOAD_MAX_BYTES,
     GALLERY_TRANSFORM_UPLOAD_MAX_BYTES,
 )
@@ -146,80 +149,143 @@ def setup_gallery_routes() -> APIRouter:
         import uuid
         from pathlib import Path
 
-        form = await request.form()
-        file = form.get("file")
-        if not file or not hasattr(file, 'filename'):
-            raise HTTPException(400, "No file provided")
-
         user = get_current_user(request)
-        album_id = form.get("album_id") or None
-        content = await read_upload_limited(file, GALLERY_UPLOAD_MAX_BYTES, "Gallery upload")
+        ctype = request.headers.get("content-type", "")
+        _file = None
+        if ctype.startswith("multipart/"):
+            # Normal-sized uploads: standard multipart form. Starlette keeps the
+            # part in a ~1 MiB in-memory spool (rolls to a temp file only past
+            # that), so memory stays bounded for typical photos.
+            form = await request.form()
+            _file = form.get("file")
+            if not _file or not hasattr(_file, 'filename'):
+                raise HTTPException(400, "No file provided")
+            orig_filename = _file.filename
+            album_id = form.get("album_id") or None
+        else:
+            # Large uploads (the GB-scale video lane): the client streams the raw
+            # file as the request body with metadata in the query string. We pipe
+            # request.stream() straight to disk (one write, no /tmp spool, flat
+            # memory) — letting form() buffer/spool a 10 GB body and then copying
+            # it again is double the disk I/O on a spinning NAS, and the temp
+            # spool can fill the container or eat RAM.
+            orig_filename = request.query_params.get("filename") or "upload"
+            album_id = request.query_params.get("album_id") or None
 
-        # Duplicate detection via SHA-256
-        file_hash = hashlib.sha256(content).hexdigest()
-        db = SessionLocal()
-        try:
-            if album_id and user is not None:
+        # Validate the extension BEFORE touching disk — cheap reject.
+        ext = orig_filename.rsplit(".", 1)[-1].lower() if "." in orig_filename else "png"
+        VIDEO_EXTS = {"mp4", "mov", "webm", "mkv", "m4v"}
+        IMAGE_EXTS = {"png", "jpg", "jpeg", "webp", "gif"}
+        if ext not in VIDEO_EXTS and ext not in IMAGE_EXTS:
+            raise HTTPException(400, f"Unsupported file type: .{ext}")
+        is_video = ext in VIDEO_EXTS
+
+        # Validate the target album in its OWN short session — the streaming
+        # copy below can take minutes for a multi-GB video, and holding a
+        # pooled DB connection across it would starve concurrent requests.
+        if album_id and user is not None:
+            db = SessionLocal()
+            try:
                 _get_or_404_album(db, album_id, user)
+            finally:
+                db.close()
 
-            # SECURITY: scope the dup-detect to THIS user — otherwise a
-            # caller can probe whether someone else uploaded the same
-            # file (the response leaks the existing row's id+filename).
-            _dup_q = db.query(GalleryImage).filter(
-                GalleryImage.file_hash == file_hash,
-                GalleryImage.is_active == True,
+        img_dir = Path(GENERATED_IMAGES_DIR)
+        img_dir.mkdir(parents=True, exist_ok=True)
+        filename = f"{uuid.uuid4().hex[:12]}.{ext}"
+        img_path = img_dir / filename
+        # Stream into a temp file in the SAME directory (same filesystem →
+        # os.replace below is atomic), hashing as we go. Flat ~1 MiB memory
+        # regardless of file size — the old whole-body buffer made multi-GB
+        # videos an OOM hazard on a shared box. The leading dot keeps the temp
+        # name from ever matching the served-filename pattern.
+        tmp_path = img_dir / f".upload-{uuid.uuid4().hex[:12]}.tmp"
+        if _file is not None:
+            file_hash, total_size = await stream_upload_to_path(
+                _file, tmp_path, GALLERY_UPLOAD_MAX_BYTES, "Gallery upload"
             )
-            if user:
-                _dup_q = _dup_q.filter(GalleryImage.owner == user)
-            existing = _dup_q.first()
-            if existing:
-                return {"ok": False, "duplicate": True, "filename": existing.filename,
-                        "id": existing.id, "message": "Duplicate photo skipped"}
+        else:
+            file_hash, total_size = await stream_request_to_path(
+                request, tmp_path, GALLERY_UPLOAD_MAX_BYTES, "Gallery upload"
+            )
 
-            img_dir = Path(GENERATED_IMAGES_DIR)
-            img_dir.mkdir(parents=True, exist_ok=True)
-
-            ext = file.filename.rsplit(".", 1)[-1].lower() if "." in file.filename else "png"
-            VIDEO_EXTS = {"mp4", "mov", "webm", "mkv", "m4v"}
-            IMAGE_EXTS = {"png", "jpg", "jpeg", "webp", "gif"}
-            if ext not in VIDEO_EXTS and ext not in IMAGE_EXTS:
-                raise HTTPException(400, f"Unsupported file type: .{ext}")
-            is_video = ext in VIDEO_EXTS
-            filename = f"{uuid.uuid4().hex[:12]}.{ext}"
-            img_path = img_dir / filename
-            img_path.write_bytes(content)
-
+        try:
             # Extract EXIF for images only — PIL can't parse video containers
-            # and the failure path logs a noisy WARNING. We'll add ffprobe-based
-            # video metadata extraction in a follow-up.
-            exif = {} if is_video else _extract_exif(content)
-            original_name = file.filename.rsplit(".", 1)[0] if "." in file.filename else file.filename
+            # and the failure path logs a noisy WARNING. Images are small
+            # enough to read back whole; videos (the multi-GB case) skip this.
+            exif = {} if is_video else await asyncio.to_thread(
+                lambda: _extract_exif(tmp_path.read_bytes())
+            )
+            original_name = orig_filename.rsplit(".", 1)[0] if "." in orig_filename else orig_filename
 
-            img_id = str(uuid.uuid4())
-            db.add(GalleryImage(
-                id=img_id,
-                filename=filename,
-                prompt=original_name,
-                model="imported",
-                owner=user,
-                file_hash=file_hash,
-                file_size=len(content),
-                width=exif.get("width"),
-                height=exif.get("height"),
-                taken_at=exif.get("taken_at"),
-                camera_make=exif.get("camera_make"),
-                camera_model=exif.get("camera_model"),
-                gps_lat=exif.get("gps_lat"),
-                gps_lng=exif.get("gps_lng"),
-                album_id=album_id,
-            ))
-            db.commit()
-            resp = {"ok": True, "filename": filename, "id": img_id}
-            if exif.get("exif_error"):
-                resp["exif_warning"] = exif["exif_error"]
-            return resp
+            db = SessionLocal()
+            try:
+                # SECURITY: scope the dup-detect to THIS user — otherwise a
+                # caller can probe whether someone else uploaded the same
+                # file (the response leaks the existing row's id+filename).
+                _dup_q = db.query(GalleryImage).filter(
+                    GalleryImage.file_hash == file_hash,
+                    GalleryImage.is_active == True,
+                )
+                if user:
+                    _dup_q = _dup_q.filter(GalleryImage.owner == user)
+                existing = _dup_q.first()
+                if existing:
+                    return {"ok": False, "duplicate": True, "filename": existing.filename,
+                            "id": existing.id, "message": "Duplicate photo skipped"}
+
+                # Make H.264 videos iOS-decodable (lossless remux: cap level to
+                # 5.2 + faststart) before publishing — phones reject Level 6.0 /
+                # moov-at-end with MediaError 4. Best-effort, off the event loop;
+                # on failure the original bytes publish unchanged.
+                if is_video:
+                    try:
+                        from src.video_normalize import normalize_in_place
+                        changed, _vinfo = await asyncio.to_thread(
+                            normalize_in_place, tmp_path, ext)
+                        if changed:
+                            total_size = tmp_path.stat().st_size
+                    except Exception as _ve:  # never let normalization break an upload
+                        logger.warning("Gallery video normalize skipped: %s", _ve)
+
+                # Atomic publish: the served filename appears only when the
+                # bytes are fully on disk.
+                await asyncio.to_thread(os.replace, tmp_path, img_path)
+
+                img_id = str(uuid.uuid4())
+                db.add(GalleryImage(
+                    id=img_id,
+                    filename=filename,
+                    prompt=original_name,
+                    model="imported",
+                    owner=user,
+                    media_type="video" if is_video else "image",
+                    file_hash=file_hash,
+                    file_size=total_size,
+                    width=exif.get("width"),
+                    height=exif.get("height"),
+                    taken_at=exif.get("taken_at"),
+                    camera_make=exif.get("camera_make"),
+                    camera_model=exif.get("camera_model"),
+                    gps_lat=exif.get("gps_lat"),
+                    gps_lng=exif.get("gps_lng"),
+                    album_id=album_id,
+                ))
+                db.commit()
+                resp = {"ok": True, "filename": filename, "id": img_id}
+                if exif.get("exif_error"):
+                    resp["exif_warning"] = exif["exif_error"]
+                return resp
+            finally:
+                db.close()
         finally:
-            db.close()
+            # Duplicate return or any failure: drop the temp (replace() above
+            # already moved it on the success path, so this is a no-op there).
+            try:
+                if tmp_path.exists():
+                    tmp_path.unlink()
+            except OSError:
+                pass
 
     # ---- POST /api/gallery/{id}/replace ----
     @router.post("/api/gallery/{image_id}/replace")
@@ -465,6 +531,8 @@ def setup_gallery_routes() -> APIRouter:
         tag: Optional[str] = Query(None),
         model: Optional[str] = Query(None),
         album: Optional[str] = Query(None),
+        media_type: Optional[str] = Query(None),
+        show_hidden: bool = Query(False),
         favorites: bool = Query(False),
         sort: str = Query("recent"),
         seed: Optional[int] = Query(None),
@@ -473,27 +541,54 @@ def setup_gallery_routes() -> APIRouter:
     ) -> Dict[str, Any]:
         user = get_current_user(request)
         db = SessionLocal()
-        try:
-            # Distinct tags for filter UI
-            tag_q = db.query(GalleryImage.tags).filter(
-                GalleryImage.is_active == True, GalleryImage.tags != None, GalleryImage.tags != ""
-            )
-            tag_q = _owner_filter(tag_q, user)
-            tag_rows = tag_q.all()
-            all_tags = set()
-            for (raw,) in tag_rows:
-                for t in raw.split(","):
-                    t = t.strip()
-                    if t:
-                        all_tags.add(t)
 
-            # Distinct models for filter UI
-            model_q = db.query(GalleryImage.model).filter(
-                GalleryImage.is_active == True, GalleryImage.model != None
-            )
-            model_q = _owner_filter(model_q, user)
-            model_rows = model_q.distinct().all()
-            all_models = sorted([m for (m,) in model_rows if m])
+        def _apply_media_filters(query):
+            """Shared media_type + hidden-by-default filtering, applied to the
+            main result query and to the tag/model facet queries so hidden
+            items never leak through any surface."""
+            if not show_hidden:
+                query = query.filter(
+                    (GalleryImage.hidden == False) | (GalleryImage.hidden == None)
+                )
+            if media_type == "video":
+                query = query.filter(GalleryImage.media_type == "video")
+            elif media_type == "image":
+                # NULL media_type predates the column → treat as image.
+                query = query.filter(
+                    (GalleryImage.media_type == "image") | (GalleryImage.media_type == None)
+                )
+            return query
+
+        try:
+            # Distinct tags + models for the filter UI. These scan the whole
+            # (media-filtered) library and don't change between pages of the
+            # same view, so only compute them on the first page; infinite-scroll
+            # requests (offset > 0) skip them and the client keeps the chips it
+            # already rendered. None signals "unchanged" to the client.
+            all_tags = None
+            all_models = None
+            if offset == 0:
+                tag_q = db.query(GalleryImage.tags).filter(
+                    GalleryImage.is_active == True, GalleryImage.tags != None, GalleryImage.tags != ""
+                )
+                tag_q = _owner_filter(tag_q, user)
+                tag_q = _apply_media_filters(tag_q)
+                tag_rows = tag_q.all()
+                all_tags = set()
+                for (raw,) in tag_rows:
+                    for t in raw.split(","):
+                        t = t.strip()
+                        if t:
+                            all_tags.add(t)
+
+                # Distinct models for filter UI
+                model_q = db.query(GalleryImage.model).filter(
+                    GalleryImage.is_active == True, GalleryImage.model != None
+                )
+                model_q = _owner_filter(model_q, user)
+                model_q = _apply_media_filters(model_q)
+                model_rows = model_q.distinct().all()
+                all_models = sorted([m for (m,) in model_rows if m])
 
             # Base query with left join to sessions for session_name
             q = (
@@ -502,6 +597,7 @@ def setup_gallery_routes() -> APIRouter:
                 .filter(GalleryImage.is_active == True)
             )
             q = _owner_filter(q, user)
+            q = _apply_media_filters(q)
 
             # Search filter (prompt + tags + ai_tags)
             if search:
@@ -539,13 +635,22 @@ def setup_gallery_routes() -> APIRouter:
             if favorites:
                 q = q.filter(GalleryImage.favorite == True)
 
-            # Total before pagination
-            total = q.count()
+            # Total before pagination — the client gates "Load More" on this.
+            # Like the facets/total_tagged below, it's a first-page-only stat:
+            # on scroll pages (offset > 0) we skip the COUNT(*) and the client
+            # keeps the value it already has (None = unchanged).
+            total = None
+            if offset == 0:
+                total = q.count()
             # How many of those have AI tags — surfaced as "X/Y photos tagged"
-            # in the AI-tagging settings header.
-            total_tagged = q.filter(
-                GalleryImage.ai_tags.isnot(None), GalleryImage.ai_tags != ""
-            ).count()
+            # in the AI-tagging settings header. Like the facets, this is a
+            # first-page-only stat; on scroll pages we skip the extra count and
+            # the client keeps the value it already has (None = unchanged).
+            total_tagged = None
+            if offset == 0:
+                total_tagged = q.filter(
+                    GalleryImage.ai_tags.isnot(None), GalleryImage.ai_tags != ""
+                ).count()
 
             # Sorting
             if sort == "shuffle":
@@ -572,10 +677,17 @@ def setup_gallery_routes() -> APIRouter:
                 else:
                     rows = []
             else:
+                # Tiebreak on id so the order is STABLE across pages/refreshes.
+                # created_at alone is non-unique (e.g. several chat-uploaded
+                # photos share a timestamp); without a tiebreaker, offset/limit
+                # pagination reorders on every query — rows duplicate or get
+                # skipped between pages, so a freshly-tagged photo can drop out
+                # of the loaded set and look untagged. (shuffle is already stable
+                # — it pages a seeded id list.)
                 if sort == "oldest":
-                    q = q.order_by(GalleryImage.created_at.asc())
+                    q = q.order_by(GalleryImage.created_at.asc(), GalleryImage.id.asc())
                 else:  # recent
-                    q = q.order_by(GalleryImage.created_at.desc())
+                    q = q.order_by(GalleryImage.created_at.desc(), GalleryImage.id.desc())
                 rows = q.offset(offset).limit(limit).all()
 
             items = []
@@ -586,7 +698,8 @@ def setup_gallery_routes() -> APIRouter:
                 "items": items,
                 "total": total,
                 "total_tagged": total_tagged,
-                "tags": sorted(all_tags),
+                # tags/models are None on scroll pages (offset > 0) — see above.
+                "tags": sorted(all_tags) if all_tags is not None else None,
                 "models": all_models,
             }
         except Exception as e:
@@ -794,6 +907,8 @@ def setup_gallery_routes() -> APIRouter:
                 img.tags = ', '.join(cleaned)
             if req.favorite is not None:
                 img.favorite = req.favorite
+            if req.hidden is not None:
+                img.hidden = req.hidden
             if req.album_id is not None:
                 if req.album_id:
                     # Validate the target album belongs to the caller before
@@ -1782,6 +1897,8 @@ def setup_gallery_routes() -> APIRouter:
                 if cover_id:
                     _get_or_404_image(db, cover_id, user)
                 album.cover_id = cover_id
+            if data.get("hidden") is not None:
+                album.hidden = bool(data["hidden"])
             db.commit()
             return {"ok": True}
         finally:

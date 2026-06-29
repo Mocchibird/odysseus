@@ -89,7 +89,7 @@ def test_stream_request_over_limit_413_and_cleanup(tmp_path):
 
 def test_gallery_upload_has_raw_stream_path():
     # Large uploads bypass form() and stream the raw body to disk.
-    src = (REPO / "routes" / "gallery_routes.py").read_text(encoding="utf-8")
+    src = (REPO / "routes" / "gallery" / "gallery_routes.py").read_text(encoding="utf-8")
     start = src.index("async def gallery_upload")
     end = src.index("@router.post", start + 1)
     body = src[start:end]
@@ -98,7 +98,7 @@ def test_gallery_upload_has_raw_stream_path():
 
 
 def test_gallery_upload_streams_instead_of_buffering():
-    src = (REPO / "routes" / "gallery_routes.py").read_text(encoding="utf-8")
+    src = (REPO / "routes" / "gallery" / "gallery_routes.py").read_text(encoding="utf-8")
     start = src.index("async def gallery_upload")
     end = src.index("@router.post", start + 1)
     body = src[start:end]
