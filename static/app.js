@@ -15,7 +15,7 @@ import searchModule from './js/search.js';
 import chatModule from './js/chat.js?v=474';
 import compareModule from './js/compare/index.js';
 import documentModule from './js/document.js?v=484';
-import documentWorkspaceModule from './js/documentWorkspace.js?v=483';
+import documentWorkspaceModule from './js/documentWorkspace.js?v=485';
 import searchChatModule from './js/search-chat.js';
 import { makeWindowDraggable } from './js/windowDrag.js';
 import markdownModule from './js/markdown.js';
@@ -145,6 +145,10 @@ async function _createDirectChatFromPreferredModel() {
 
   return false;
 }
+// Expose the preferred-model new-chat starter so the Documents workspace can
+// begin a FRESH chat (with the configured default model) when a doc is opened
+// into a closed view — the doc then binds to it via active_doc_id.
+try { window.__odysseusStartDefaultChat = _createDirectChatFromPreferredModel; } catch (_) {}
 
 // ============================================
 // EVENT LISTENERS INITIALIZATION

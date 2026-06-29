@@ -2238,6 +2238,11 @@ body.doc-workspace-open #icon-rail { display: none; }
   display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
 }
 #doc-workspace .dw-empty { padding: 24px 12px; text-align: center; opacity: 0.5; font-size: 12px; }
+/* Active (open) document row in the tag-folder tree. */
+#doc-workspace .dw-list .notes-vault-file.active {
+  border-color: var(--accent-primary, var(--red));
+  background: color-mix(in srgb, var(--accent-primary, var(--red)) 12%, var(--panel));
+}
 /* Zero the search input's baked-in margin-top:6px so it sits centred in the head. */
 #doc-workspace .dw-left-head .memory-search-input { margin-top: 0; }
 #doc-workspace .dw-back { flex: 0 0 auto; }

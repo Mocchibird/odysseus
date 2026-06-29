@@ -539,6 +539,32 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
         finally:
             db.close()
 
+    # ---- GET /api/documents/trash ----
+    # MUST be registered before /api/documents/{session_id} below, else "trash"
+    # is matched as a session id ("Session not found").
+    @router.get("/api/documents/trash")
+    async def documents_trash(request: Request) -> Dict[str, Any]:
+        """Soft-deleted (trashed) documents for the Trash view — owner-scoped."""
+        user = get_current_user(request)
+        db = SessionLocal()
+        try:
+            q = db.query(Document).filter(Document.is_active == False)
+            if user:
+                q = q.filter(or_(Document.owner == user, Document.owner.is_(None)))
+            rows = q.order_by(Document.updated_at.desc()).limit(200).all()
+            documents = [{
+                "id": r.id,
+                "title": r.title or "Untitled",
+                "preview": (r.current_content or "")[:200],
+                "language": r.language or "markdown",
+                "tags": _parse_tags(r.tags),
+                "updated_at": (r.updated_at.isoformat() + "Z") if r.updated_at else None,
+                "session_id": r.session_id,
+            } for r in rows]
+            return {"documents": documents, "total": len(documents)}
+        finally:
+            db.close()
+
     # ---- GET /api/documents/{session_id} ----
     @router.get("/api/documents/{session_id}")
     async def list_documents(request: Request, session_id: str) -> List[Dict[str, Any]]:
@@ -594,6 +620,27 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
             else:
                 _index_document_rag(doc.owner or user, doc)   # un-archived → re-index
             return {"ok": True, "id": doc_id, "archived": doc.archived}
+        finally:
+            db.close()
+
+    # ---- POST /api/document/{doc_id}/restore ----
+    @router.post("/api/document/{doc_id}/restore")
+    async def restore_document(request: Request, doc_id: str) -> Dict[str, Any]:
+        """Undo a soft-delete — bring a trashed document back (is_active=True)."""
+        user = get_current_user(request)
+        db = SessionLocal()
+        try:
+            doc = db.query(Document).filter(Document.id == doc_id).first()
+            if not doc:
+                raise HTTPException(404, "Document not found")
+            _verify_doc_owner(db, doc, user)
+            doc.is_active = True
+            db.commit()
+            try:
+                _index_document_rag(doc.owner or user, doc)   # back into recall
+            except Exception:
+                pass
+            return {"ok": True, "id": doc_id}
         finally:
             db.close()
 

@@ -133,62 +133,196 @@ function _relTime(iso) {
   return new Date(t).toLocaleDateString();
 }
 
-function _createRow(doc) {
+// Folder/tree icons (reuse the .notes-vault-* vocabulary, StandardNotes-style).
+const _FOLDER_SVG = _icon('<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>', 14);
+const _CHEVRON_SVG = _icon('<polyline points="9 6 15 12 9 18"/>', 13);
+const _TRASH_SVG = _icon('<polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>', 14);
+const _RESTORE_SVG = _icon('<path d="M3 7v6h6"/><path d="M3 13a9 9 0 1 0 3-7.7L3 8"/>', 14);
+const _GEN_DOC_16 = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>';
+
+let _expanded = _loadExpanded();   // Set of open folder keys (persisted)
+let _trashDocs = null;             // lazy-loaded soft-deleted docs
+
+function _loadExpanded() {
+  try { return new Set(JSON.parse(localStorage.getItem('odysseus-dw-expanded') || '[]')); }
+  catch (_) { return new Set(); }
+}
+function _persistExpanded() {
+  try { localStorage.setItem('odysseus-dw-expanded', JSON.stringify([..._expanded])); } catch (_) {}
+}
+function _toggleFolder(key) {
+  if (_expanded.has(key)) _expanded.delete(key); else _expanded.add(key);
+  _persistExpanded();
+  _renderList();
+}
+
+// Build a nested tag tree by splitting each tag on "/" (StandardNotes nesting).
+function _buildTagTree(docs) {
+  const root = { children: new Map(), docs: [], _ids: new Set() };
+  const untagged = [];
+  for (const doc of docs) {
+    const tags = (Array.isArray(doc.tags) ? doc.tags : []).filter(t => (t || '').trim());
+    if (!tags.length) { untagged.push(doc); continue; }
+    for (const tag of tags) {
+      const segs = tag.split('/').map(s => s.trim()).filter(Boolean);
+      if (!segs.length) continue;
+      let node = root, path = '';
+      for (const seg of segs) {
+        path = path ? path + '/' + seg : seg;
+        if (!node.children.has(seg)) node.children.set(seg, { name: seg, fullPath: path, children: new Map(), docs: [], _ids: new Set() });
+        node = node.children.get(seg);
+      }
+      if (!node._ids.has(doc.id)) { node._ids.add(doc.id); node.docs.push(doc); }
+    }
+  }
+  return { root, untagged };
+}
+function _countNode(node) {
+  let c = node.docs.length;
+  for (const ch of node.children.values()) c += _countNode(ch);
+  node.count = c;
+  return c;
+}
+
+function _emptyEl(text) {
+  const e = document.createElement('div');
+  e.className = 'dw-empty';
+  e.textContent = text;
+  return e;
+}
+
+function _folderRow(name, key, count, depth, icon) {
+  const f = document.createElement('div');
+  f.className = 'notes-vault-folder dw-folder' + (_expanded.has(key) ? ' open' : '');
+  f.style.setProperty('--vault-indent', (depth * 14) + 'px');
+  f.setAttribute('role', 'button');
+  f.tabIndex = 0;
+  f.innerHTML = `<span class="notes-vault-folder-chevron">${_CHEVRON_SVG}</span>`
+    + `<span class="notes-vault-folder-icon">${icon || _FOLDER_SVG}</span>`
+    + `<span class="notes-vault-folder-name">${uiModule.esc(name)}</span>`
+    + `<span class="notes-vault-folder-count">${count}</span>`;
+  return f;
+}
+
+function _fileRow(doc, depth, opts = {}) {
   const row = document.createElement('div');
-  row.className = 'doclib-card memory-item dw-row';
+  row.className = 'notes-vault-file dw-file';
   row.dataset.docId = doc.id;
   row.setAttribute('role', 'button');
   row.tabIndex = 0;
-  if (doc.id === _activeDocId) row.classList.add('active');
-
-  const content = document.createElement('div');
-  content.className = 'dw-row-content';
-
-  const titleEl = document.createElement('div');
-  titleEl.className = 'memory-item-title';
-  const langSvg = (doc.language && doc.language !== 'text')
-    ? langIcon(doc.language, 12, { style: 'vertical-align:-2px;margin-right:4px;opacity:0.55;flex-shrink:0;color:currentColor;' })
-    : _GEN_DOC_ICON;
-  titleEl.innerHTML = langSvg + uiModule.esc(doc.title || 'Untitled');
-  content.appendChild(titleEl);
-
-  const meta = document.createElement('div');
-  meta.className = 'memory-item-meta';
-  const pieces = [];
-  if (doc.session_name) pieces.push(`<span>${uiModule.esc(doc.session_name)}</span>`);
-  if (doc.language && doc.language !== 'text') pieces.push(`<span>${uiModule.esc(doc.language)}</span>`);
+  if (depth) row.style.setProperty('--vault-indent', (depth * 14) + 'px');
+  if (doc.id === _activeDocId && !opts.trash) row.classList.add('active');
+  const lang = (doc.language || '').toLowerCase();
+  const langSvg = (lang && lang !== 'text' && lang !== 'markdown')
+    ? langIcon(lang, 16, { style: 'color:currentColor;' })
+    : _GEN_DOC_16;
   const rel = _relTime(doc.updated_at);
-  if (rel) pieces.push(`<span>${uiModule.esc(rel)}</span>`);
-  meta.innerHTML = pieces.join('<span style="opacity:0.5;">·</span>');
-  content.appendChild(meta);
-
-  row.appendChild(content);
-  row.addEventListener('click', () => _openDoc(doc));
-  row.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); _openDoc(doc); }
-  });
+  const preview = (doc.preview || '').replace(/[#>*`_~\[\]]/g, ' ').replace(/\s+/g, ' ').trim();
+  row.innerHTML =
+    `<span class="notes-vault-file-icon">${langSvg}</span>`
+    + `<span class="notes-vault-file-main">`
+      + `<span class="notes-vault-file-title">${uiModule.esc(doc.title || 'Untitled')}</span>`
+      + (preview ? `<span class="notes-vault-file-excerpt">${uiModule.esc(preview)}</span>` : '')
+    + `</span>`
+    + `<span class="notes-vault-file-meta">${uiModule.esc(rel)}</span>`
+    + (opts.trash ? `<button type="button" class="notes-vault-file-actions dw-restore" title="Restore" aria-label="Restore">${_RESTORE_SVG}</button>` : '<span></span>');
+  if (opts.trash) {
+    row.querySelector('.dw-restore').addEventListener('click', (e) => { e.stopPropagation(); _restoreDoc(doc.id); });
+  } else {
+    row.addEventListener('click', () => _openDoc(doc));
+    row.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); _openDoc(doc); } });
+  }
   return row;
+}
+
+function _renderNode(parent, node, depth) {
+  const key = 't:' + node.fullPath;
+  const folder = _folderRow(node.name, key, node.count, depth);
+  folder.addEventListener('click', () => _toggleFolder(key));
+  folder.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); _toggleFolder(key); } });
+  parent.appendChild(folder);
+  if (!_expanded.has(key)) return;
+  for (const ch of [...node.children.values()].sort((a, b) => a.name.localeCompare(b.name))) _renderNode(parent, ch, depth + 1);
+  for (const doc of node.docs) parent.appendChild(_fileRow(doc, depth + 1));
 }
 
 function _renderList() {
   const list = _shell && _shell.querySelector('#dw-list');
   if (!list) return;
   list.innerHTML = '';
-  if (!_docs.length) {
-    const empty = document.createElement('div');
-    empty.className = 'dw-empty';
-    empty.textContent = _currentSearch() ? 'No documents match.' : 'No documents yet.';
-    list.appendChild(empty);
+  list.className = 'dw-list notes-vault-list notes-vault-tree';
+  const q = _currentSearch();
+
+  // While searching, show a flat list of matches (folders only get in the way).
+  if (q) {
+    if (!_docs.length) { list.appendChild(_emptyEl('No documents match.')); return; }
+    const frag = document.createDocumentFragment();
+    for (const doc of _docs) frag.appendChild(_fileRow(doc, 0));
+    list.appendChild(frag);
     return;
   }
+
   const frag = document.createDocumentFragment();
-  for (const doc of _docs) frag.appendChild(_createRow(doc));
+  const { root, untagged } = _buildTagTree(_docs);
+  for (const ch of root.children.values()) _countNode(ch);
+  if (!_docs.length) frag.appendChild(_emptyEl('No documents yet.'));
+  for (const node of [...root.children.values()].sort((a, b) => a.name.localeCompare(b.name))) _renderNode(frag, node, 0);
+
+  // Untagged group (after the tag folders)
+  if (untagged.length) {
+    const key = 'untagged';
+    const f = _folderRow('Untagged', key, untagged.length, 0);
+    f.addEventListener('click', () => _toggleFolder(key));
+    frag.appendChild(f);
+    if (_expanded.has(key)) for (const doc of untagged) frag.appendChild(_fileRow(doc, 1));
+  }
+
+  // Trash group (lazy-loaded soft-deleted docs, with per-row Restore)
+  const tkey = 'trash';
+  const tf = _folderRow('Trash', tkey, _trashDocs ? _trashDocs.length : '·', 0, _TRASH_SVG);
+  tf.addEventListener('click', () => _toggleTrash());
+  frag.appendChild(tf);
+  if (_expanded.has(tkey)) {
+    if (_trashDocs === null) frag.appendChild(_emptyEl('Loading…'));
+    else if (!_trashDocs.length) frag.appendChild(_emptyEl('Trash is empty.'));
+    else for (const doc of _trashDocs) frag.appendChild(_fileRow(doc, 1, { trash: true }));
+  }
+
   list.appendChild(frag);
+}
+
+function _toggleTrash() {
+  const opening = !_expanded.has('trash');
+  if (opening) _expanded.add('trash'); else _expanded.delete('trash');
+  _persistExpanded();
+  _renderList();
+  if (opening && _trashDocs === null) _loadTrash().then(() => _renderList());
+}
+
+async function _loadTrash() {
+  try {
+    const res = await fetch(`${API_BASE}/api/documents/trash`, { credentials: 'same-origin' });
+    _trashDocs = res.ok ? ((await res.json()).documents || []) : [];
+  } catch (_) { _trashDocs = []; }
+}
+
+async function _restoreDoc(id) {
+  try {
+    const res = await fetch(`${API_BASE}/api/document/${id}/restore`, { method: 'POST', credentials: 'same-origin' });
+    if (!res.ok) throw new Error(res.statusText);
+    if (uiModule) uiModule.showToast('Document restored');
+    _trashDocs = null;                  // force a fresh trash list
+    if (_expanded.has('trash')) await _loadTrash();
+    await _loadList(_currentSearch());  // the restored doc reappears in the tree
+  } catch (e) {
+    console.error('Workspace: restore failed', e);
+    if (uiModule) uiModule.showError('Restore failed');
+  }
 }
 
 function _highlightActive() {
   if (!_shell) return;
-  _shell.querySelectorAll('.dw-row').forEach(r => {
+  _shell.querySelectorAll('.dw-file').forEach(r => {
     r.classList.toggle('active', r.dataset.docId === _activeDocId);
   });
 }
@@ -245,12 +379,9 @@ async function _openDoc(doc) {
     // editor textarea — idempotent, gated to markdown docs internally.
     const ta = document.getElementById('doc-editor-textarea');
     if (ta) attachMdShortcuts(ta);
-    // Repaint the side chat to this document's own conversation when it has
-    // one. The doc-scoped agent still works either way (active_doc_id is sent
-    // whenever the editor is open), so a doc without a session is fine.
-    if (doc.session_id && sessionModule.getCurrentSessionId() !== doc.session_id) {
-      try { sessionModule.selectSession(doc.session_id); } catch (_) {}
-    }
+    // The open document binds to whatever chat is current via active_doc_id
+    // (a fresh one if the workspace was just opened — see openWorkspace), so we
+    // deliberately DON'T switch the side chat to the doc's old session here.
   } catch (e) {
     console.error('Workspace: failed to open document', e);
   }
@@ -280,6 +411,7 @@ async function _newDoc() {
 export function init(apiBase) { API_BASE = apiBase || ''; }
 
 export async function openWorkspace(docId) {
+  const wasClosed = !_open;
   _buildShell();
   _shell.classList.remove('hidden');
   if (!_open) {
@@ -287,6 +419,11 @@ export async function openWorkspace(docId) {
     document.body.classList.add('doc-workspace-open');
     _setMobilePane('left');
   }
+  // Opening the workspace from a closed state starts a FRESH chat (with the
+  // configured default model). The document opened below then binds to it via
+  // active_doc_id — so each time you enter the workspace you get a clean
+  // assistant for the doc, instead of the doc's stale prior conversation.
+  if (wasClosed) { try { await window.__odysseusStartDefaultChat?.(); } catch (_) {} }
   _relocateChat();
   await _loadList(_currentSearch());
   if (docId) {
