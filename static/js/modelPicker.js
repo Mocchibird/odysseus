@@ -79,16 +79,24 @@ let _deps = null;
 let _autoSelectingDefault = false;
 let _defaultChatPickInFlight = false;
 
-function _modelExists(modelId, url) {
+function _modelExists(modelId, url, endpointId) {
   if (!modelId || !window.modelsModule || !window.modelsModule.getCachedItems) return false;
   const items = window.modelsModule.getCachedItems() || [];
   if (!items.length) return true;
-  const targetUrl = (url || '').replace(/\/+$/, '');
+  // Normalize so the /chat/completions URL that /api/default-chat returns still
+  // matches a cached endpoint's base URL. Without this, a configured default
+  // (or fallback) model was wrongly rejected and the picker showed "Select
+  // model" even though the model is available — the URL forms simply differed.
+  const norm = (u) => (u || '').replace(/\/+$/, '').replace(/\/(v\d+\/)?chat\/completions$/i, '').replace(/\/+$/, '');
+  const targetUrl = norm(url);
   return items.some(item => {
     if (item.offline) return false;
-    const itemUrl = (item.url || '').replace(/\/+$/, '');
     const models = (item.models || []).concat(item.models_extra || []);
-    return models.includes(modelId) && (!targetUrl || itemUrl === targetUrl);
+    if (!models.includes(modelId)) return false;
+    // Prefer an explicit endpoint-id match (robust); else a normalized-URL match.
+    const idMatch = endpointId && item.endpoint_id && item.endpoint_id === endpointId;
+    const urlMatch = !targetUrl || norm(item.url || '') === targetUrl;
+    return idMatch || urlMatch;
   });
 }
 
@@ -712,12 +720,12 @@ export function updateModelPicker() {
   let modelId = null;
   if (s && s.model) {
     modelId = s.model;
-    if (!_modelExists(modelId, s.endpoint_url || '')) {
+    if (!_modelExists(modelId, s.endpoint_url || '', s.endpoint_id)) {
       modelId = null;
     }
   } else if (_pendingChat && _pendingChat.modelId) {
     modelId = _pendingChat.modelId;
-    if (!_modelExists(modelId, _pendingChat.url || '')) {
+    if (!_modelExists(modelId, _pendingChat.url || '', _pendingChat.endpointId)) {
       _deps.setPendingChat(null);
       modelId = null;
     }
