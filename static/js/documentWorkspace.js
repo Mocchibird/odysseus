@@ -13,7 +13,7 @@
 // Opened from the Documents rail button and the /workspace deep link.
 // ============================================
 
-import documentModule from './document.js?v=484';
+import documentModule from './document.js?v=505';
 import sessionModule from './sessions.js';
 import uiModule from './ui.js';
 import { langIcon } from './langIcons.js';
@@ -31,6 +31,7 @@ let _refreshTimer = null;       // debounce for documents-refresh re-fetch
 let _listReqSeq = 0;            // guards against out-of-order list fetches
 let _knownTags = new Set();     // user-created tag paths (incl. empty folders), persisted via /api/prefs
 let _tagMenuEl = null;          // body-appended folder-actions menu (swept on every re-render)
+let _fileMenuEl = null;         // body-appended per-file "…" actions menu (swept on every re-render)
 let _tagInputMode = null;       // { action: 'create'|'subtag'|'rename', path } for the New-tag bar
 
 // ---- icons ----------------------------------------------------------------
@@ -156,6 +157,7 @@ function _relTime(iso) {
 // Folder/tree icons (reuse the .notes-vault-* vocabulary, StandardNotes-style).
 const _FOLDER_SVG = _icon('<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>', 14);
 const _CHEVRON_SVG = _icon('<polyline points="9 6 15 12 9 18"/>', 13);
+const _DOTS_SVG = _icon('<circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/>', 14);
 const _TRASH_SVG = _icon('<polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>', 14);
 const _RESTORE_SVG = _icon('<path d="M3 7v6h6"/><path d="M3 13a9 9 0 1 0 3-7.7L3 8"/>', 14);
 const _GEN_DOC_16 = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>';
@@ -254,12 +256,16 @@ function _fileRow(doc, depth, opts = {}) {
       + (preview ? `<span class="notes-vault-file-excerpt">${uiModule.esc(preview)}</span>` : '')
     + `</span>`
     + `<span class="notes-vault-file-meta">${uiModule.esc(rel)}</span>`
-    + (opts.trash ? `<button type="button" class="notes-vault-file-actions dw-restore" title="Restore" aria-label="Restore">${_RESTORE_SVG}</button>` : '<span></span>');
+    + (opts.trash
+        ? `<button type="button" class="notes-vault-file-actions dw-restore" title="Restore" aria-label="Restore">${_RESTORE_SVG}</button>`
+        : `<button type="button" class="notes-vault-file-actions dw-file-actions" title="Actions" aria-label="Document actions">${_DOTS_SVG}</button>`);
   if (opts.trash) {
     row.querySelector('.dw-restore').addEventListener('click', (e) => { e.stopPropagation(); _restoreDoc(doc.id); });
   } else {
-    row.addEventListener('click', () => _openDoc(doc));
+    // The row opens the doc; the … button + its menu must not bubble into that.
+    row.addEventListener('click', (e) => { if (e.target.closest('.dw-file-actions')) return; _openDoc(doc); });
     row.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); _openDoc(doc); } });
+    row.querySelector('.dw-file-actions').addEventListener('click', (e) => { e.stopPropagation(); _showFileMenu(e.currentTarget, doc); });
     // Drag a note onto a tag folder (or "Untagged") to (re)assign its tags.
     row.draggable = true;
     row.addEventListener('dragstart', (e) => {
@@ -296,6 +302,7 @@ function _renderList() {
   const list = _shell && _shell.querySelector('#dw-list');
   if (!list) return;
   _closeFolderMenu();   // a body-appended folder menu can't outlive the rows it anchors to
+  _closeFileMenu();     // ditto for the per-file "…" menu
   list.innerHTML = '';
   list.className = 'dw-list notes-vault-list notes-vault-tree';
   const q = _currentSearch();
@@ -477,6 +484,129 @@ function _showFolderMenu(anchor, node) {
     else if (act === 'rename') _beginTagInput('rename', node.fullPath);
     else if (act === 'delete') _deleteTag(node);
   }));
+}
+
+// ---- per-file "…" actions menu (Open / Rename / Edit tags / Duplicate / Delete) ----
+
+function _closeFileMenu() {
+  if (!_fileMenuEl) return;
+  try { dismissOrRemove(_fileMenuEl); } catch (_) { try { _fileMenuEl.remove(); } catch (__) {} }
+  _fileMenuEl = null;
+}
+
+function _showFileMenu(anchor, doc) {
+  _closeFileMenu();
+  const menu = document.createElement('div');
+  menu.className = 'dw-folder-menu dw-file-menu';   // reuse the folder-menu styling
+  menu.innerHTML =
+    '<button type="button" data-act="open">Open</button>'
+    + '<button type="button" data-act="rename">Rename</button>'
+    + '<button type="button" data-act="tags">Edit tags</button>'
+    + '<button type="button" data-act="duplicate">Duplicate</button>'
+    + '<button type="button" data-act="delete" class="dw-folder-menu-del">Delete</button>';
+  document.body.appendChild(menu);
+  const r = anchor.getBoundingClientRect();
+  menu.style.position = 'fixed';
+  menu.style.top = `${Math.round(r.bottom + 4)}px`;
+  menu.style.left = `${Math.round(Math.min(r.left, window.innerWidth - 168))}px`;
+  menu.style.zIndex = String(topPopupZ());
+  const close = bindMenuDismiss(menu, () => { try { menu.remove(); } catch (_) {} if (_fileMenuEl === menu) _fileMenuEl = null; });
+  _fileMenuEl = menu;
+  menu.querySelectorAll('button').forEach(b => b.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const act = b.dataset.act;
+    close();
+    if (act === 'open') _openDoc(doc);
+    else if (act === 'rename') _renameDoc(doc);
+    else if (act === 'tags') _editDocTags(doc);
+    else if (act === 'duplicate') _duplicateDoc(doc);
+    else if (act === 'delete') _deleteDoc(doc);
+  }));
+}
+
+async function _renameDoc(doc) {
+  const next = await uiModule.styledPrompt('Rename this document.', {
+    title: 'Rename', defaultValue: doc.title || '', placeholder: 'Document title', confirmText: 'Rename', maxLength: 200,
+  });
+  if (next === null) return;
+  const title = next.trim();
+  if (!title || title === doc.title) return;
+  try {
+    // updateTitle PATCHes the title AND updates the editor's open tab if this doc
+    // is currently open there (single source of truth) — see document.js.
+    await documentModule.updateTitle(doc.id, title);
+    doc.title = title;
+    if (uiModule) uiModule.showToast('Renamed');
+    _renderList();
+  } catch (e) {
+    console.error('Workspace: rename failed', e);
+    if (uiModule) uiModule.showError('Rename failed');
+  }
+}
+
+async function _editDocTags(doc) {
+  const cur = Array.isArray(doc.tags) ? doc.tags.join(', ') : '';
+  const next = await uiModule.styledPrompt('Comma-separated tags (use "/" to nest, e.g. Tech/Kernel).', {
+    title: 'Edit tags', defaultValue: cur, placeholder: 'tag1, tag2', confirmText: 'Save', maxLength: 500,
+  });
+  if (next === null) return;
+  const tags = next.split(',').map(t => t.trim()).filter(Boolean);
+  try {
+    await _postTags(doc, tags);
+    if (uiModule) uiModule.showToast(tags.length ? `Tagged: ${tags.join(', ')}` : 'Tags cleared');
+    _renderList();
+  } catch (e) {
+    console.error('Workspace: edit tags failed', e);
+    if (uiModule) uiModule.showError('Failed to set tags');
+  }
+}
+
+// No server clone endpoint — duplicate = GET the source, POST a fresh doc, then
+// copy its tags, then refresh the list.
+async function _duplicateDoc(doc) {
+  try {
+    const res = await fetch(`${API_BASE}/api/document/${doc.id}`, { credentials: 'same-origin' });
+    if (!res.ok) throw new Error(res.statusText);
+    const src = await res.json();
+    const body = {
+      title: `${src.title || doc.title || 'Untitled'} (copy)`,
+      language: src.language || doc.language || undefined,
+      content: src.current_content != null ? src.current_content : (src.content || ''),
+    };
+    const cr = await fetch(`${API_BASE}/api/document`, {
+      method: 'POST', credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!cr.ok) throw new Error(cr.statusText);
+    const made = await cr.json();
+    const tags = Array.isArray(doc.tags) ? doc.tags : [];
+    if (made.id && tags.length) {
+      await fetch(`${API_BASE}/api/document/${made.id}/tags?tags=${encodeURIComponent(tags.join(','))}`, { method: 'POST', credentials: 'same-origin' });
+    }
+    if (uiModule) uiModule.showToast('Duplicated');
+    await _loadList(_currentSearch());
+  } catch (e) {
+    console.error('Workspace: duplicate failed', e);
+    if (uiModule) uiModule.showError('Duplicate failed');
+  }
+}
+
+// Soft-delete (recoverable from the Trash folder) — mirrors the per-row restore flow.
+async function _deleteDoc(doc) {
+  const ok = await uiModule.styledConfirm(`Delete “${doc.title || 'Untitled'}”? It moves to Trash and can be restored.`, { confirmText: 'Delete', danger: true });
+  if (!ok) return;
+  try {
+    const res = await fetch(`${API_BASE}/api/document/${doc.id}`, { method: 'DELETE', credentials: 'same-origin' });
+    if (!res.ok) throw new Error(res.statusText);
+    if (uiModule) uiModule.showToast('Moved to Trash');
+    _trashDocs = null;                                   // invalidate the trash cache
+    if (_expanded.has('trash')) await _loadTrash();
+    await _loadList(_currentSearch());
+  } catch (e) {
+    console.error('Workspace: delete failed', e);
+    if (uiModule) uiModule.showError('Delete failed');
+  }
 }
 
 // ---- New-tag bar (create / add-subtag / rename share one inline input) ----
@@ -702,6 +832,7 @@ export function closeWorkspace() {
   if (!_open || !_shell) return;
   _open = false;
   _closeFolderMenu();
+  _closeFileMenu();
   _endTagInput();
   // Restore the chat to its home BEFORE hiding the shell so it's back in the
   // normal app view, then tear down the workspace editor.
@@ -721,6 +852,13 @@ if (typeof window !== 'undefined') {
     if (!_open) return;
     clearTimeout(_refreshTimer);
     _refreshTimer = setTimeout(() => _loadList(_currentSearch()), 500);
+  });
+  // The editor's tab bar can switch the active doc (tab click / close); keep the
+  // left-list highlight in sync with whichever doc the editor is now showing.
+  window.addEventListener('document-switched', (e) => {
+    if (!_open) return;
+    const id = e && e.detail && e.detail.docId;
+    if (id && id !== _activeDocId) { _activeDocId = id; _highlightActive(); }
   });
 }
 

@@ -285,8 +285,9 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
     const curSession = sessionModule?.getCurrentSessionId() || '';
     let _anyTab = false;
     for (const [id, doc] of docs) {
-      // Only show tabs for the current session
-      if (doc.sessionId && curSession && doc.sessionId !== curSession) continue;
+      // Only show tabs for the current session — except in the workspace, where
+      // the left list is the library view and every open doc should be a tab.
+      if (!_workspaceMode && doc.sessionId && curSession && doc.sessionId !== curSession) continue;
       _anyTab = true;
       const isActive = id === activeDocId;
       const title = doc.title || 'Untitled';
@@ -302,7 +303,7 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
       const langChip = `<span class="doc-tab-lang">${lic}</span>`;
       html += `<div class="doc-tab${isActive ? ' active' : ''}" draggable="true" data-doc-id="${id}" title="${_esc(title)}">
         ${verChip}${langChip}<span class="doc-tab-title" title="Double-click to rename">${_esc(shortTitle)}</span>
-        <button class="doc-tab-close" data-doc-id="${id}" title="Unlink from chat (kept in the Library)">&times;</button>
+        <button class="doc-tab-close" data-doc-id="${id}" title="${_workspaceMode ? 'Close tab (the document stays in the Library)' : 'Unlink from chat (kept in the Library)'}">&times;</button>
       </div>`;
     }
     // Empty state (panel open, no doc yet): show a ghost "Untitled" tab so it's
@@ -3811,6 +3812,9 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
 
     renderTabs();
     _syncHeaderActions();
+    // Let the workspace left-list highlight follow tab switches (it only learns
+    // of list clicks otherwise). Fires for the chat-docked editor too, harmlessly.
+    try { window.dispatchEvent(new CustomEvent('document-switched', { detail: { docId } })); } catch (_) {}
 
     // Restore any persisted suggestions for this doc
     if (_activeSuggestions.length === 0) {
@@ -3843,19 +3847,28 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
   async function closeTab(docId) {
     // Save current editor content to map so the check below uses fresh data
     saveCurrentToMap();
-    _detachDocFromSession(docId, { toast: true });
-    // Find next tab in the current session
+    if (_workspaceMode) {
+      // In the workspace the left list is the persistent Library view, so a tab ×
+      // just drops the doc from the open set — it does NOT unlink/delete it
+      // server-side (that would be a surprising data loss from a "close tab").
+      docs.delete(docId);
+    } else {
+      _detachDocFromSession(docId, { toast: true });
+    }
+    // Find the next tab to show (workspace: any open doc; chat-docked: same session).
     const curSession = sessionModule?.getCurrentSessionId() || '';
     let nextId = null;
     for (const [id, d] of docs) {
-      if (!d.sessionId || !curSession || d.sessionId === curSession) {
+      if (_workspaceMode || !d.sessionId || !curSession || d.sessionId === curSession) {
         nextId = id;
         break;
       }
     }
     if (!nextId) {
-      activeDocId = null;
-      closePanel();
+      // Workspace: keep the editor pane mounted (closing the panel would tear it
+      // out of the workspace centre) — just show the empty state.
+      if (_workspaceMode) { showEmptyState(); }
+      else { activeDocId = null; closePanel(); }
       return;
     }
     if (activeDocId === docId) {
@@ -10544,6 +10557,7 @@ const documentModule = {
   exitDiffMode,
   isDiffModeActive,
   getCurrentDocId,
+  updateTitle,
   findEmailDocId,
   getSelectionContext,
   clearSelection,
