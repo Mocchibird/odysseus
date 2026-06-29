@@ -35,6 +35,24 @@ def _ics_naive_dtstart(dt):
         return datetime(dt.year, dt.month, dt.day)
     return dt
 
+
+def _ensure_positive_duration(start_dt, end_dt, all_day):
+    """Clamp an imported event's end so it has a positive duration.
+
+    Some .ics exporters write a single-day all-day event with DTEND equal to
+    DTSTART (treating DTEND as inclusive rather than the RFC 5545 exclusive
+    bound). Stored verbatim that produces a zero-duration row, which the
+    list_events overlap filter (dtstart < end AND dtend > start) silently
+    drops — the event never appears on the calendar even though the web UI
+    would otherwise show it. Normalize a non-positive end to the same default
+    span used when DTEND is absent: one day for all-day events, one hour
+    otherwise.
+    """
+    if end_dt <= start_dt:
+        return start_dt + (timedelta(days=1) if all_day else timedelta(hours=1))
+    return end_dt
+
+
 # Single-user fallback identity. Used only when:
 #   1. The app is configured for single-user (no auth middleware), AND
 #   2. The request didn't resolve to an authenticated user.
@@ -276,7 +294,7 @@ def _import_ics_content(
         ).delete()
         db.commit()
 
-    imported = skipped = 0
+    imported = skipped = repaired = 0
     for comp in cal_data.walk():
         if comp.name != "VEVENT":
             continue
@@ -300,6 +318,18 @@ def _import_ics_content(
                 .first()
             )
             if existing:
+                # An import predating the clamp below may have stored this same
+                # event with a non-positive duration, which the list_events
+                # overlap filter hides. Re-importing lands here and would skip
+                # without touching that row, so the event would stay invisible.
+                # Backfill the clamp onto the stored row before skipping it.
+                # (Ported from upstream's import path.)
+                fixed_end = _ensure_positive_duration(
+                    existing.dtstart, existing.dtend, bool(existing.all_day)
+                )
+                if fixed_end != existing.dtend:
+                    existing.dtend = fixed_end
+                    repaired += 1
                 skipped += 1
                 continue
 
@@ -327,6 +357,11 @@ def _import_ics_content(
             else:
                 end_dt = start_dt + timedelta(hours=1)
 
+        # Clamp non-positive durations (DTEND <= DTSTART, e.g. exporters that
+        # treat all-day DTEND as inclusive) so the row isn't hidden by the
+        # list_events overlap filter. Ported from upstream's import path.
+        end_dt = _ensure_positive_duration(start_dt, end_dt, all_day)
+
         ev = CalendarEvent(
             uid=uid_val,
             calendar_id=target_cal.id,
@@ -348,6 +383,7 @@ def _import_ics_content(
         "ok": True,
         "imported": imported,
         "skipped": skipped,
+        "repaired": repaired,
         "deleted": deleted_existing,
         "calendar": cal_display,
         "calendar_id": target_cal.id,
@@ -714,6 +750,20 @@ def _parse_dt(s: str) -> datetime:
         if not rest:
             return base
         t = _parse_time(rest)
+        if t is not None:
+            return base.replace(hour=t[0], minute=t[1])
+
+    # time-first: "3pm today", "9am tomorrow", "11pm tonight"
+    # (parity with parse_due_for_user, which handles these via the same form)
+    m = _re.match(r'^(.+?)\s+(today|tonight|tomorrow|tmrw|yesterday)$', lower)
+    if m:
+        time_part, word = m.group(1).strip(), m.group(2)
+        base = today
+        if word in ("tomorrow", "tmrw"):
+            base = today + timedelta(days=1)
+        elif word == "yesterday":
+            base = today - timedelta(days=1)
+        t = _parse_time(time_part)
         if t is not None:
             return base.replace(hour=t[0], minute=t[1])
 

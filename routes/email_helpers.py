@@ -42,6 +42,16 @@ from src.constants import LOOPBACK_HOSTS
 logger = logging.getLogger(__name__)
 
 
+class EmailNotConfiguredError(RuntimeError):
+    """Raised when an IMAP operation is attempted on an account that has no
+    inbox configured (e.g. a send-only / SMTP-only account).
+
+    Subclasses RuntimeError so existing broad ``except Exception`` handlers
+    keep working; callers that want to treat "no inbox" as an empty result
+    rather than a failure can catch this type specifically.
+    """
+
+
 _LOCAL_MAIL_BRIDGE_HOSTS = {
     "localhost",
     "127.0.0.1",
@@ -269,8 +279,9 @@ def _strip_think(text: str) -> str:
     """
     if not text:
         return ""
-    from src.text_helpers import strip_think as _central, _THINK_CLOSED_RE, _THINK_OPEN_RE, _THINK_TAG_RE
-    had_think = bool(_THINK_CLOSED_RE.search(text) or _THINK_OPEN_RE.search(text) or _THINK_TAG_RE.search(text))
+    from src.text_helpers import strip_think as _central, _THINK_TAG_RE
+    # Single linear tag check; the old closed/open `.search()` calls could ReDoS.
+    had_think = bool(_THINK_TAG_RE.search(text))
     return _central(text, prose=had_think, prompt_echo=True)
 
 
@@ -984,6 +995,14 @@ def _imap_connect(account_id: str | None = None, owner: str = "",
     # `timeout` is overridable so short-lived callers (e.g. the service-health
     # probe) can impose a tighter budget than the default IMAP timeout.
     cfg = _get_email_config(account_id, owner=owner)
+    # Send-only (SMTP-only) account: no IMAP host means there is no inbox to
+    # read. Bail out with a clear, typed error instead of handing an empty
+    # host to imaplib — IMAP4("", 993) silently dials localhost:993 and fails
+    # with a confusing "[Errno 111] Connection refused" on every inbox poll.
+    if not cfg.get("imap_host"):
+        raise EmailNotConfiguredError(
+            f"IMAP is not configured for account {cfg.get('account_name') or 'default'!r}"
+        )
     # Connection mode:
     #   STARTTLS on → plain + upgrade
     #   STARTTLS off + port 993 → implicit SSL (IMAPS)

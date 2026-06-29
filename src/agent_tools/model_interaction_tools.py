@@ -49,7 +49,7 @@ async def chat_with_model(content: str, session_id: Optional[str] = None, owner:
     try:
         # _resolve_model does blocking DB I/O; offload so it doesn't stall the
         # single-worker event loop (fork addition preserved across the #4445 move).
-        url, model, headers = await asyncio.to_thread(lambda: _resolve_model(model_spec, owner=owner))
+        url, model, headers = await asyncio.to_thread(_resolve_model, model_spec, owner=owner)
     except ValueError as e:
         return {"error": str(e)}
 
@@ -95,7 +95,7 @@ async def ask_teacher(content: str, session_id: Optional[str] = None, owner: Opt
     try:
         # _resolve_model does blocking DB I/O; offload so it doesn't stall the
         # single-worker event loop (fork addition preserved across the #4445 move).
-        url, model, headers = await asyncio.to_thread(lambda: _resolve_model(model_spec, owner=owner))
+        url, model, headers = await asyncio.to_thread(_resolve_model, model_spec, owner=owner)
     except ValueError as e:
         return {"error": str(e)}
 
