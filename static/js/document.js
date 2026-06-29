@@ -3951,8 +3951,16 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
 
   // ---- Panel open/close ----
 
-  export function openPanel() {
+  // Workspace mode: when the editor is hosted inside the Documents Workspace
+  // (a fixed 3-pane full-window view) instead of docked beside the chat, the
+  // pane mounts into a caller-supplied centre column and skips all the
+  // chat-docked chrome (divider/drag-resize/fullscreen/slide/doc-view).
+  let _workspaceMode = false;
+  let _workspaceMountTarget = null;
+  export function openPanel(opts = {}) {
     if (isOpen) return;
+    _workspaceMode = !!opts.workspace;
+    _workspaceMountTarget = opts.workspace ? (opts.mountTarget || null) : null;
     // Clear any pane/divider still sliding out from a just-fired close so we
     // don't end up with two #doc-editor-pane nodes (and a stale close stripping
     // doc-view). Paired with the isOpen guard in _finishClose above.
@@ -3965,7 +3973,9 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
       _minimizedDocId = null;
       Modals.unregister('doc-panel');
     }
-    const container = document.getElementById('chat-container');
+    const container = (_workspaceMode && _workspaceMountTarget)
+      ? _workspaceMountTarget
+      : document.getElementById('chat-container');
     if (!container) return;
 
     isOpen = true;
@@ -3975,7 +3985,9 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
     _ensureAgentMode();
     _markDocVisibleState(_lastSessionId, 'open');
 
-    document.body.classList.add('doc-view');
+    // doc-view drives the chat-docked split + mobile sheet rules; the
+    // workspace has its own fixed layout and must NOT trigger them.
+    if (!_workspaceMode) document.body.classList.add('doc-view');
 
     // Sync toggle button state
     const toggleBtn = document.getElementById('overflow-doc-btn');
@@ -4264,6 +4276,13 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
       });
     }
 
+    // ── Placement & chat-docked chrome ──────────────────────────────────
+    // Workspace mode: the pane lives inside a fixed centre column, so we mount
+    // it directly and skip the divider / drag-resize / fullscreen / slide
+    // chrome entirely. The default (chat-docked) path below is unchanged.
+    if (_workspaceMode) {
+      container.appendChild(pane);
+    } else {
     // Insert after chat-container (appears on right by default)
     // If sidebar is on the right, insert before chat-container instead
     const sidebar = document.getElementById('sidebar');
@@ -4389,6 +4408,7 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
       });
       _obs.observe(document.body, { childList: true, subtree: true });
     }
+    } // end !_workspaceMode chat-docked chrome
 
     // Mobile grab handle — swipe down to dismiss (like the other sheet windows).
     _wireSwipeDismiss(document.getElementById('doc-mobile-grabber'));
@@ -6024,6 +6044,21 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
   }
 
   export function closePanel(direction) {
+    if (direction === 'workspace') {
+      // Workspace teardown: the pane lives in the workspace centre column, not
+      // the chat-docked split — there's no doc-view / chat-container / slide
+      // chrome to unwind. Persist, drop the pane, and clear workspace state.
+      if (isOpen) saveCurrentToMap();
+      isOpen = false;
+      _workspaceMode = false;
+      _workspaceMountTarget = null;
+      _markDocVisibleState(_lastSessionId, 'closed');
+      activeDocId = null;
+      document.getElementById('doc-editor-pane')?.remove();
+      document.getElementById('overflow-doc-btn')?.classList.remove('active');
+      document.getElementById('doc-indicator-btn')?.classList.remove('active');
+      return;
+    }
     if (!isOpen) {
       if (direction !== 'down' && Modals.isRegistered('doc-panel')) {
         _minimizedDocId = null;
@@ -6273,7 +6308,13 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
   function _ensureDocPaneMounted() {
     if (!isOpen || !document.getElementById('doc-editor-pane')) {
       isOpen = false;
-      openPanel();
+      // In workspace mode, remount into the same centre column (not the
+      // chat-docked split) so switching docs keeps the pane where it belongs.
+      if (_workspaceMode && _workspaceMountTarget) {
+        openPanel({ workspace: true, mountTarget: _workspaceMountTarget });
+      } else {
+        openPanel();
+      }
     }
   }
 
@@ -6301,6 +6342,29 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
       }
     }
   }
+
+  // Open (or switch to) a document inside the Documents Workspace centre
+  // column. Establishes workspace mode so loadDocument's _ensureDocPaneMounted
+  // mounts the pane into `mountTarget` instead of the chat-docked split, and
+  // tears down any chat-docked pane first so there's only ever one editor.
+  export async function openInWorkspace(docId, mountTarget) {
+    if (isOpen && !_workspaceMode) {
+      isOpen = false;
+      document.getElementById('doc-editor-pane')?.remove();
+      document.getElementById('doc-divider')?.remove();
+      document.body.classList.remove('doc-view');
+    }
+    _workspaceMode = true;
+    _workspaceMountTarget = mountTarget;
+    if (docId) {
+      await loadDocument(docId);
+    } else if (!isOpen) {
+      openPanel({ workspace: true, mountTarget });
+    }
+  }
+
+  /** Is the editor currently hosted inside the Documents Workspace? */
+  export function isWorkspaceMode() { return _workspaceMode; }
 
   // Deep-link: #document-<id> opens that document on load / URL-bar nav.
   // Clicks on in-chat document anchors are handled separately (they call
@@ -10495,6 +10559,8 @@ const documentModule = {
   createDocument,
   newDocument,
   loadDocument,
+  openInWorkspace,
+  isWorkspaceMode,
   injectFreshDoc,
   ensurePaneMounted: _ensureDocPaneMounted,
   loadSessionDocs,

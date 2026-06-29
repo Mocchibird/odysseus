@@ -2232,6 +2232,17 @@ label.ask-user-option .ask-user-option-desc { flex-basis: 100%; }
 #doc-workspace .dw-center { min-width: 0; display: flex; position: relative; }
 #doc-workspace .dw-right { min-width: 0; border-left: 1px solid var(--border); position: relative; overflow: hidden; }
 #doc-workspace.dw-chat-collapsed .dw-right { border-left: none; }
+/* The real #chat-container is *relocated* into the right pane (never cloned).
+   Neutralize its main-view sidebar offset so it fills the column. */
+#doc-workspace .dw-right > #chat-container {
+  position: relative;
+  left: auto; right: auto;
+  width: 100%; height: 100%;
+  max-width: none; margin: 0;
+}
+/* The global sidebar-expand hamburger floats above everything (z:210) and is
+   redundant inside the full-window workspace — it would overlap the search. */
+body.doc-workspace-open #hamburger-btn { display: none; }
 /* Neutralize the editor's chat-docked chrome inside the workspace centre. */
 #doc-workspace .dw-center .doc-editor-pane,
 #doc-workspace .dw-center #doc-editor-pane {
@@ -2243,6 +2254,23 @@ label.ask-user-option .ask-user-option-desc { flex-basis: 100%; }
   box-shadow: none;
   transform: none;
 }
+/* Left-pane rows reuse the library card vocabulary (.doclib-card.memory-item),
+   stacked full-width with an active highlight for the open document. Values
+   mirror the library card's meta line — no new spacing/colour invented. */
+#doc-workspace .dw-row { width: 100%; cursor: pointer; margin-bottom: 4px; }
+#doc-workspace .dw-row-content { flex: 1; min-width: 0; }
+#doc-workspace .dw-row.active {
+  border-color: var(--accent-primary, var(--red));
+  background: color-mix(in srgb, var(--accent-primary, var(--red)) 10%, transparent);
+}
+#doc-workspace .dw-row .memory-item-title {
+  display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+#doc-workspace .dw-row .memory-item-meta {
+  font-size: 10px; opacity: 0.55; margin-top: 2px;
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+}
+#doc-workspace .dw-empty { padding: 24px 12px; text-align: center; opacity: 0.5; font-size: 12px; }
 #doc-workspace .dw-close { position: absolute; top: 8px; right: 8px; z-index: 3; }
 #doc-workspace .dw-chat-toggle { position: absolute; top: 8px; right: 44px; z-index: 3; }
 #doc-workspace .dw-mobile-switch { display: none; }
@@ -2257,7 +2285,12 @@ label.ask-user-option .ask-user-option-desc { flex-basis: 100%; }
     grid-row: 1;
     background: var(--panel);
     border-bottom: 1px solid var(--border);
+    /* leave room for the absolute close button so the Chat tab isn't covered */
+    padding-right: 44px;
   }
+  /* The chat-collapse toggle is a desktop affordance; on mobile the tab switch
+     replaces it, and it would overlap the Chat tab + close button. */
+  #doc-workspace .dw-chat-toggle { display: none; }
   #doc-workspace .dw-mtab {
     flex: 1;
     padding: 10px;
@@ -2269,7 +2302,7 @@ label.ask-user-option .ask-user-option-desc { flex-basis: 100%; }
     font: inherit;
     cursor: pointer;
   }
-  #doc-workspace .dw-mtab.active { opacity: 1; border-bottom-color: var(--accent, var(--red)); }
+  #doc-workspace .dw-mtab.active { opacity: 1; border-bottom-color: var(--accent-primary, var(--red)); }
   #doc-workspace .dw-left,
   #doc-workspace .dw-center,
   #doc-workspace .dw-right { display: none; grid-row: 2; grid-column: 1; }
