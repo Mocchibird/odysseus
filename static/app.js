@@ -15,7 +15,7 @@ import searchModule from './js/search.js';
 import chatModule from './js/chat.js?v=474';
 import compareModule from './js/compare/index.js';
 import documentModule from './js/document.js?v=506';
-import documentWorkspaceModule from './js/documentWorkspace.js?v=506';
+import documentWorkspaceModule from './js/documentWorkspace.js?v=507';
 import searchChatModule from './js/search-chat.js';
 import { makeWindowDraggable } from './js/windowDrag.js';
 import markdownModule from './js/markdown.js';

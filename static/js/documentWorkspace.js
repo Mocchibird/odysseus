@@ -79,7 +79,7 @@ function _buildShell() {
         <button class="memory-item-btn dw-ai-hide" id="dw-ai-hide" title="Hide assistant" aria-label="Hide assistant">${_ICON_CLOSE}</button>
       </div>
     </div>
-    <button class="icon-rail-btn dw-chat-toggle" id="dw-chat-toggle" title="Assistant (ask about this document)" aria-label="Open assistant">${_ICON_CHAT}</button>
+    <button class="dw-chat-toggle" id="dw-chat-toggle" title="Open the assistant" aria-label="Open assistant">${_ICON_CHAT}<span>Assist</span></button>
     <button class="icon-rail-btn dw-close" id="dw-close" title="Exit workspace" aria-label="Exit workspace">${_ICON_CLOSE}</button>
     <div class="dw-mobile-switch" role="tablist" aria-label="Workspace panes">
       <button class="dw-mtab" data-pane="left">List</button>
@@ -441,6 +441,26 @@ async function _assignTag(docId, tagPath) {
   }
 }
 
+// Position a body-appended menu under its anchor, but flip it ABOVE when there
+// isn't room below (so a row near the screen bottom doesn't get its menu cut
+// off), and clamp to the viewport on both axes. The menu must already be in the
+// DOM (so offsetHeight/Width are measurable).
+function _positionMenu(menu, anchor) {
+  const r = anchor.getBoundingClientRect();
+  menu.style.position = 'fixed';
+  menu.style.zIndex = String(topPopupZ());
+  const mh = menu.offsetHeight || 0;
+  const mw = menu.offsetWidth || 160;
+  const vh = window.innerHeight, vw = window.innerWidth;
+  let top;
+  if (vh - r.bottom >= mh + 8) top = r.bottom + 4;        // fits below
+  else if (r.top >= mh + 8) top = r.top - mh - 4;         // flip above
+  else top = vh - mh - 8;                                  // fits neither → pin to bottom
+  const left = Math.min(r.left, vw - mw - 8);
+  menu.style.top = `${Math.round(Math.max(8, top))}px`;
+  menu.style.left = `${Math.round(Math.max(8, left))}px`;
+}
+
 // ---- folder actions menu (… on hover) ------------------------------------
 
 function _closeFolderMenu() {
@@ -469,11 +489,7 @@ function _showFolderMenu(anchor, node) {
     + '<button type="button" data-act="rename">Rename</button>'
     + '<button type="button" data-act="delete" class="dw-folder-menu-del">Delete tag</button>';
   document.body.appendChild(menu);
-  const r = anchor.getBoundingClientRect();
-  menu.style.position = 'fixed';
-  menu.style.top = `${Math.round(r.bottom + 4)}px`;
-  menu.style.left = `${Math.round(Math.min(r.left, window.innerWidth - 168))}px`;
-  menu.style.zIndex = String(topPopupZ());
+  _positionMenu(menu, anchor);
   const close = bindMenuDismiss(menu, () => { try { menu.remove(); } catch (_) {} if (_tagMenuEl === menu) _tagMenuEl = null; });
   _tagMenuEl = menu;
   menu.querySelectorAll('button').forEach(b => b.addEventListener('click', (e) => {
@@ -505,11 +521,7 @@ function _showFileMenu(anchor, doc) {
     + '<button type="button" data-act="duplicate">Duplicate</button>'
     + '<button type="button" data-act="delete" class="dw-folder-menu-del">Delete</button>';
   document.body.appendChild(menu);
-  const r = anchor.getBoundingClientRect();
-  menu.style.position = 'fixed';
-  menu.style.top = `${Math.round(r.bottom + 4)}px`;
-  menu.style.left = `${Math.round(Math.min(r.left, window.innerWidth - 168))}px`;
-  menu.style.zIndex = String(topPopupZ());
+  _positionMenu(menu, anchor);
   const close = bindMenuDismiss(menu, () => { try { menu.remove(); } catch (_) {} if (_fileMenuEl === menu) _fileMenuEl = null; });
   _fileMenuEl = menu;
   menu.querySelectorAll('button').forEach(b => b.addEventListener('click', (e) => {

@@ -2313,11 +2313,40 @@ body.doc-workspace-open #icon-rail { display: none; }
   background: color-mix(in srgb, var(--accent-primary, var(--red)) 14%, transparent);
 }
 .dw-folder-menu button.dw-folder-menu-del { color: var(--accent-primary, var(--red)); }
-/* Controls. Desktop: exit = the list-head back arrow (.dw-back). The floating
-   bubble (.dw-chat-toggle) OPENS the assistant and only shows while it's
+/* Controls. Desktop: exit = the list-head back arrow (.dw-back). The "Assist"
+   handle (.dw-chat-toggle) OPENS the assistant and only shows while it's
    collapsed; the assistant's own × (.dw-ai-hide, in .dw-ai-head) HIDES it.
    .dw-close is the mobile-only exit (hidden on desktop). */
-#doc-workspace .dw-chat-toggle { position: absolute; top: 8px; right: 8px; z-index: 3; }
+/* A labelled handle docked to the RIGHT EDGE, vertically centred — reads as a
+   button (panel pulls out from here) and stays clear of the tab bar (top) and
+   the editor footer (bottom), which it used to overlap as a floating bubble. */
+#doc-workspace .dw-chat-toggle {
+  position: absolute;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 3;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 12px;
+  font: inherit;
+  font-size: 11px;
+  background: var(--panel);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-right: none;
+  border-radius: 8px 0 0 8px;
+  box-shadow: -3px 0 12px rgba(0, 0, 0, 0.28);
+  cursor: pointer;
+  transition: color 0.12s, border-color 0.12s, background 0.12s;
+}
+#doc-workspace .dw-chat-toggle svg { flex-shrink: 0; }
+#doc-workspace .dw-chat-toggle:hover {
+  color: var(--accent-primary, var(--red));
+  border-color: var(--accent-primary, var(--red));
+  background: color-mix(in srgb, var(--accent-primary, var(--red)) 8%, var(--panel));
+}
 #doc-workspace:not(.dw-chat-collapsed) .dw-chat-toggle { display: none; }
 #doc-workspace .dw-close { display: none; }
 /* Assistant (right pane) header: title + new-chat + hide ×. */
