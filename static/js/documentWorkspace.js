@@ -30,6 +30,9 @@ let _searchTimer = null;        // debounce for the search box
 let _refreshTimer = null;       // debounce for documents-refresh re-fetch
 let _listReqSeq = 0;            // guards against out-of-order list fetches
 let _knownTags = new Set();     // user-created tag paths (incl. empty folders), persisted via /api/prefs
+let _sortPrefs = {};            // { __default:'recent', '<tagPath>':'name'|'recent'|'oldest' } via /api/prefs
+let _pinned = [];               // ordered pinned doc ids (display order; new pins prepend) via /api/prefs
+let _pinnedSet = new Set();     // _pinned as a set for O(1) lookup
 let _tagMenuEl = null;          // body-appended folder-actions menu (swept on every re-render)
 let _fileMenuEl = null;         // body-appended per-file "…" actions menu (swept on every re-render)
 let _tagInputMode = null;       // { action: 'create'|'subtag'|'rename', path } for the New-tag bar
@@ -49,6 +52,10 @@ const _ICON_NEWCHAT = _icon('<path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 
 const _ICON_NEWTAG = _icon('<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><line x1="12" y1="10" x2="12" y2="16"/><line x1="9" y1="13" x2="15" y2="13"/>', 14);
 // Floppy disk — manual save.
 const _ICON_SAVE = _icon('<path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/>', 14);
+// Pin (pinned-note marker + the pin/unpin action).
+const _ICON_PIN = _icon('<path d="M9 4v6l-2 4h10l-2-4V4"/><line x1="12" y1="14" x2="12" y2="21"/><line x1="8" y1="4" x2="16" y2="4"/>', 13);
+// Sort (descending bars) — the sort control.
+const _ICON_SORT = _icon('<line x1="4" y1="6" x2="16" y2="6"/><line x1="4" y1="12" x2="12" y2="12"/><line x1="4" y1="18" x2="8" y2="18"/>', 14);
 // Generic document glyph — mirrors the library card's fallback icon.
 const _GEN_DOC_ICON = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:4px;opacity:0.4;flex-shrink:0;"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>';
 
@@ -69,6 +76,7 @@ function _buildShell() {
       </div>
       <div class="dw-tagbar">
         <button class="memory-toolbar-btn dw-newtag" id="dw-newtag" type="button" title="New tag (folder)">${_ICON_NEWTAG}<span>New tag</span></button>
+        <button class="memory-toolbar-btn dw-sortbtn" id="dw-sortbtn" type="button" title="Default sort order">${_ICON_SORT}<span>Sort</span></button>
         <input type="text" id="dw-tag-input" class="memory-search-input dw-tag-input hidden" placeholder="tag name (use / to nest)" autocomplete="off" />
       </div>
       <div class="dw-list" id="dw-list" role="list"></div>
@@ -124,6 +132,8 @@ function _buildShell() {
   // New-tag bar: the button opens an inline input that also serves the
   // per-folder "Add subtag" / "Rename" actions (one input, mode-driven).
   el.querySelector('#dw-newtag').addEventListener('click', () => _beginTagInput('create'));
+  // Default (global) sort order — per-folder overrides live in each folder's … menu.
+  el.querySelector('#dw-sortbtn').addEventListener('click', (e) => _showSortMenu(e.currentTarget, null));
   const tagInput = el.querySelector('#dw-tag-input');
   tagInput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') { e.preventDefault(); _commitTagInput(); }
@@ -317,6 +327,8 @@ function _fileRow(doc, depth, opts = {}) {
   row.tabIndex = 0;
   if (depth) row.style.setProperty('--vault-indent', (depth * 14) + 'px');
   if (doc.id === _activeDocId && !opts.trash) row.classList.add('active');
+  const pinned = !opts.trash && _pinnedSet.has(doc.id);
+  if (pinned) row.classList.add('dw-pinned');
   const lang = (doc.language || '').toLowerCase();
   const langSvg = (lang && lang !== 'text' && lang !== 'markdown')
     ? langIcon(lang, 16, { style: 'color:currentColor;' })
@@ -329,7 +341,7 @@ function _fileRow(doc, depth, opts = {}) {
       + `<span class="notes-vault-file-title">${uiModule.esc(doc.title || 'Untitled')}</span>`
       + (preview ? `<span class="notes-vault-file-excerpt">${uiModule.esc(preview)}</span>` : '')
     + `</span>`
-    + `<span class="notes-vault-file-meta">${uiModule.esc(rel)}</span>`
+    + `<span class="notes-vault-file-meta">${pinned ? `<span class="dw-pin-mark" title="Pinned">${_ICON_PIN}</span>` : ''}${uiModule.esc(rel)}</span>`
     + (opts.trash
         ? `<button type="button" class="notes-vault-file-actions dw-restore" title="Restore" aria-label="Restore">${_RESTORE_SVG}</button>`
         : `<button type="button" class="notes-vault-file-actions dw-file-actions" title="Actions" aria-label="Document actions">${_DOTS_SVG}</button>`);
@@ -369,7 +381,7 @@ function _renderNode(parent, node, depth) {
   parent.appendChild(folder);
   if (!_expanded.has(key)) return;
   for (const ch of [...node.children.values()].sort((a, b) => a.name.localeCompare(b.name))) _renderNode(parent, ch, depth + 1);
-  for (const doc of node.docs) parent.appendChild(_fileRow(doc, depth + 1));
+  for (const doc of _sortDocs(node.docs, node.fullPath)) parent.appendChild(_fileRow(doc, depth + 1));
 }
 
 function _renderList() {
@@ -385,7 +397,7 @@ function _renderList() {
   if (q) {
     if (!_docs.length) { list.appendChild(_emptyEl('No documents match.')); return; }
     const frag = document.createDocumentFragment();
-    for (const doc of _docs) frag.appendChild(_fileRow(doc, 0));
+    for (const doc of _sortDocs(_docs, null)) frag.appendChild(_fileRow(doc, 0));
     list.appendChild(frag);
     return;
   }
@@ -403,7 +415,7 @@ function _renderList() {
     _makeDropTarget(f, null);   // drop a note here → clear all its tags
     f.addEventListener('click', () => _toggleFolder(key));
     frag.appendChild(f);
-    if (_expanded.has(key)) for (const doc of untagged) frag.appendChild(_fileRow(doc, 1));
+    if (_expanded.has(key)) for (const doc of _sortDocs(untagged, null)) frag.appendChild(_fileRow(doc, 1));
   }
 
   // Trash group (lazy-loaded soft-deleted docs, with per-row Restore)
@@ -469,6 +481,97 @@ function _saveKnownTags() {
       body: JSON.stringify({ value: [..._knownTags] }),
     });
   } catch (_) { /* best-effort */ }
+}
+
+// ---- sort prefs + pinning (per-folder sort + pinned-first), persisted -------
+
+async function _loadSortPrefs() {
+  try {
+    const res = await fetch(`${API_BASE}/api/prefs/dw_sort`, { credentials: 'same-origin' });
+    if (res.ok) { const v = (await res.json()).value; if (v && typeof v === 'object' && !Array.isArray(v)) _sortPrefs = v; }
+  } catch (_) { /* prefs unavailable → default sort */ }
+}
+function _saveSortPrefs() {
+  try {
+    fetch(`${API_BASE}/api/prefs/dw_sort`, {
+      method: 'PUT', credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ value: _sortPrefs }),
+    });
+  } catch (_) { /* best-effort */ }
+}
+async function _loadPinned() {
+  try {
+    const res = await fetch(`${API_BASE}/api/prefs/dw_pinned`, { credentials: 'same-origin' });
+    if (res.ok) { const v = (await res.json()).value; if (Array.isArray(v)) _pinned = v.map(x => String(x || '')).filter(Boolean); }
+  } catch (_) { /* prefs unavailable → nothing pinned */ }
+  _pinnedSet = new Set(_pinned);
+}
+function _savePinned() {
+  _pinnedSet = new Set(_pinned);
+  try {
+    fetch(`${API_BASE}/api/prefs/dw_pinned`, {
+      method: 'PUT', credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ value: _pinned }),
+    });
+  } catch (_) { /* best-effort */ }
+}
+
+const _SORTS = { name: 'Name', recent: 'Recent', oldest: 'Oldest' };
+// Resolve the sort for a tag path: per-folder pref → global default → 'recent'.
+function _sortFor(tagPath) {
+  return _sortPrefs[tagPath == null ? '__default' : tagPath] || _sortPrefs.__default || 'recent';
+}
+function _docCmp(key) {
+  if (key === 'name') {
+    return (a, b) => (a.title || 'Untitled').localeCompare(b.title || 'Untitled', undefined, { numeric: true, sensitivity: 'base' });
+  }
+  const ts = (d) => { const t = Date.parse(d.updated_at || d.created_at || ''); return isNaN(t) ? 0 : t; };
+  if (key === 'oldest') return (a, b) => ts(a) - ts(b);
+  return (a, b) => ts(b) - ts(a);   // 'recent' (newest first) — default
+}
+// Order a group of docs: pinned first (in _pinned order), then the rest by the
+// folder's sort. Defensive — a comparator/data glitch falls back to the input
+// order rather than blanking the list.
+function _sortDocs(docs, tagPath) {
+  try {
+    const pinned = [], rest = [];
+    for (const d of docs) (_pinnedSet.has(d.id) ? pinned : rest).push(d);
+    pinned.sort((a, b) => _pinned.indexOf(a.id) - _pinned.indexOf(b.id));
+    rest.sort(_docCmp(_sortFor(tagPath)));
+    return pinned.concat(rest);
+  } catch (e) { console.error('Workspace: sort failed', e); return docs; }
+}
+function _togglePin(doc) {
+  const id = doc && doc.id;
+  if (!id) return;
+  if (_pinnedSet.has(id)) _pinned = _pinned.filter(x => x !== id);
+  else _pinned.unshift(id);   // new pins go to the TOP of their group
+  _savePinned();
+  _renderList();
+}
+// Shared sort picker for the global Sort button (tagPath=null → __default) and
+// each folder's … menu (tagPath=the folder). Reuses the _fileMenuEl sweep slot.
+function _showSortMenu(anchor, tagPath) {
+  _closeFileMenu(); _closeFolderMenu();
+  const cur = _sortFor(tagPath);
+  const menu = document.createElement('div');
+  menu.className = 'dw-folder-menu dw-sort-menu';
+  menu.innerHTML = Object.entries(_SORTS).map(([k, label]) =>
+    `<button type="button" class="${k === cur ? 'active' : ''}" data-sort="${k}">${label}</button>`).join('');
+  document.body.appendChild(menu);
+  _positionMenu(menu, anchor);
+  const close = bindMenuDismiss(menu, () => { try { menu.remove(); } catch (_) {} if (_fileMenuEl === menu) _fileMenuEl = null; });
+  _fileMenuEl = menu;
+  menu.querySelectorAll('button').forEach(b => b.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const k = b.dataset.sort;
+    close();
+    if (tagPath == null) _sortPrefs.__default = k; else _sortPrefs[tagPath] = k;
+    _saveSortPrefs();
+    _renderList();
+  }));
 }
 
 // Drop a dragged note onto `el` to (re)tag it: tagPath = the folder's path, or
@@ -560,6 +663,7 @@ function _showFolderMenu(anchor, node) {
   menu.className = 'dw-folder-menu';
   menu.innerHTML =
     '<button type="button" data-act="subtag">Add subtag</button>'
+    + '<button type="button" data-act="sort">Sort by…</button>'
     + '<button type="button" data-act="rename">Rename</button>'
     + '<button type="button" data-act="delete" class="dw-folder-menu-del">Delete tag</button>';
   document.body.appendChild(menu);
@@ -571,6 +675,7 @@ function _showFolderMenu(anchor, node) {
     const act = b.dataset.act;
     close();
     if (act === 'subtag') _beginTagInput('subtag', node.fullPath);
+    else if (act === 'sort') _showSortMenu(anchor, node.fullPath);   // per-folder sort
     else if (act === 'rename') _beginTagInput('rename', node.fullPath);
     else if (act === 'delete') _deleteTag(node);
   }));
@@ -590,6 +695,7 @@ function _showFileMenu(anchor, doc) {
   menu.className = 'dw-folder-menu dw-file-menu';   // reuse the folder-menu styling
   menu.innerHTML =
     '<button type="button" data-act="open">Open</button>'
+    + `<button type="button" data-act="pin">${_pinnedSet.has(doc.id) ? 'Unpin' : 'Pin'}</button>`
     + '<button type="button" data-act="rename">Rename</button>'
     + '<button type="button" data-act="tags">Edit tags</button>'
     + '<button type="button" data-act="duplicate">Duplicate</button>'
@@ -603,6 +709,7 @@ function _showFileMenu(anchor, doc) {
     const act = b.dataset.act;
     close();
     if (act === 'open') _openDoc(doc);
+    else if (act === 'pin') _togglePin(doc);
     else if (act === 'rename') _renameDoc(doc);
     else if (act === 'tags') _editDocTags(doc);
     else if (act === 'duplicate') _duplicateDoc(doc);
@@ -904,7 +1011,7 @@ export async function openWorkspace(docId) {
   // assistant for the doc, instead of the doc's stale prior conversation.
   if (wasClosed) { try { await window.__odysseusStartDefaultChat?.(); } catch (_) {} }
   _relocateChat();
-  await _loadKnownTags();
+  await Promise.all([_loadKnownTags(), _loadSortPrefs(), _loadPinned()]);
   await _loadList(_currentSearch());
   if (docId) {
     // Explicit doc (e.g. opened from the Library) — open it in the centre.

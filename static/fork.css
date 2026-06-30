@@ -2260,7 +2260,8 @@ body.doc-workspace-open #icon-rail { display: none; }
   display: flex; align-items: center; gap: 6px;
   padding: 6px 8px; border-bottom: 1px solid var(--border);
 }
-#doc-workspace .dw-tagbar .dw-newtag {
+#doc-workspace .dw-tagbar .dw-newtag,
+#doc-workspace .dw-tagbar .dw-sortbtn {
   flex: 0 0 auto; display: inline-flex; align-items: center; gap: 5px;  /* memory-toolbar-btn isn't flex (trap B.2) */
 }
 #doc-workspace .dw-tagbar .dw-tag-input { flex: 1; min-width: 0; margin-top: 0; }  /* zero the baked-in 6px (trap B.1) */
@@ -2317,6 +2318,14 @@ body.doc-workspace-open #icon-rail { display: none; }
   background: color-mix(in srgb, var(--accent-primary, var(--red)) 14%, transparent);
 }
 .dw-folder-menu button.dw-folder-menu-del { color: var(--accent-primary, var(--red)); }
+/* Sort picker: mark the active option (no checkmark glyph — accent + weight). */
+.dw-sort-menu button.active { color: var(--accent-primary, var(--red)); font-weight: 600; }
+/* Pinned-note marker in the row meta (left of the timestamp). */
+#doc-workspace .dw-pin-mark {
+  display: inline-flex; align-items: center; vertical-align: middle;
+  margin-right: 5px; color: var(--accent-primary, var(--red));
+}
+#doc-workspace .dw-pin-mark svg { display: block; }
 /* Controls. Desktop: exit = the list-head back arrow (.dw-back); the assistant
    opens via the "Assist" button injected into the editor footer (see
    _mountFooterControls) and hides via its own × (.dw-ai-hide). .dw-close is the
