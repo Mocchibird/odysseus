@@ -115,6 +115,9 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
   let activeDocId = null;           // currently visible doc
   let _lastSessionId = '';          // session context for "+" button
   const docs = new Map();           // docId -> { id, title, language, content, version, sessionId }
+  // Last view the user explicitly chose (editor / reader / split). Carried over
+  // to the next doc opened (list or [[link]]) so the view stays "sticky".
+  let _stickyViewMode = 'editor';
 
   const _docOpenKey = (sessionId) => 'odysseus-doc-open-' + sessionId;
   const _docMinimizedKey = (sessionId) => 'odysseus-doc-minimized-' + sessionId;
@@ -3802,8 +3805,15 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
       _showEmailFields(doc);
     } else {
       _hideEmailFields();
-      const wantsMarkdownPreview = (doc.language || 'markdown') === 'markdown' && doc._markdownPreviewActive === true;
-      _setMarkdownPreviewActive(wantsMarkdownPreview, { remember: false });
+      // Sticky view: open the incoming doc in the SAME view the user last chose
+      // (editor / reader / split) — tracked in _stickyViewMode by the view
+      // setters — rather than the doc's own remembered mode. Applies whether the
+      // doc is opened from the list or a [[link]]. (Reading the pane here would
+      // be too late: opening from the list resets it before this runs.)
+      const md = (doc.language || 'markdown') === 'markdown';
+      if (md && _stickyViewMode === 'split') _setSplitActive(true, { remember: false });
+      else if (md && _stickyViewMode === 'reader') _setMarkdownPreviewActive(true, { remember: false });
+      else _setMarkdownPreviewActive(false, { remember: false });   // editor (also clears split)
     }
 
     // Hide version panel on switch
@@ -4699,6 +4709,9 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
         if (ae && ae !== document.body && pane && !pane.contains(ae)) return;
         e.preventDefault();
         toggleMarkdownPreview();
+        // User action → remember the resulting view for the next doc opened.
+        const _pv = document.getElementById('doc-md-preview');
+        _stickyViewMode = (_pv && _pv.style.display !== 'none') ? 'reader' : 'editor';
         _syncHeaderActions();
       });
     }
@@ -4885,6 +4898,10 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
       const opt = e.target.closest('.md-view-opt');
       if (!opt) return;
       const view = opt.dataset.mdview; // 'edit' | 'preview' | 'split'
+      // Remember the user's explicit view choice so the next doc opened (list
+      // or [[link]]) inherits it — tracked here (a genuine user action) rather
+      // than in the low-level setters, which programmatic load-time calls hit.
+      _stickyViewMode = view === 'split' ? 'split' : (view === 'preview' ? 'reader' : 'editor');
       if (view === 'split') {
         _setSplitActive(true);
       } else {
@@ -9104,16 +9121,11 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
             const items = Array.isArray(data && data.documents) ? data.documents : [];
             const exact = items.find(d => (d.title || '').toLowerCase() === title.toLowerCase());
             const target = exact || items[0];
-            if (target && target.id) {
-              // Followed from the reader (this handler is bound to the preview),
-              // so open the linked doc in reader view too (markdown only).
-              loadDocument(target.id).then(() => {
-                const d = activeDocId && docs.get(activeDocId);
-                if (d && (d.language || 'markdown') === 'markdown') {
-                  try { _setMarkdownPreviewActive(true); } catch (_) {}
-                }
-              });
-            } else if (uiModule) uiModule.showToast(`No document named “${title}”`);
+            // Opens via switchToDoc, which carries over the current view mode
+            // (editor / reader / split) — so a link followed from the reader
+            // stays in the reader, from the editor stays in the editor, etc.
+            if (target && target.id) loadDocument(target.id);
+            else if (uiModule) uiModule.showToast(`No document named “${title}”`);
           })
           .catch(() => { if (uiModule) uiModule.showError('Could not open link'); });
         return;
