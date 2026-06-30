@@ -555,6 +555,11 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
     if (textarea) textarea.disabled = false;
     if (langSelect) langSelect.value = '';
     if (badge) badge.textContent = '';
+    // No active doc → drop out of reader/split so the empty editor shows. The
+    // preview/split panes would otherwise keep rendering the just-closed doc's
+    // text (it only cleared the textarea). remember:false keeps _stickyViewMode
+    // intact so the next doc you open still inherits your chosen view.
+    _setMarkdownPreviewActive(false, { remember: false });
     _hideLoadingOverlay();
     syncHighlighting();
     renderTabs();

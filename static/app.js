@@ -14,7 +14,7 @@ import presetsModule from './js/presets.js';
 import searchModule from './js/search.js';
 import chatModule from './js/chat.js?v=474';
 import compareModule from './js/compare/index.js';
-import documentModule from './js/document.js?v=516';
+import documentModule from './js/document.js?v=517';
 import documentWorkspaceModule from './js/documentWorkspace.js?v=511';
 import searchChatModule from './js/search-chat.js';
 import { makeWindowDraggable } from './js/windowDrag.js';
