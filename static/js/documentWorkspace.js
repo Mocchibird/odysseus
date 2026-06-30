@@ -13,7 +13,7 @@
 // Opened from the Documents rail button and the /workspace deep link.
 // ============================================
 
-import documentModule from './document.js?v=508';
+import documentModule from './document.js?v=509';
 import sessionModule from './sessions.js';
 import uiModule from './ui.js';
 import { langIcon } from './langIcons.js';
@@ -177,30 +177,35 @@ function _mountFooterControls() {
   const footer = document.getElementById('doc-actions-footer');
   if (!footer) return;
   const split = footer.querySelector('.email-send-split');
-  if (!footer.querySelector('#dw-footer-save')) {
-    const save = document.createElement('button');
+  let save = footer.querySelector('#dw-footer-save');
+  if (!save) {
+    save = document.createElement('button');
     save.type = 'button';
     save.id = 'dw-footer-save';
     save.className = 'doc-action-icon-btn dw-footer-ctl';
     save.title = 'Save (Ctrl/Cmd+S)';
     save.innerHTML = `${_ICON_SAVE}<span>Save</span>`;
     save.addEventListener('click', _saveDoc);
-    if (split) footer.insertBefore(save, split); else footer.appendChild(save);   // left of Copy
   }
-  if (!footer.querySelector('#dw-footer-assist')) {
-    const assist = document.createElement('button');
+  let assist = footer.querySelector('#dw-footer-assist');
+  if (!assist) {
+    assist = document.createElement('button');
     assist.type = 'button';
     assist.id = 'dw-footer-assist';
     assist.className = 'doc-action-icon-btn dw-footer-ctl dw-footer-assist';
     assist.title = 'Open the assistant';
-    assist.innerHTML = `${_ICON_CHAT}<span>Assist</span>`;
+    assist.innerHTML = _ICON_CHAT;   // icon only — the bubble is self-explanatory
+    assist.setAttribute('aria-label', 'Open the assistant');
     assist.addEventListener('click', () => {
       if (!_shell) return;
       _shell.classList.remove('dw-chat-collapsed');
       if (window.innerWidth <= 768) _setMobilePane('right');
     });
-    footer.appendChild(assist);   // after the split → right of Copy
   }
+  // Re-assert position on every call (the footer's own reorder runs first):
+  // Save immediately LEFT of Copy, Assist immediately RIGHT of it.
+  if (split) { split.before(save); split.after(assist); }
+  else { footer.appendChild(save); footer.appendChild(assist); }
 }
 
 function _currentSearch() {

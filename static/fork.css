@@ -2190,6 +2190,10 @@ label.ask-user-option .ask-user-option-desc { flex-basis: 100%; }
    folder (which makes the list overflow) doesn't make the rows reflow narrower
    when the scrollbar appears. */
 #doc-workspace .dw-list { flex: 1; overflow-y: auto; overflow-x: hidden; padding: 6px; scrollbar-gutter: stable; }
+/* The list is a flex column (.notes-vault-list); without this its rows get
+   flex-shrunk to their min-height when the list overflows (folders/files look
+   "squished" vertically once a folder is expanded). Pin them so it scrolls. */
+#doc-workspace .dw-list > * { flex-shrink: 0; }
 #doc-workspace .dw-center { min-width: 0; min-height: 0; overflow: hidden; display: flex; position: relative; }
 #doc-workspace .dw-right { min-width: 0; min-height: 0; display: flex; flex-direction: column; border-left: 1px solid var(--border); position: relative; overflow: hidden; }
 #doc-workspace.dw-chat-collapsed .dw-right { border-left: none; }
@@ -2341,8 +2345,12 @@ body.dw-resizing { cursor: col-resize; user-select: none; }
 #dw-footer-save, #dw-footer-assist { display: none; }
 body.doc-workspace-open #dw-footer-save,
 body.doc-workspace-open #dw-footer-assist { display: inline-flex; }
-/* Assist opens the AI panel → accent it as the primary action; hide it once the
-   panel is already open. */
+/* Save anchors the right cluster (margin-left:auto) so it sits immediately LEFT
+   of Copy; move the auto-margin off the Copy split so the cluster stays packed:
+   [left controls] … [Save][Copy/Export][Assist]. */
+body.doc-workspace-open #doc-actions-footer #dw-footer-save { margin-left: auto; }
+body.doc-workspace-open #doc-actions-footer .email-send-split { margin-left: 0; }
+/* Assist opens the AI panel → accent it (icon-only); hidden once the panel is open. */
 #dw-footer-assist { color: var(--accent-primary, var(--red)); }
 #doc-workspace:not(.dw-chat-collapsed) #dw-footer-assist { display: none; }
 #doc-workspace .dw-close { display: none; }

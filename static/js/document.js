@@ -9056,8 +9056,16 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
             const items = Array.isArray(data && data.documents) ? data.documents : [];
             const exact = items.find(d => (d.title || '').toLowerCase() === title.toLowerCase());
             const target = exact || items[0];
-            if (target && target.id) loadDocument(target.id);
-            else if (uiModule) uiModule.showToast(`No document named “${title}”`);
+            if (target && target.id) {
+              // Followed from the reader (this handler is bound to the preview),
+              // so open the linked doc in reader view too (markdown only).
+              loadDocument(target.id).then(() => {
+                const d = activeDocId && docs.get(activeDocId);
+                if (d && (d.language || 'markdown') === 'markdown') {
+                  try { _setMarkdownPreviewActive(true); } catch (_) {}
+                }
+              });
+            } else if (uiModule) uiModule.showToast(`No document named “${title}”`);
           })
           .catch(() => { if (uiModule) uiModule.showError('Could not open link'); });
         return;
