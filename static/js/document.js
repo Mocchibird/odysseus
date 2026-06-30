@@ -4702,13 +4702,19 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
         _syncHeaderActions();
       });
     }
-    // Cmd/Ctrl+S = manual save, Cmd/Ctrl+W = close the active document tab.
-    // Bound once; only fires while the editor is open AND focus is in the doc
-    // pane (or nowhere) so it never steals the shortcut from chat/other inputs.
-    // (Cmd/Ctrl+W is a browser-reserved shortcut — preventDefault works in an
-    // installed PWA / standalone window but a plain browser tab may still close.)
+    // Cmd/Ctrl+S = manual save (works anywhere — browsers let a page intercept
+    // it). Cmd/Ctrl+W = close the active doc, but ONLY in an installed PWA /
+    // standalone window: browsers HARD-reserve Cmd/Ctrl+W in a normal tab
+    // (preventDefault cannot stop the tab from closing), so intercepting it
+    // there is a footgun that just loses the whole tab. In a browser tab the
+    // per-tab × closes a doc instead. Bound once; only fires while the editor is
+    // open AND focus is in the doc pane (or nowhere) so it never steals the
+    // shortcut from chat/other inputs.
     if (!window._docSaveCloseBound) {
       window._docSaveCloseBound = true;
+      const _isStandalone = () =>
+        (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) ||
+        window.navigator.standalone === true;
       document.addEventListener('keydown', (e) => {
         const mod = e.ctrlKey || e.metaKey;
         if (!mod || e.altKey || e.shiftKey) return;
@@ -4721,7 +4727,7 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
         if (k === 's') {
           e.preventDefault();
           saveDocument();
-        } else if (activeDocId) {
+        } else if (k === 'w' && _isStandalone() && activeDocId) {
           e.preventDefault();
           closeTab(activeDocId);
         }
