@@ -2281,6 +2281,22 @@ body.doc-workspace-open #icon-rail { display: none; }
 #doc-workspace .dw-folder:focus-within .dw-folder-actions { opacity: 1; }
 #doc-workspace .dw-folder:hover .notes-vault-folder-count { opacity: 0; }
 
+/* Per-file "…" + restore buttons: centre the icon, and draw the focus ring
+   INSIDE the button. The global :focus-visible outline sits 4px outside the
+   button, which — for an action button hard against the row's right padding —
+   reads as the … hugging / overflowing the rounded row border. An inset ring is
+   self-contained, so the button always sits cleanly within the box. */
+#doc-workspace .notes-vault-file-actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+#doc-workspace .notes-vault-file-actions:focus-visible,
+#doc-workspace .dw-folder-actions:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 2px var(--accent-primary, var(--red));
+}
+
 /* Folder actions menu — body-appended (escapes the list overflow), z set via
    topPopupZ() in JS; swept on every list re-render. Panel/border vars only. */
 .dw-folder-menu {
