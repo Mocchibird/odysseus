@@ -7084,13 +7084,45 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
   // and compare against the number of \n-separated lines.
   function _textareaWraps(ta) {
     if (!ta) return false;
+    const value = ta.value || '';
+    const logicalLines = value.split('\n').length;
     const style = getComputedStyle(ta);
     const lh = parseFloat(style.lineHeight) || (parseFloat(style.fontSize) * 1.45);
     if (!lh) return false;
-    const padTop = parseFloat(style.paddingTop) || 0;
-    const padBottom = parseFloat(style.paddingBottom) || 0;
-    const renderedRows = Math.round((ta.scrollHeight - padTop - padBottom) / lh);
-    const logicalLines = (ta.value || '').split('\n').length;
+    // The textarea's own scrollHeight is clamped to its (often tall) clientHeight,
+    // so it reports far more "rows" than the content has whenever a doc is
+    // SHORTER than the editor — falsely flagging a wrap and suppressing pinned
+    // selections on short docs. Measure the content's true wrapped height in a
+    // hidden probe sized to the textarea's content width instead, matching the
+    // same kerning/ligature lockdown so the wrap column lines up with the real
+    // textarea (mirrors the selection mirror).
+    let probe = document.getElementById('doc-wrap-probe');
+    if (!probe) {
+      probe = document.createElement('div');
+      probe.id = 'doc-wrap-probe';
+      probe.setAttribute('aria-hidden', 'true');
+      probe.style.cssText = 'position:absolute;visibility:hidden;left:-9999px;top:0;margin:0;border:0;padding:0;';
+      document.body.appendChild(probe);
+    }
+    probe.style.font = style.font;
+    probe.style.lineHeight = style.lineHeight;
+    probe.style.letterSpacing = style.letterSpacing;
+    probe.style.wordSpacing = style.wordSpacing;
+    probe.style.fontFeatureSettings = style.fontFeatureSettings;
+    probe.style.fontVariantLigatures = style.fontVariantLigatures;
+    probe.style.fontKerning = style.fontKerning;
+    probe.style.textRendering = style.textRendering;
+    probe.style.tabSize = style.tabSize;
+    probe.style.whiteSpace = 'pre-wrap';
+    probe.style.overflowWrap = style.overflowWrap;
+    probe.style.wordBreak = style.wordBreak;
+    const padL = parseFloat(style.paddingLeft) || 0;
+    const padR = parseFloat(style.paddingRight) || 0;
+    probe.style.width = Math.max(0, ta.clientWidth - padL - padR) + 'px';
+    // A zero-width space per line keeps empty / final lines from collapsing to
+    // 0 height (so the row count matches the textarea's).
+    probe.textContent = value.replace(/\n/g, '​\n') + '​';
+    const renderedRows = Math.round(probe.scrollHeight / lh);
     return renderedRows > logicalLines;
   }
 

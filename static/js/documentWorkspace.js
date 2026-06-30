@@ -13,7 +13,7 @@
 // Opened from the Documents rail button and the /workspace deep link.
 // ============================================
 
-import documentModule from './document.js?v=511';
+import documentModule from './document.js?v=512';
 import sessionModule from './sessions.js';
 import uiModule from './ui.js';
 import { langIcon } from './langIcons.js';
