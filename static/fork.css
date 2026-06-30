@@ -2326,6 +2326,8 @@ body.doc-workspace-open #icon-rail { display: none; }
   margin-right: 5px; color: var(--accent-primary, var(--red));
 }
 #doc-workspace .dw-pin-mark svg { display: block; }
+/* Reorder drop indicator: a top accent line = "the dragged pin lands above here". */
+#doc-workspace .dw-file.dw-reorder-over { box-shadow: inset 0 2px 0 var(--accent-primary, var(--red)); }
 /* Controls. Desktop: exit = the list-head back arrow (.dw-back); the assistant
    opens via the "Assist" button injected into the editor footer (see
    _mountFooterControls) and hides via its own × (.dw-ai-hide). .dw-close is the

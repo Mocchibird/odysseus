@@ -7302,6 +7302,16 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
     mirror.style.letterSpacing = style.letterSpacing;
     mirror.style.wordSpacing = style.wordSpacing;
     mirror.style.textIndent = style.textIndent;
+    // Match the editor's ligature/kerning lockdown (.doc-editor-textarea /
+    // .doc-editor-highlight pin these OFF with !important). Without it the
+    // mirror kerns glyph pairs the real textarea doesn't, so the measured caret
+    // x drifts (the selection band shifts a couple chars) and the line measures
+    // wider — wrapping in the mirror only, which trips the multi-line branch and
+    // bleeds the band onto the next row. Mirrors _syncLineNumberMeasureStyle.
+    mirror.style.fontFeatureSettings = style.fontFeatureSettings;
+    mirror.style.fontVariantLigatures = style.fontVariantLigatures;
+    mirror.style.fontKerning = style.fontKerning;
+    mirror.style.textRendering = style.textRendering;
 
     const codeDoc = _isCodeDoc();
     const scrollTop = textarea.scrollTop;

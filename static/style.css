@@ -10246,6 +10246,20 @@ details a:hover {
   outline: none;
   border-color: var(--red);
 }
+/* Group-tab participant <select>s (.preset-input) had no rule, so they fell back
+   to native UA chrome + an inline height:26px that clipped the option-label tops.
+   Give them the same padded/auto-height box as .char-template-select. */
+.preset-input {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--fg);
+  padding: 5px 8px;
+  font-family: inherit;
+  box-sizing: border-box;
+  cursor: pointer;
+}
+.preset-input:focus { outline: none; border-color: var(--accent-primary, var(--red)); }
 .char-action-btn {
   background: none;
   border: 1px solid var(--border);

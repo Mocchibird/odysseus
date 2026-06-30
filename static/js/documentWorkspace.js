@@ -13,7 +13,7 @@
 // Opened from the Documents rail button and the /workspace deep link.
 // ============================================
 
-import documentModule from './document.js?v=509';
+import documentModule from './document.js?v=511';
 import sessionModule from './sessions.js';
 import uiModule from './ui.js';
 import { langIcon } from './langIcons.js';
@@ -33,6 +33,7 @@ let _knownTags = new Set();     // user-created tag paths (incl. empty folders),
 let _sortPrefs = {};            // { __default:'recent', '<tagPath>':'name'|'recent'|'oldest' } via /api/prefs
 let _pinned = [];               // ordered pinned doc ids (display order; new pins prepend) via /api/prefs
 let _pinnedSet = new Set();     // _pinned as a set for O(1) lookup
+let _draggingId = null;         // doc id currently being dragged (for pinned reorder)
 let _tagMenuEl = null;          // body-appended folder-actions menu (swept on every re-render)
 let _fileMenuEl = null;         // body-appended per-file "…" actions menu (swept on every re-render)
 let _tagInputMode = null;       // { action: 'create'|'subtag'|'rename', path } for the New-tag bar
@@ -352,21 +353,41 @@ function _fileRow(doc, depth, opts = {}) {
     row.addEventListener('click', (e) => { if (e.target.closest('.dw-file-actions')) return; _openDoc(doc); });
     row.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); _openDoc(doc); } });
     row.querySelector('.dw-file-actions').addEventListener('click', (e) => { e.stopPropagation(); _showFileMenu(e.currentTarget, doc); });
-    // Drag a note onto a tag folder (or "Untagged") to (re)assign its tags.
+    // Drag a note onto a tag folder (or "Untagged") to (re)assign its tags;
+    // drag a PINNED note onto another pinned note to reorder the pins.
     row.draggable = true;
     row.addEventListener('dragstart', (e) => {
+      _draggingId = doc.id;
       try { e.dataTransfer.setData('text/plain', doc.id); } catch (_) {}
-      e.dataTransfer.effectAllowed = 'copy';
+      e.dataTransfer.effectAllowed = 'copyMove';   // copy = tag-assign, move = reorder
       row.classList.add('dragging');
       if (_shell) _shell.classList.add('dw-dragging');
     });
     row.addEventListener('dragend', () => {
+      _draggingId = null;
       row.classList.remove('dragging');
       if (_shell) {
         _shell.classList.remove('dw-dragging');
-        _shell.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over'));
+        _shell.querySelectorAll('.drag-over, .dw-reorder-over').forEach(el => el.classList.remove('drag-over', 'dw-reorder-over'));
       }
     });
+    // Pinned rows double as reorder drop targets: dropping another pinned note
+    // here moves it directly above this one in the pinned order.
+    if (pinned) {
+      row.addEventListener('dragover', (e) => {
+        if (!_draggingId || _draggingId === doc.id || !_pinnedSet.has(_draggingId)) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        row.classList.add('dw-reorder-over');
+      });
+      row.addEventListener('dragleave', () => row.classList.remove('dw-reorder-over'));
+      row.addEventListener('drop', (e) => {
+        if (!_draggingId || !_pinnedSet.has(_draggingId)) return;
+        e.preventDefault(); e.stopPropagation();
+        row.classList.remove('dw-reorder-over');
+        _reorderPinned(_draggingId, doc.id);
+      });
+    }
   }
   return row;
 }
@@ -548,6 +569,16 @@ function _togglePin(doc) {
   if (!id) return;
   if (_pinnedSet.has(id)) _pinned = _pinned.filter(x => x !== id);
   else _pinned.unshift(id);   // new pins go to the TOP of their group
+  _savePinned();
+  _renderList();
+}
+// Manual pin order: move `draggedId` to directly before `targetId`.
+function _reorderPinned(draggedId, targetId) {
+  if (!draggedId || draggedId === targetId) return;
+  const arr = _pinned.filter(x => x !== draggedId);
+  const ti = arr.indexOf(targetId);
+  if (ti < 0) arr.unshift(draggedId); else arr.splice(ti, 0, draggedId);
+  _pinned = arr;
   _savePinned();
   _renderList();
 }

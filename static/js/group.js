@@ -91,7 +91,7 @@ function _initGroupTab() {
     charSel.className = 'preset-input';
     // add an identifier that this is a character selection
     charSel.dataset.selectionType = "character"
-    charSel.style.cssText = 'font-size:11px;flex:1;height:26px;';
+    charSel.style.cssText = 'font-size:11px;flex:1;';
     charSel.innerHTML = '<option value="">Empty...</option>' +
       characters.map(c => '<option value="' + c.id + '">' + uiModule.esc(c.name) + '</option>').join('');
 
@@ -99,7 +99,7 @@ function _initGroupTab() {
     modelSel.className = 'preset-input';
     // add an identifier that this is a model selection
     modelSel.dataset.selectionType = "model"
-    modelSel.style.cssText = 'font-size:11px;flex:1;height:26px;';
+    modelSel.style.cssText = 'font-size:11px;flex:1;';
     modelSel.innerHTML = '<option value="">Model…</option>' +
       models.map(m => '<option value="' + m.mid + '">' + uiModule.esc(m.display) + '</option>').join('');
 
