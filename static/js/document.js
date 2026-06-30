@@ -4702,6 +4702,31 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
         _syncHeaderActions();
       });
     }
+    // Cmd/Ctrl+S = manual save, Cmd/Ctrl+W = close the active document tab.
+    // Bound once; only fires while the editor is open AND focus is in the doc
+    // pane (or nowhere) so it never steals the shortcut from chat/other inputs.
+    // (Cmd/Ctrl+W is a browser-reserved shortcut — preventDefault works in an
+    // installed PWA / standalone window but a plain browser tab may still close.)
+    if (!window._docSaveCloseBound) {
+      window._docSaveCloseBound = true;
+      document.addEventListener('keydown', (e) => {
+        const mod = e.ctrlKey || e.metaKey;
+        if (!mod || e.altKey || e.shiftKey) return;
+        const k = (e.key || '').toLowerCase();
+        if (k !== 's' && k !== 'w') return;
+        if (!isOpen) return;
+        const ae = document.activeElement;
+        const pane = document.getElementById('doc-editor-pane');
+        if (ae && ae !== document.body && pane && !pane.contains(ae)) return;
+        if (k === 's') {
+          e.preventDefault();
+          saveDocument();
+        } else if (activeDocId) {
+          e.preventDefault();
+          closeTab(activeDocId);
+        }
+      });
+    }
     document.getElementById('doc-email-draft-btn')?.addEventListener('click', () => {
       document.getElementById('doc-email-more-menu').style.display = 'none';
       _saveDraft();

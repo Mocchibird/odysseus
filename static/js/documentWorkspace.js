@@ -13,7 +13,7 @@
 // Opened from the Documents rail button and the /workspace deep link.
 // ============================================
 
-import documentModule from './document.js?v=506';
+import documentModule from './document.js?v=508';
 import sessionModule from './sessions.js';
 import uiModule from './ui.js';
 import { langIcon } from './langIcons.js';
@@ -47,6 +47,8 @@ const _ICON_BACK = _icon('<line x1="19" y1="12" x2="5" y2="12"/><polyline points
 const _ICON_NEWCHAT = _icon('<path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/><line x1="12" y1="8.5" x2="12" y2="14.5"/><line x1="9" y1="11.5" x2="15" y2="11.5"/>');
 // Folder with a plus — creates a new tag (folder).
 const _ICON_NEWTAG = _icon('<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><line x1="12" y1="10" x2="12" y2="16"/><line x1="9" y1="13" x2="15" y2="13"/>', 14);
+// Floppy disk — manual save.
+const _ICON_SAVE = _icon('<path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/>', 14);
 // Generic document glyph — mirrors the library card's fallback icon.
 const _GEN_DOC_ICON = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:4px;opacity:0.4;flex-shrink:0;"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>';
 
@@ -70,6 +72,7 @@ function _buildShell() {
         <input type="text" id="dw-tag-input" class="memory-search-input dw-tag-input hidden" placeholder="tag name (use / to nest)" autocomplete="off" />
       </div>
       <div class="dw-list" id="dw-list" role="list"></div>
+      <div class="dw-left-resizer" id="dw-left-resizer" title="Drag to resize the list" aria-hidden="true"></div>
     </div>
     <div class="dw-center" id="dw-center"></div>
     <div class="dw-right" id="dw-right">
@@ -79,7 +82,6 @@ function _buildShell() {
         <button class="memory-item-btn dw-ai-hide" id="dw-ai-hide" title="Hide assistant" aria-label="Hide assistant">${_ICON_CLOSE}</button>
       </div>
     </div>
-    <button class="dw-chat-toggle" id="dw-chat-toggle" title="Open the assistant" aria-label="Open assistant">${_ICON_CHAT}<span>Assist</span></button>
     <button class="icon-rail-btn dw-close" id="dw-close" title="Exit workspace" aria-label="Exit workspace">${_ICON_CLOSE}</button>
     <div class="dw-mobile-switch" role="tablist" aria-label="Workspace panes">
       <button class="dw-mtab" data-pane="left">List</button>
@@ -93,8 +95,10 @@ function _buildShell() {
   // top-right close). Both leave the document & chat intact.
   el.querySelector('#dw-back').addEventListener('click', () => closeWorkspace());
   el.querySelector('#dw-close').addEventListener('click', () => closeWorkspace());
-  // The floating bubble OPENS the assistant; the panel's own × HIDES it.
-  el.querySelector('#dw-chat-toggle').addEventListener('click', () => el.classList.remove('dw-chat-collapsed'));
+  // Restore the persisted list width + wire the drag-to-resize handle. The
+  // "Assist" open-button now lives in the editor footer (see _mountFooterControls).
+  try { const _w = localStorage.getItem('odysseus-dw-left-w'); if (_w) el.style.setProperty('--dw-left-w', _w); } catch (_) {}
+  _wireResizer();
   el.querySelector('#dw-ai-hide').addEventListener('click', () => {
     if (window.innerWidth <= 768) _setMobilePane('center');   // mobile: back to the editor tab
     else el.classList.add('dw-chat-collapsed');               // desktop: collapse the panel only
@@ -133,6 +137,70 @@ function _setMobilePane(pane) {
   if (!_shell) return;
   _shell.setAttribute('data-pane', pane);
   _shell.querySelectorAll('.dw-mtab').forEach(b => b.classList.toggle('active', b.dataset.pane === pane));
+}
+
+// Drag-to-resize the left list: the handle on the list's right edge sets the
+// --dw-left-w grid column width (clamped + persisted). Desktop only.
+function _wireResizer() {
+  const rez = _shell.querySelector('#dw-left-resizer');
+  if (!rez) return;
+  const onMove = (e) => {
+    let w = e.clientX - _shell.getBoundingClientRect().left;
+    w = Math.max(200, Math.min(560, w));
+    _shell.style.setProperty('--dw-left-w', w + 'px');
+  };
+  const onUp = () => {
+    document.removeEventListener('pointermove', onMove);
+    document.removeEventListener('pointerup', onUp);
+    document.body.classList.remove('dw-resizing');
+    try { localStorage.setItem('odysseus-dw-left-w', _shell.style.getPropertyValue('--dw-left-w')); } catch (_) {}
+  };
+  rez.addEventListener('pointerdown', (e) => {
+    if (window.innerWidth <= 768) return;   // single-column on mobile — no resize
+    e.preventDefault();
+    document.body.classList.add('dw-resizing');
+    document.addEventListener('pointermove', onMove);
+    document.addEventListener('pointerup', onUp);
+  });
+}
+
+// Save the open document (manual save) — mirrors Cmd/Ctrl+S; documentModule
+// shows its own "Document saved" toast.
+function _saveDoc() {
+  try { documentModule.saveDocument(); } catch (e) { console.error('Workspace: save failed', e); }
+}
+
+// Mount the workspace's "Save" + "Assist" controls into the editor's bottom
+// action footer (right of the Copy/Export split), reusing the footer's own
+// button vocabulary. Idempotent — safe to call on every doc open.
+function _mountFooterControls() {
+  const footer = document.getElementById('doc-actions-footer');
+  if (!footer) return;
+  const split = footer.querySelector('.email-send-split');
+  if (!footer.querySelector('#dw-footer-save')) {
+    const save = document.createElement('button');
+    save.type = 'button';
+    save.id = 'dw-footer-save';
+    save.className = 'doc-action-icon-btn dw-footer-ctl';
+    save.title = 'Save (Ctrl/Cmd+S)';
+    save.innerHTML = `${_ICON_SAVE}<span>Save</span>`;
+    save.addEventListener('click', _saveDoc);
+    if (split) footer.insertBefore(save, split); else footer.appendChild(save);   // left of Copy
+  }
+  if (!footer.querySelector('#dw-footer-assist')) {
+    const assist = document.createElement('button');
+    assist.type = 'button';
+    assist.id = 'dw-footer-assist';
+    assist.className = 'doc-action-icon-btn dw-footer-ctl dw-footer-assist';
+    assist.title = 'Open the assistant';
+    assist.innerHTML = `${_ICON_CHAT}<span>Assist</span>`;
+    assist.addEventListener('click', () => {
+      if (!_shell) return;
+      _shell.classList.remove('dw-chat-collapsed');
+      if (window.innerWidth <= 768) _setMobilePane('right');
+    });
+    footer.appendChild(assist);   // after the split → right of Copy
+  }
 }
 
 function _currentSearch() {
@@ -239,6 +307,7 @@ function _fileRow(doc, depth, opts = {}) {
   const row = document.createElement('div');
   row.className = 'notes-vault-file dw-file';
   row.dataset.docId = doc.id;
+  row.title = doc.title || 'Untitled';   // full title on hover (rows truncate)
   row.setAttribute('role', 'button');
   row.tabIndex = 0;
   if (depth) row.style.setProperty('--vault-indent', (depth * 14) + 'px');
@@ -782,6 +851,7 @@ async function _openDoc(doc) {
     // editor textarea — idempotent, gated to markdown docs internally.
     const ta = document.getElementById('doc-editor-textarea');
     if (ta) attachMdShortcuts(ta);
+    _mountFooterControls();   // Save + Assist in the editor's bottom action bar
     // The open document binds to whatever chat is current via active_doc_id
     // (a fresh one if the workspace was just opened — see openWorkspace), so we
     // deliberately DON'T switch the side chat to the doc's old session here.
@@ -800,6 +870,7 @@ async function _newDoc() {
       await documentModule.openInWorkspace(null, center);
     }
     await documentModule.newDocument();
+    _mountFooterControls();
     _activeDocId = documentModule.getCurrentDocId();
     await _loadList(_currentSearch());
     _highlightActive();
