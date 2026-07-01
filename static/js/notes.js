@@ -2552,12 +2552,12 @@ function _bindCardEvents(body) {
     if (span.isContentEditable) return;
     const note = _notes.find(n => n.id === noteId);
     if (!note || !Array.isArray(note.items) || !note.items[idx]) return;
-    
+
     span.textContent = note.items[idx].text || '';
     span.contentEditable = "true";
     span.spellcheck = false;
     span.focus();
-    
+
     const selection = window.getSelection();
     const range = document.createRange();
     range.selectNodeContents(span);
@@ -2569,7 +2569,7 @@ function _bindCardEvents(body) {
       span.contentEditable = "false";
       const newText = span.textContent.trim();
       const oldText = (note.items[idx].text || '').trim();
-      
+
       if (newText === oldText) {
         _renderNotes();
         return;
@@ -2884,6 +2884,7 @@ function _collectFormDraft(form) {
   const d = {
     _ts: Date.now(),
     note_type: type,
+    color: form.dataset.noteColor || '',
     title: form.querySelector('.note-form-title')?.value || '',
     label: form.querySelector('.note-form-label')?.value || '',
     reminder_at: form.querySelector('.note-form-reminder')?.value || null,
@@ -2930,7 +2931,7 @@ function _applyDraftToNote(note, id) {
   const d = _loadDraft(id);
   if (_isDraftEmpty(d)) return { note, restored: false };
   const merged = { ...(note || {}) };
-  ['note_type', 'title', 'label', 'reminder_at', 'due_date', 'repeat', 'content', 'items'].forEach(k => {
+  ['note_type', 'color', 'title', 'label', 'reminder_at', 'due_date', 'repeat', 'content', 'items'].forEach(k => {
     if (d[k] !== undefined) merged[k] = d[k];
   });
   return { note: merged, restored: true };
@@ -2946,6 +2947,7 @@ function _buildForm(note = null) {
 
   const form = document.createElement('div');
   form.className = 'note-form';
+  form.dataset.noteColor = color || '';
   if (color && !_isBgImage(color)) form.classList.add('note-color-' + color);
   if (_isBgImage(color)) form.setAttribute('style', _customColorStyle(color));
   let currentImageUrl = _safeImgSrc(note?.image_url || '');
@@ -3153,6 +3155,7 @@ function _buildForm(note = null) {
   // Color dots — apply to entire form immediately
   const _applyFormColor = (newColor) => {
     currentColor = newColor || '';
+    form.dataset.noteColor = currentColor;
     const isBg = _isBgImage(currentColor);
     COLORS.forEach(c => { if (c.value && c.value !== 'custom') form.classList.remove('note-color-' + c.value); });
     if (currentColor && !isBg) form.classList.add('note-color-' + currentColor);
@@ -3162,6 +3165,7 @@ function _buildForm(note = null) {
       d.classList.toggle('active', _dotIsActive(d.dataset.color, currentColor));
       d.style.background = _dotBg(d.dataset.color, currentColor);
     });
+    form.dispatchEvent(new Event('change', { bubbles: true }));
   };
   form.querySelectorAll('.note-color-dot').forEach(dot => {
     dot.addEventListener('click', () => {
@@ -4870,8 +4874,14 @@ function _openMobileFullscreenEdit(id, fromCard) {
   const headerActions = overlay.querySelector('.note-fullscreen-actions');
   const archiveBtn = form.querySelector('.note-form-archive-btn');
   const deleteBtn  = form.querySelector('.note-form-delete-btn');
-  if (headerActions && archiveBtn) headerActions.appendChild(archiveBtn);
-  if (headerActions && deleteBtn)  headerActions.appendChild(deleteBtn);
+  if (headerActions && archiveBtn) {
+    archiveBtn.classList.remove('note-form-collapsible');
+    headerActions.appendChild(archiveBtn);
+  }
+  if (headerActions && deleteBtn) {
+    deleteBtn.classList.remove('note-form-collapsible');
+    headerActions.appendChild(deleteBtn);
+  }
   // The built-in archive/delete handlers re-render the notes grid but
   // leave THIS overlay sitting in front of it — looks like nothing
   // happened. Add follow-up listeners that close the overlay so the
