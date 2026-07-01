@@ -7143,7 +7143,21 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
       probe.style.cssText = 'position:absolute;visibility:hidden;left:-9999px;top:0;margin:0;border:0;padding:0;';
       document.body.appendChild(probe);
     }
+    // getComputedStyle().font can serialize to "" (spec-defined, when the
+    // longhands don't fit shorthand grammar), which would silently no-op
+    // this assignment and leave the probe on its CSS-default font (Fira
+    // Code @ 16px) instead of the textarea's real font/size — measuring
+    // wider glyphs than actually render, so lines that fit on one row in
+    // the real textarea falsely "wrap" here. That flips this function to
+    // true, which clears/suppresses pinned selections (see call site) —
+    // set every font longhand explicitly so the copy can't fail.
     probe.style.font = style.font;
+    probe.style.fontFamily = style.fontFamily;
+    probe.style.fontSize = style.fontSize;
+    probe.style.fontWeight = style.fontWeight;
+    probe.style.fontStyle = style.fontStyle;
+    probe.style.fontStretch = style.fontStretch;
+    probe.style.fontVariant = style.fontVariant;
     probe.style.lineHeight = style.lineHeight;
     probe.style.letterSpacing = style.letterSpacing;
     probe.style.wordSpacing = style.wordSpacing;
