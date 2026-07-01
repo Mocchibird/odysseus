@@ -210,11 +210,6 @@ def search(owner: Optional[str], q: str = "", tags=None, limit: int = 50) -> lis
         db.close()
 
 
-def semantic_search(owner: Optional[str], q: str, k: int = 5) -> list:
-    """Vector recall scoped to the Files store (kind="file"). [] when RAG down."""
-    return content_rag.semantic_search(owner, q, k=k, kinds=[RAG_KIND])
-
-
 def get(owner: Optional[str], file_id: str) -> Optional[dict]:
     """Full record incl. the FULL extracted text (owner-scoped) — backs the
     open-the-real-file verification path."""

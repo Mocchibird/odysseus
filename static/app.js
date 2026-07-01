@@ -3,7 +3,7 @@
 // ES6 module — entry point, no exports (wires all modules together)
 // ============================================
 // UI language layer first — its observer must be live before modules render.
-import './js/i18n.js?v=402';
+import './js/i18n.js?v=523';
 import Storage from './js/storage.js';
 import uiModule from './js/ui.js';
 import workspaceModule from './js/workspace.js';
@@ -15,7 +15,7 @@ import searchModule from './js/search.js';
 import chatModule from './js/chat.js?v=522';
 import compareModule from './js/compare/index.js';
 import documentModule from './js/document.js?v=522';
-import documentWorkspaceModule from './js/documentWorkspace.js?v=522';
+import documentWorkspaceModule from './js/documentWorkspace.js?v=523';
 import searchChatModule from './js/search-chat.js';
 import { makeWindowDraggable } from './js/windowDrag.js';
 import markdownModule from './js/markdown.js';

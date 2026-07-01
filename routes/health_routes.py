@@ -4,6 +4,7 @@ Thin owner-scoped wrapper over src/health_store.py. The same store backs the
 agent MCP server (mcp_servers/health_server.py), so the UI and the assistant
 share one set of rows.
 """
+import asyncio
 import json
 import os
 import re
@@ -128,8 +129,7 @@ def setup_health_routes(upload_handler=None):
     async def estimate_meal(request: Request, file: UploadFile = File(...)):
         """Estimate a meal's calories/macros from a photo via the vision model.
         Returns an estimate for the user to confirm — does not auto-log."""
-        _owner(request)  # gate anonymous
-        owner = require_user(request)
+        owner = _owner(request)  # gate anonymous
         data = await file.read(8 * 1024 * 1024 + 1)
         if len(data) > 8 * 1024 * 1024:
             raise HTTPException(413, "Image too large (max 8MB)")
@@ -146,7 +146,7 @@ def setup_health_routes(upload_handler=None):
                 '{"description": "<short dish name>", "kcal": <integer>, '
                 '"protein_g": <number>, "carbs_g": <number>, "fat_g": <number>}.'
             )
-            res = analyze_image_with_vl_result(tmp, owner=owner, prompt=prompt)
+            res = await asyncio.to_thread(analyze_image_with_vl_result, tmp, owner=owner, prompt=prompt)
         finally:
             if tmp:
                 try:
@@ -307,16 +307,5 @@ def setup_health_routes(upload_handler=None):
         except ValueError as e:
             raise HTTPException(400, str(e))
         return {"ok": True, "imported": n}
-
-    # ── Combined dashboard snapshot ──────────────────────────────────────────
-    @router.get("/summary")
-    def summary(request: Request):
-        owner = _owner(request)
-        return {
-            "habits": hs.list_habits(owner),
-            "calories": hs.daily_calories(owner),
-            "weight": hs.weight_trend(owner, days=90),
-            "tdee": hs.tdee(owner),
-        }
 
     return router

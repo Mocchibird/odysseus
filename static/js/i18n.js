@@ -51,7 +51,9 @@ function _translateTextNode(node) {
   // Preserve surrounding whitespace (indentation inside markup). Never write
   // an unchanged value — setting nodeValue fires the observer even when the
   // text is identical, which would loop the microtask queue forever.
-  const next = raw.replace(trimmed, replacement);
+  // Function replacer so a translation containing $&, $1, $$ etc. is inserted
+  // verbatim (a string replacement arg treats those as special patterns).
+  const next = raw.replace(trimmed, () => replacement);
   if (next !== raw) node.nodeValue = next;
 }
 

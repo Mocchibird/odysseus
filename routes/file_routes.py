@@ -26,17 +26,17 @@ def setup_file_routes(upload_handler) -> APIRouter:
     async def files_search(request: Request, q: str = "", tags: str = "", limit: int = 50):
         owner = get_current_user(request)
         tag_list = [t.strip() for t in (tags or "").split(",") if t.strip()]
-        return {"files": fs.search(owner, q=q, tags=tag_list, limit=limit)}
+        return {"files": await asyncio.to_thread(fs.search, owner, q=q, tags=tag_list, limit=limit)}
 
     @router.get("/tags")
     async def files_tags(request: Request):
         owner = get_current_user(request)
-        return {"tags": fs.list_tags(owner)}
+        return {"tags": await asyncio.to_thread(fs.list_tags, owner)}
 
     @router.get("/{file_id}")
     async def files_get(request: Request, file_id: str):
         owner = get_current_user(request)
-        rec = fs.get(owner, file_id)
+        rec = await asyncio.to_thread(fs.get, owner, file_id)
         if not rec:
             raise HTTPException(404, "Not found")
         return rec
@@ -45,10 +45,10 @@ def setup_file_routes(upload_handler) -> APIRouter:
     async def files_raw(request: Request, file_id: str):
         """Serve the ACTUAL stored file — the open-and-verify path."""
         owner = get_current_user(request)
-        path = fs.file_abspath(owner, file_id)
+        path = await asyncio.to_thread(fs.file_abspath, owner, file_id)
         if not path:
             raise HTTPException(404, "File not found")
-        rec = fs.get(owner, file_id) or {}
+        rec = await asyncio.to_thread(fs.get, owner, file_id) or {}
         return FileResponse(
             path,
             media_type=rec.get("mime") or None,

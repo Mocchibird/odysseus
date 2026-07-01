@@ -14,7 +14,6 @@
 // ============================================
 
 import documentModule from './document.js?v=522';
-import sessionModule from './sessions.js';
 import uiModule from './ui.js';
 import { langIcon } from './langIcons.js';
 import { attachMdShortcuts } from './mdShortcuts.js?v=478';
@@ -57,8 +56,6 @@ const _ICON_SAVE = _icon('<path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5
 const _ICON_PIN = _icon('<path d="M9 4v6l-2 4h10l-2-4V4"/><line x1="12" y1="14" x2="12" y2="21"/><line x1="8" y1="4" x2="16" y2="4"/>', 13);
 // Sort (descending bars) — the sort control.
 const _ICON_SORT = _icon('<line x1="4" y1="6" x2="16" y2="6"/><line x1="4" y1="12" x2="12" y2="12"/><line x1="4" y1="18" x2="8" y2="18"/>', 14);
-// Generic document glyph — mirrors the library card's fallback icon.
-const _GEN_DOC_ICON = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:4px;opacity:0.4;flex-shrink:0;"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>';
 
 // ---- shell ----------------------------------------------------------------
 
