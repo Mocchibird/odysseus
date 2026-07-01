@@ -7180,7 +7180,9 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
   }
 
   /** Update selection tracking, show badge + persistent highlight.
-   *  Each new selection is added (pinned). Click without selecting to clear all. */
+   *  Selecting text pins it for chat context; making a new selection
+   *  elsewhere replaces the pin rather than adding to it — only one
+   *  region is ever active at a time. Click without selecting to clear it. */
   function updateSelectionState() {
     // Pinned selections are safe whenever the overlay measurement can
     // be exact. That holds in two cases: (1) fullscreen — width is
@@ -7212,17 +7214,11 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
     const startLine = text.substring(0, start).split('\n').length;
     const endLine = text.substring(0, end).split('\n').length;
 
-    // Check for overlap with existing selection — replace if overlapping
-    const overlapIdx = _selections.findIndex(s =>
-      (start >= s.start && start <= s.end) || (end >= s.start && end <= s.end) ||
-      (start <= s.start && end >= s.end)
-    );
+    // Single-select: a new selection always replaces whatever was
+    // pinned before, regardless of overlap — only one region is ever
+    // active as chat context at a time.
     const entry = { text: selectedText, startLine, endLine, start, end };
-    if (overlapIdx >= 0) {
-      _selections[overlapIdx] = entry;
-    } else {
-      _selections.push(entry);
-    }
+    _selections = [entry];
 
     showSelectionBadge();
     renderAllSelectionHighlights();
