@@ -185,6 +185,12 @@ async def send_ntfy_notification(
         if action_text:
             headers["Actions"] = action_text
 
+    # Keep the pre-auth URL for the returned result: for auth_type="query",
+    # _apply_auth appends the API key to the URL as a query param. That
+    # augmented URL must go to httpx but must NOT be returned to the caller —
+    # do_send_ping surfaces the result into the LLM tool-result stream and
+    # stored transcripts, which would leak the key. Return publish_url instead.
+    publish_url = url
     url, auth = _apply_auth(integration, url, headers)
 
     try:
@@ -210,7 +216,7 @@ async def send_ntfy_notification(
     return {
         "output": f"Sent ntfy ping to topic {clean_topic}.",
         "topic": clean_topic,
-        "url": url,
+        "url": publish_url,
         "exit_code": 0,
     }
 

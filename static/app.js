@@ -15,7 +15,7 @@ import searchModule from './js/search.js';
 import chatModule from './js/chat.js?v=522';
 import compareModule from './js/compare/index.js';
 import documentModule from './js/document.js?v=522';
-import documentWorkspaceModule from './js/documentWorkspace.js?v=523';
+import documentWorkspaceModule from './js/documentWorkspace.js?v=524';
 import searchChatModule from './js/search-chat.js';
 import { makeWindowDraggable } from './js/windowDrag.js';
 import markdownModule from './js/markdown.js';
@@ -25,7 +25,7 @@ import memoryModule from './js/memory.js';
 import voiceRecorderModule from './js/voiceRecorder.js';
 import censorModule from './js/censor.js';
 import notesModule from './js/notes.js?v=464';
-import booksModule from './js/books.js?v=420';
+import booksModule from './js/books.js?v=524';
 import pingsModule from './js/pings.js?v=396';
 // tasks.js + calendar.js + gallery.js are imported EAGERLY (not lazy): they
 // run boot-time side effects at module load — tasks.js starts background-task
@@ -70,7 +70,7 @@ import { initSectionCollapse, initSectionDrag } from './js/section-management.js
 // stay eagerly imported above.)
 const _lazyModule = (loader) => { let m; return async () => (m ||= (await loader()).default); };
 const _gallery  = _lazyModule(() => import('./js/gallery.js?v=456'));
-const _health   = _lazyModule(() => import('./js/health.js?v=399'));
+const _health   = _lazyModule(() => import('./js/health.js?v=524'));
 const _today    = _lazyModule(() => import('./js/today.js?v=422'));
 
 const API_BASE = window.location.origin;

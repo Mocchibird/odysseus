@@ -301,11 +301,13 @@ def setup_health_routes(upload_handler=None):
     async def import_csv(request: Request, kind: str = "meals"):
         owner = _owner(request)
         raw = await request.body()
+        if len(raw) > 5 * 1024 * 1024:
+            raise HTTPException(413, "CSV too large (max 5MB)")
         text = raw.decode("utf-8", "replace") if raw else ""
         try:
-            n = hs.import_csv(owner, kind, text)
+            result = hs.import_csv(owner, kind, text)
         except ValueError as e:
             raise HTTPException(400, str(e))
-        return {"ok": True, "imported": n}
+        return {"ok": True, **result}
 
     return router

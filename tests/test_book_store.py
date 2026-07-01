@@ -93,7 +93,7 @@ def test_delete_book_removes_bytes_and_clears_state():
     assert book_store.get_book("d", kid) is None
     assert not p.exists()  # bytes removed
     assert book_store.list_annotations("d", kid)["items"] == []
-    assert book_store.get_progress("d", kid, missing_ok=True)["chapter_index"] == 0
+    assert book_store.get_progress("d", kid)["chapter_index"] == 0
     assert book_store.delete_book("d", kid) is False  # already gone
 
 

@@ -870,16 +870,6 @@ details.md-callout[open] > summary::after { transform: rotate(-135deg); }
 .notes-book-page {
   outline: 0;
 }
-.notes-book-content-page .notes-book-page {
-  min-height: 280px;
-  max-height: calc(100vh - 250px);
-  overflow: auto;
-  padding: 2px 12px 24px;
-  border-radius: 7px;
-  background: color-mix(in srgb, var(--fg) 2%, transparent);
-  overscroll-behavior: contain;
-  scroll-behavior: smooth;
-}
 .notes-book-content-scroll .notes-book-page {
   overflow: visible;
 }
@@ -1825,10 +1815,6 @@ body.gallery-selecting .gallery-card-menu-btn,
       padding: 12px 2px 34px;
       font-size: 15px;
       line-height: 1.68;
-    }
-  .notes-book-content-page .notes-book-page {
-      max-height: calc(100dvh - 250px);
-      padding: 2px 8px 22px;
     }
   /* Bigger reader area on mobile — less chrome, more page (#8). dvh tracks the
        browser's collapsing toolbars better than svh/vh. The PDF viewer is a

@@ -109,7 +109,18 @@ def setup_today_routes() -> APIRouter:
                     "location": e.location or "",
                 })
 
-            n_q = db.query(Note).filter(Note.archived == False)  # noqa: E712
+            from sqlalchemy import or_, and_
+            # Only pull notes that actually carry a reminder — a note with no
+            # due_date AND no reminder_at can never be an active reminder, so
+            # excluding them in SQL avoids materializing + date-parsing the
+            # user's entire note collection on every dashboard load. Unset
+            # fields are stored as NULL or "" (house style), so guard both.
+            n_q = db.query(Note).filter(Note.archived == False).filter(  # noqa: E712
+                or_(
+                    and_(Note.due_date.isnot(None), Note.due_date != ""),
+                    and_(Note.reminder_at.isnot(None), Note.reminder_at != ""),
+                )
+            )
             if owner:
                 n_q = owner_filter(n_q, Note, owner, include_shared=allow_null)
             rem_rows = []

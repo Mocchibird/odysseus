@@ -4,7 +4,7 @@ Branching is handled client-side (the panel creates a chat session via
 /api/session and PUTs the id back here), so there's no server branch endpoint —
 just read/mark/keep/delete + an unread count for the rail badge.
 """
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Body, HTTPException, Request
 
 from src.auth_helpers import require_user
 from src import pings_store as ps
@@ -29,9 +29,11 @@ def setup_ping_routes():
         return {"ok": True, "updated": ps.mark_all_read(_owner(request))}
 
     @router.put("/{ping_id}")
-    async def update_ping(ping_id: str, request: Request):
+    def update_ping(ping_id: str, request: Request, body: dict = Body(...)):
+        # Sync def so FastAPI runs the blocking pings_store DB writes in the
+        # threadpool (like the sibling read/delete routes) instead of on the
+        # event loop. FastAPI parses the JSON body before dispatch.
         owner = _owner(request)
-        body = await request.json()
         updated = None
         if "read" in body:
             updated = ps.mark_read(owner, ping_id, body["read"])

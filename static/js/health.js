@@ -678,7 +678,8 @@ async function _renderCalories() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || 'Import failed');
-      uiModule.showToast?.(`Imported ${data.imported} row(s)`);
+      const skipped = data.skipped || 0;
+      uiModule.showToast?.(`Imported ${data.imported} row(s)${skipped ? ` (${skipped} skipped)` : ''}`);
       _renderCalories();
     } catch (err) { uiModule.showError?.(err.message); }
     finally { e.target.value = ''; }

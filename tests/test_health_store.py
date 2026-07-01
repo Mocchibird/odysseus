@@ -199,8 +199,8 @@ def test_csv_export_import():
     hs.log_meal(owner, "Eggs", 200, protein_g=14)
     text = hs.export_csv(owner, "meals")
     assert "Eggs" in text and "kcal" in text
-    n = hs.import_csv(owner, "weights", "measured_at,kg,notes\n2026-01-01T08:00:00,79.5,morning\n")
-    assert n == 1
+    result = hs.import_csv(owner, "weights", "measured_at,kg,notes\n2026-01-01T08:00:00,79.5,morning\n")
+    assert result["imported"] == 1 and result["skipped"] == 0
     assert any(w["kg"] == 79.5 for w in hs.list_weights(owner, days=4000))
 
 

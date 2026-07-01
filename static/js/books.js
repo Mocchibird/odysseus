@@ -36,11 +36,9 @@ let _bookSaveTimer = null;
 let _bookChapterLoading = false;
 let _bookAutoAdvancing = false;
 let _bookKeyHandler = null;
-// Page-turning was removed — books are always continuous-scroll (EPUB + PDF).
-const _bookReadMode = 'scroll';
-// PDFs always render as the actual PDF (text extraction still exists on the
-// backend for chat/search — there's just no in-reader Text toggle).
-const _bookPdfViewMode = 'pdf';
+// Books are always continuous-scroll (EPUB + PDF); PDFs always render as the
+// actual PDF (backend text extraction still exists for chat/search, but there's
+// no in-reader page-turn or Text-view toggle — those modes were removed).
 let _bookNavOpen = true;           // the chapter/page jump row is shown by default
 const BOOK_CONTINUOUS_MAX_RENDERED_CHAPTERS = 5;
 // Live PDF.js reader controller for the actual-PDF view (see pdfReader.js).
@@ -113,7 +111,7 @@ async function _openBook(path) {
   _bookOpenBook = data.book || null;
   if (_bookOpenBook) _bookOpenBook._chapterCache = {};
   _bookChapterIndex = Math.max(0, Number(_bookOpenBook?.progress?.chapter_index || 0));
-  if (_bookOpenBook?.kind !== 'pdf' || _bookPdfViewMode === 'text') {
+  if (_bookOpenBook?.kind !== 'pdf') {
     await _loadBookChapter(_bookChapterIndex);
   }
   return _bookOpenBook;
@@ -228,8 +226,7 @@ function _bookChapterScrollPercent() {
       return Math.max(0, Math.min(100, pct));
     }
   }
-  const page = body?.querySelector('.notes-book-page');
-  const scroller = _bookReadMode === 'page' && page ? page : body;
+  const scroller = body;
   if (scroller && scroller.scrollHeight > scroller.clientHeight) {
     return (scroller.scrollTop / Math.max(1, scroller.scrollHeight - scroller.clientHeight)) * 100;
   }
@@ -408,34 +405,11 @@ function _scheduleBookProgressSave(scrollPercent = null) {
 }
 
 async function _turnBookPage(direction = 1) {
+  // Continuous-scroll only (page mode was removed): a "turn" is a chapter step,
+  // driven by the ← / → keys.
   if (!_bookOpenBook?.chapters?.length) return;
   const dir = Number(direction || 0) < 0 ? -1 : 1;
-  if (_bookReadMode === 'scroll') {
-    await _setBookChapter(_bookChapterIndex + dir);
-    return;
-  }
-  const page = _readerScroller()?.querySelector('.notes-book-page');
-  if (!page) {
-    await _setBookChapter(_bookChapterIndex + dir);
-    return;
-  }
-  const maxScroll = Math.max(0, page.scrollHeight - page.clientHeight);
-  const step = Math.max(160, Math.floor(page.clientHeight * 0.86));
-  if (dir > 0) {
-    if (page.scrollTop >= maxScroll - 8) {
-      if (_bookChapterIndex >= _bookOpenBook.chapters.length - 1) return;
-      await _setBookChapter(_bookChapterIndex + 1);
-    } else {
-      page.scrollTo({ top: Math.min(maxScroll, page.scrollTop + step), behavior: 'smooth' });
-      _scheduleBookProgressSave();
-    }
-  } else if (page.scrollTop <= 8) {
-    if (_bookChapterIndex <= 0) return;
-    await _setBookChapter(_bookChapterIndex - 1);
-  } else {
-    page.scrollTo({ top: Math.max(0, page.scrollTop - step), behavior: 'smooth' });
-    _scheduleBookProgressSave();
-  }
+  await _setBookChapter(_bookChapterIndex + dir);
 }
 
 async function _setBookChapter(index, restoreProgress = false) {
@@ -474,9 +448,9 @@ async function _setBookChapter(index, restoreProgress = false) {
         body.scrollTop = 0;
       }
     } else if (page) {
-      page.scrollTop = restoreProgress && pct > 0 && _bookReadMode === 'page' ? targetScroll(page) : 0;
+      page.scrollTop = 0;
     }
-    if (!_bookUsesContinuousScroll() && body && restoreProgress && pct > 0 && _bookReadMode === 'scroll') {
+    if (!_bookUsesContinuousScroll() && body && restoreProgress && pct > 0) {
       body.scrollTop = targetScroll(body);
     } else if (!_bookUsesContinuousScroll() && body) {
       body.scrollTop = 0;
@@ -684,16 +658,15 @@ function _renderBookReader(body, baseHtml) {
     }
     return;
   }
-  body.innerHTML = baseHtml + `<div class="notes-book-reader notes-book-reader-${_attrEsc(_bookReadMode)}${navOpen ? ' notes-book-nav-open' : ''}">
+  body.innerHTML = baseHtml + `<div class="notes-book-reader notes-book-reader-scroll${navOpen ? ' notes-book-nav-open' : ''}">
     ${headHtml}
-    <article class="notes-book-content notes-book-content-${_attrEsc(_bookReadMode)}${continuousScroll ? ' notes-book-content-continuous' : ''}">
+    <article class="notes-book-content notes-book-content-scroll${continuousScroll ? ' notes-book-content-continuous' : ''}">
       <div class="notes-epub-progress-line"><span style="width:${Math.max(0, Math.min(progressPct, 100))}%"></span></div>
       <div class="notes-book-page${continuousScroll ? ' notes-book-stream' : ''}" tabindex="0" ${continuousScroll ? `data-stream-start="${idx}" data-stream-end="${idx}"` : ''}>${pageHtml}</div>
     </article>
   </div>`;
   _wireBookReaderHead(body);
   if (body._notesBookScrollHandler) body.removeEventListener('scroll', body._notesBookScrollHandler);
-  const page = body.querySelector('.notes-book-page');
   body._notesBookScrollHandler = () => {
     if (_bookUsesContinuousScroll()) {
       _updateBookVisibleChapterFromScroll();
@@ -707,8 +680,7 @@ function _renderBookReader(body, baseHtml) {
     }
     _scheduleBookProgressSave();
   };
-  const scrollNode = _bookReadMode === 'page' && page ? page : body;
-  scrollNode.addEventListener('scroll', body._notesBookScrollHandler, { passive: true });
+  body.addEventListener('scroll', body._notesBookScrollHandler, { passive: true });
   if (continuousScroll) requestAnimationFrame(() => _appendNextBookChapterIfNeeded());
   if (_bookKeyHandler) document.removeEventListener('keydown', _bookKeyHandler);
   _bookKeyHandler = (e) => {
@@ -725,25 +697,6 @@ function _renderBookReader(body, baseHtml) {
     }
   };
   document.addEventListener('keydown', _bookKeyHandler);
-  if (page) {
-    let touchStartX = 0;
-    let touchStartY = 0;
-    page.addEventListener('touchstart', (e) => {
-      const touch = e.touches?.[0];
-      if (!touch) return;
-      touchStartX = touch.clientX;
-      touchStartY = touch.clientY;
-    }, { passive: true });
-    page.addEventListener('touchend', (e) => {
-      if (_bookReadMode !== 'page') return;
-      const touch = e.changedTouches?.[0];
-      if (!touch) return;
-      const dx = touch.clientX - touchStartX;
-      const dy = touch.clientY - touchStartY;
-      if (Math.abs(dx) < 52 || Math.abs(dx) < Math.abs(dy) * 1.4) return;
-      _turnBookPage(dx < 0 ? 1 : -1);
-    }, { passive: true });
-  }
   _wireBookTools(body, { supportsSelection: true });
 }
 
@@ -904,7 +857,7 @@ function _renderListInto() {
         btn.classList.add('loading');
         await _openBook(path);
         _render();
-        if (_bookOpenBook?.kind !== 'pdf' || _bookPdfViewMode === 'text') {
+        if (_bookOpenBook?.kind !== 'pdf') {
           requestAnimationFrame(() => _setBookChapter(_bookOpenBook?.progress?.chapter_index || 0, true));
         }
       } catch (e) {
@@ -1119,7 +1072,7 @@ async function _openAndShow(path) {
     _booksLoading = false;
   }
   _render();
-  if (_bookOpenBook && (_bookOpenBook.kind !== 'pdf' || _bookPdfViewMode === 'text')) {
+  if (_bookOpenBook && _bookOpenBook.kind !== 'pdf') {
     requestAnimationFrame(() => _setBookChapter(_bookOpenBook.progress?.chapter_index || 0, true));
   }
 }

@@ -64,12 +64,11 @@ def test_get_returns_full_text_and_raw_path():
     assert fs.file_abspath("intruder", rec["id"]) is None
 
 
-def test_tags_favorite_rename():
+def test_tags_and_rename():
     rec = _ingest("t", "x.txt", b"body")
     assert fs.set_tags("t", rec["id"], "one, two, two")["tags"] == ["one", "two"]  # de-duped
-    assert fs.set_favorite("t", rec["id"], True)["favorite"] is True
     assert fs.rename("t", rec["id"], "renamed.txt")["filename"] == "renamed.txt"
-    assert fs.set_favorite("intruder", rec["id"], True) is None  # owner-scoped
+    assert fs.rename("intruder", rec["id"], "hacked.txt") is None  # owner-scoped
 
 
 def test_update_text_rewrites_bytes_for_text_files():

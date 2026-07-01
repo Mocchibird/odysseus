@@ -119,10 +119,18 @@ def resolve_book_file(owner: Optional[str], kb_id: str) -> Path:
 
 def list_books(owner: Optional[str], query: str = "", limit: int = 50) -> list[dict]:
     from core.database import SessionLocal, Book, BookProgress
+    from sqlalchemy import func
     cap = max(1, int(limit or 50))
     db = SessionLocal()
     try:
-        q = db.query(Book)
+        # Select only the columns the list view needs, and truncate the heavy
+        # extracted `text` blob to the 300-char excerpt IN SQL (aliased as
+        # `text` so _book_dict reads it unchanged). Loading full text for up to
+        # 500 books — MBs per PDF/EPUB — just to slice [:300] was needless I/O.
+        q = db.query(
+            Book.id, Book.filename, Book.mime, Book.file_size, Book.tags,
+            Book.favorite, func.substr(Book.text, 1, 300).label("text"),
+        )
         if owner is not None:
             q = q.filter(Book.owner == owner)
         query = (query or "").strip()
@@ -172,7 +180,7 @@ def set_favorite(owner: Optional[str], kb_id: str, favorite: bool) -> dict:
         b = _book_dict(row)
     finally:
         db.close()
-    b["progress"] = get_progress(owner, kb_id, missing_ok=True)
+    b["progress"] = get_progress(owner, kb_id)
     return b
 
 
@@ -292,7 +300,7 @@ def _progress_to_dict(row, kb_id: str) -> dict:
     }
 
 
-def get_progress(owner: Optional[str], kb_id: str, *, missing_ok: bool = False) -> dict:
+def get_progress(owner: Optional[str], kb_id: str) -> dict:
     from core.database import SessionLocal, BookProgress
     db = SessionLocal()
     try:

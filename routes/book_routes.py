@@ -138,7 +138,12 @@ def setup_book_routes() -> APIRouter:
 
     @router.get("/search")
     async def search_book(request: Request, path: str, q: str = "", limit: int = 120):
-        result = book_reader.search_book_text(_owner(request), path, q, max_results=max(1, min(int(limit or 120), 400)))
+        # Off-thread: scanning a large book (zip reads + text extraction) would
+        # otherwise block the event loop. Matches upload_book's to_thread pattern.
+        result = await asyncio.to_thread(
+            book_reader.search_book_text, _owner(request), path, q,
+            max_results=max(1, min(int(limit or 120), 400)),
+        )
         return {"ok": True, **result}
 
     @router.get("/cover")

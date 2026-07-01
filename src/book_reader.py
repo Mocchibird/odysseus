@@ -100,7 +100,7 @@ def parse_pdf(owner: str | None, kb_id: str, *, include_pages: bool = True) -> d
         "id": kb_id, "kind": "pdf", "path": kb_id,
         "title": b["title"], "author": author,
         "chapter_count": len(chapters), "chapters": chapters,
-        "progress": book_store.get_progress(owner, kb_id, missing_ok=True),
+        "progress": book_store.get_progress(owner, kb_id),
     }
 
 
@@ -137,12 +137,14 @@ def read_book_chapter(owner: str | None, kb_id: str, chapter_index: int = 0) -> 
     }
 
 
-def get_progress(owner: str | None, kb_id: str, *, missing_ok: bool = False) -> dict:
-    return book_store.get_progress(owner, kb_id, missing_ok=missing_ok)
+def get_progress(owner: str | None, kb_id: str) -> dict:
+    _require_book(owner, kb_id)  # owner-scope: 404 if the book isn't the caller's
+    return book_store.get_progress(owner, kb_id)
 
 
 def save_progress(owner: str | None, kb_id: str, *, chapter_index: int, scroll_percent: float = 0,
                   chapter_title: str = "", title: str = "", author: str = "", kind: str = "") -> dict:
+    _require_book(owner, kb_id)  # owner-scope: 404 if the book isn't the caller's
     return book_store.save_progress(
         owner, kb_id, chapter_index=chapter_index, scroll_percent=scroll_percent,
         chapter_title=chapter_title, title=title, author=author, kind=kind,
@@ -210,16 +212,32 @@ def search_book_text(owner: str | None, kb_id: str, query: str, *, max_results: 
             start = pos + len(needle)
 
     if b["kind"] == "epub":
+        # Parse the TOC + open the zip ONCE, then read each chapter's html from
+        # the already-open archive. The old loop called read_epub_chapter() per
+        # chapter, which re-parsed the whole TOC (container.xml + OPF + nav/NCX)
+        # and reopened the zip every time — O(M^2) full re-parses + M zip opens
+        # + M DB queries for an M-chapter book. Now it's one parse + one open.
+        import zipfile
         toc = epub_reader.parse_epub_toc(owner, kb_id)
-        for ch in (toc.get("chapters") or []):
-            if len(matches) >= max_results:
-                break
+        path = book_store.resolve_book_file(owner, kb_id)
+        try:
+            zf = zipfile.ZipFile(path)
+        except Exception:
+            zf = None
+        if zf is not None:
             try:
-                chapter = epub_reader.read_epub_chapter(owner, kb_id, ch.get("index", 0))
-            except Exception:
-                continue
-            text = epub_reader._plain_text(chapter.get("html") or "")
-            _scan(int(ch.get("index", 0)), chapter.get("title") or ch.get("title") or "", text)
+                for ch in (toc.get("chapters") or []):
+                    if len(matches) >= max_results:
+                        break
+                    try:
+                        raw = epub_reader._zip_read_text(zf, ch["href"])
+                        chapter_title, html = epub_reader._chapter_html(raw)
+                        text = epub_reader._plain_text(html)
+                    except Exception:
+                        continue
+                    _scan(int(ch.get("index", 0)), chapter_title or ch.get("title") or "", text)
+            finally:
+                zf.close()
     elif b["kind"] == "pdf":
         path = book_store.resolve_book_file(owner, kb_id)
         try:
@@ -259,12 +277,14 @@ def get_cover(owner: str | None, kb_id: str) -> tuple[bytes, str] | None:
 # --------------------------------------------------------------------------- #
 
 def list_annotations(owner: str | None, kb_id: str) -> dict:
+    _require_book(owner, kb_id)  # owner-scope: 404 if the book isn't the caller's
     return book_store.list_annotations(owner, kb_id)
 
 
 def add_annotation(owner: str | None, kb_id: str, *, type: str = "bookmark", chapter_index: int = 0,
                    chapter_title: str = "", text: str = "", note: str = "", color: str = "",
                    scroll_percent: float = 0) -> dict:
+    _require_book(owner, kb_id)  # owner-scope: 404 if the book isn't the caller's
     return book_store.add_annotation(
         owner, kb_id, type=type, chapter_index=chapter_index, chapter_title=chapter_title,
         text=text, note=note, color=color, scroll_percent=scroll_percent,
@@ -272,6 +292,7 @@ def add_annotation(owner: str | None, kb_id: str, *, type: str = "bookmark", cha
 
 
 def delete_annotation(owner: str | None, kb_id: str, ann_id: str) -> bool:
+    _require_book(owner, kb_id)  # owner-scope: 404 if the book isn't the caller's
     return book_store.delete_annotation(owner, kb_id, ann_id)
 
 

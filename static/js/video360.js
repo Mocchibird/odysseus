@@ -359,6 +359,11 @@ class Viewer360 {
     if (!this.renderer || !this.camera) return;
     const w = this.frame.clientWidth, h = this.frame.clientHeight;
     if (!w || !h) return;
+    // Skip when unchanged: _render() calls this every frame to catch the iOS
+    // 0->N first-frame transition the ResizeObserver can miss, but re-issuing
+    // setSize + updateProjectionMatrix ~60x/s at a steady size is wasted work.
+    if (w === this._lastW && h === this._lastH) return;
+    this._lastW = w; this._lastH = h;
     this.renderer.setSize(w, h, false);  // false: keep our 100%/inset CSS sizing
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
@@ -366,7 +371,7 @@ class Viewer360 {
 
   _render() {
     if (!this.renderer) return;
-    this._resize();  // cheap; covers a 0->N frame-size transition iOS can miss
+    this._resize();  // cheap now (no-ops at steady size); covers the iOS 0->N first frame
     this.camera.fov = this.fov * 180 / Math.PI;
     this.camera.rotation.y = this.yaw;
     this.camera.rotation.x = this.pitch;

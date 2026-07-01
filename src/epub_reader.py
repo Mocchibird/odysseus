@@ -88,6 +88,25 @@ def _plain_text(html: str) -> str:
     return BeautifulSoup(html or "", "html.parser").get_text("\n", strip=True)
 
 
+def _xml_fromstring(data):
+    """Parse EPUB metadata XML with a DTD/entity guard.
+
+    container.xml, the OPF package, and the NCX are plain XML that legitimately
+    never carry a DOCTYPE. A crafted/hostile EPUB could otherwise smuggle an
+    internal ``<!ENTITY>`` definition and blow up memory/CPU via billion-laughs
+    entity expansion (stdlib ElementTree still expands internal entities), or an
+    external-entity XXE. Rejecting any DTD before parsing neutralizes both with
+    no dependency on defusedxml (which isn't guaranteed installed). Accepts
+    str or bytes (ET.fromstring handles either)."""
+    head = data[:8192]
+    if isinstance(head, (bytes, bytearray)):
+        head = head.decode("ascii", "ignore")
+    low = head.lower()
+    if "<!doctype" in low or "<!entity" in low:
+        raise ValueError("EPUB XML with a DTD/entity declaration is not allowed")
+    return ET.fromstring(data)
+
+
 def _epub_package(owner: str | None, kb_id: str) -> tuple[Path, str, str, ET.Element]:
     path = book_store.resolve_book_file(owner, kb_id)
     if path.suffix.lower() != ".epub":
@@ -100,14 +119,16 @@ def _epub_package(owner: str | None, kb_id: str) -> tuple[Path, str, str, ET.Ele
                 container_xml = zf.read("META-INF/container.xml")
             except KeyError:
                 raise HTTPException(422, "EPUB container.xml not found")
-            root = ET.fromstring(container_xml)
+            root = _xml_fromstring(container_xml)
             rootfile = root.find(".//container:rootfile", _NS)
             opf_path = rootfile.attrib.get("full-path", "") if rootfile is not None else ""
             if not opf_path:
                 raise HTTPException(422, "EPUB root package not found")
-            opf = ET.fromstring(zf.read(opf_path))
+            opf = _xml_fromstring(zf.read(opf_path))
     except zipfile.BadZipFile:
         raise HTTPException(422, "Invalid EPUB zip file")
+    except ValueError as e:
+        raise HTTPException(422, str(e))
     opf_dir = str(Path(opf_path).parent)
     if opf_dir == ".":
         opf_dir = ""
@@ -136,7 +157,7 @@ def _epub_toc_titles(zf: zipfile.ZipFile, manifest: dict, opf_dir: str, opf: ET.
     ncx_item = manifest.get(toc_id) or next((item for item in manifest.values() if item.get("media_type") == "application/x-dtbncx+xml"), None)
     if ncx_item:
         try:
-            root = ET.fromstring(zf.read(ncx_item["href"]))
+            root = _xml_fromstring(zf.read(ncx_item["href"]))
             ns = {"ncx": "http://www.daisy.org/z3986/2005/ncx/"}
             base = str(Path(ncx_item["href"]).parent)
             if base == ".":
@@ -197,7 +218,7 @@ def parse_epub_toc(owner: str | None, kb_id: str) -> dict:
         "author": author,
         "chapter_count": len(chapters),
         "chapters": chapters,
-        "progress": book_store.get_progress(owner, kb_id, missing_ok=True),
+        "progress": book_store.get_progress(owner, kb_id),
     }
 
 

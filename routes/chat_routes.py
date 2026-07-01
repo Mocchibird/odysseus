@@ -1445,11 +1445,15 @@ def setup_chat_routes(
                                           and att_ids):
                                         # Auto-link + auto-file the attached photo to the meal/training
                                         # logged this turn (→ Food Journal / Training Journal).
+                                        # Off-thread: these helpers do blocking
+                                        # DB + file read + PIL decode (gallery
+                                        # ingest); running them inline would stall
+                                        # the event loop mid-stream.
                                         if (data.get("meal") and not _meal_photo_linked
-                                                and _link_meal_photo(_user, data["meal"], att_ids, upload_handler)):
+                                                and await asyncio.to_thread(_link_meal_photo, _user, data["meal"], att_ids, upload_handler)):
                                             _meal_photo_linked = True
                                         if (data.get("session") and not _training_photo_linked
-                                                and _link_training_photo(_user, data["session"], att_ids, upload_handler)):
+                                                and await asyncio.to_thread(_link_training_photo, _user, data["session"], att_ids, upload_handler)):
                                             _training_photo_linked = True
                                     yield chunk
                                 elif data.get("type") == "fallback":

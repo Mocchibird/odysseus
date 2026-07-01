@@ -787,13 +787,20 @@ def export_csv(owner: str, kind: str) -> str:
     return buf.getvalue()
 
 
-def import_csv(owner: str, kind: str, text: str) -> int:
-    """Append rows from a CSV (matching export_csv columns). Returns count imported."""
+def import_csv(owner: str, kind: str, text: str) -> dict:
+    """Append rows from a CSV (matching export_csv columns).
+
+    Returns {"imported": n, "skipped": k, "errors": [...]}. Bad rows are still
+    skipped (a single malformed line never aborts the whole import), but the
+    count + first few error messages are surfaced so the UI can report partial
+    failures instead of a silent success."""
     kind = (kind or "").strip().lower()
     if kind not in _CSV_FIELDS:
         raise ValueError(f"unknown import kind: {kind}")
     reader = csv.DictReader(io.StringIO(text or ""))
     n = 0
+    skipped = 0
+    errors: list = []
     for row in reader:
         try:
             if kind == "meals":
@@ -822,6 +829,9 @@ def import_csv(owner: str, kind: str, text: str) -> int:
                              kcal_burned=_i(row.get("kcal_burned")),
                              summary=(row.get("summary") or "").strip())
             n += 1
-        except Exception:
+        except Exception as e:
+            skipped += 1
+            if len(errors) < 3:
+                errors.append(str(e))
             continue
-    return n
+    return {"imported": n, "skipped": skipped, "errors": errors}

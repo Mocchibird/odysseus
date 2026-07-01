@@ -898,7 +898,12 @@ async function _renameTag(oldPath, newLeaf) {
   _saveKnownTags();
   const affected = _docs.filter(d => (d.tags || []).some(t => t === oldPath || t.startsWith(oldPath + '/')));
   try {
-    for (const d of affected) await _postTags(d, (d.tags || []).map(_re));
+    // Bounded-concurrency fan-out instead of one-at-a-time awaits: a tag shared
+    // by many docs was N sequential round-trips (seconds of blank UI). Chunks
+    // of 8 keep the server from an unbounded burst while collapsing wall-clock.
+    for (let i = 0; i < affected.length; i += 8) {
+      await Promise.all(affected.slice(i, i + 8).map(d => _postTags(d, (d.tags || []).map(_re))));
+    }
     if (uiModule) uiModule.showToast(`Renamed → ${newPath}`);
   } catch (e) {
     console.error('Workspace: rename tag failed', e);
@@ -921,7 +926,10 @@ async function _deleteTag(node) {
   _saveKnownTags();
   const affected = _docs.filter(d => (d.tags || []).some(_hit));
   try {
-    for (const d of affected) await _postTags(d, (d.tags || []).filter(t => !_hit(t)));
+    // Bounded-concurrency fan-out (chunks of 8) instead of serial awaits.
+    for (let i = 0; i < affected.length; i += 8) {
+      await Promise.all(affected.slice(i, i + 8).map(d => _postTags(d, (d.tags || []).filter(t => !_hit(t)))));
+    }
     if (uiModule) uiModule.showToast(`Deleted tag “${path}”`);
   } catch (e) {
     console.error('Workspace: delete tag failed', e);

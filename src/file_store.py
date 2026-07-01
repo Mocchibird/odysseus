@@ -243,22 +243,6 @@ def set_tags(owner: Optional[str], file_id: str, tags) -> Optional[dict]:
         db.close()
 
 
-def set_favorite(owner: Optional[str], file_id: str, favorite: bool) -> Optional[dict]:
-    from core.database import SessionLocal, FileItem
-
-    db = SessionLocal()
-    try:
-        fi = db.query(FileItem).filter(FileItem.id == file_id).first()
-        if not fi or (owner is not None and fi.owner != owner):
-            return None
-        fi.favorite = bool(favorite)
-        db.commit()
-        db.refresh(fi)
-        return _to_dict(fi)
-    finally:
-        db.close()
-
-
 def rename(owner: Optional[str], file_id: str, new_filename: str) -> Optional[dict]:
     from core.database import SessionLocal, FileItem
 
