@@ -1,11 +1,13 @@
 /**
- * video360.js — 360°/VR video viewer for the gallery, rendered with three.js.
+ * video360.js — 360°/VR viewer for the gallery (video AND photo), rendered with
+ * three.js.
  *
- * Renders the gallery <video> as an equirectangular panorama on an inward-facing
- * sphere via three.js VideoTexture. three.js handles the iOS/WebKit video-texture
- * quirks (playsinline, RGBA upload, per-frame refresh) that a hand-rolled WebGL
- * path kept tripping over. three.js is vendored at /static/lib/three.module.min.js
- * and lazy-imported only when a 360 video is actually viewed.
+ * Renders the gallery media as an equirectangular panorama on an inward-facing
+ * sphere via three.js. For video it uses a VideoTexture (three.js handles the
+ * iOS/WebKit playsinline / RGBA-upload / per-frame-refresh quirks a hand-rolled
+ * WebGL path kept tripping over); for a still photo it uses a plain Texture off
+ * the already-decoded <img>. three.js is vendored at /static/lib/three.module.min.js
+ * and lazy-imported only when a 360 view is actually enabled.
  *
  * Layouts (manual toggle — no reliable projection metadata):
  *   - mono : full-frame equirectangular
@@ -13,9 +15,11 @@
  *   - tb   : top-bottom  stereo   -> shows the TOP  eye (texture top half)
  * Plus a 180° toggle (front hemisphere only).
  *
- * The raw <video> keeps playing underneath (audio + frame source); the three.js
- * canvas sits on top. Drag to look, wheel to zoom, tap to play/pause. Only one
- * viewer is ever live, so attach() detaches the previous one.
+ * For video the raw <video> keeps playing underneath (audio + frame source) and
+ * a seek/scrub bar is shown (the three.js canvas covers the native controls);
+ * the three.js canvas sits on top. Drag to look, wheel to zoom, tap to
+ * play/pause (video only). Only one viewer is ever live, so attach() detaches
+ * the previous one.
  */
 
 const THREE_URL = '/static/lib/three.module.min.js';
@@ -38,11 +42,20 @@ export function attach(video, frame, opts) {
   catch (e) { console.warn('video360 attach failed:', e); _active = null; }
 }
 
+// Photo variant: equirectangular still image (e.g. a 2:1 panorama / 360 photo).
+export function attachImage(img, frame, opts) {
+  detach();
+  if (!img || !frame) return;
+  try { _active = new Viewer360(img, frame, { ...(opts || {}), kind: 'image' }); _active.detectAndMaybeShow(); }
+  catch (e) { console.warn('video360 attachImage failed:', e); _active = null; }
+}
+
 class Viewer360 {
-  constructor(video, frame, opts) {
-    this.video = video;
+  constructor(el, frame, opts) {
+    this.el = el;                 // <video> or <img>
     this.frame = frame;
     this.opts = opts || {};
+    this.isImage = (opts && opts.kind) === 'image';
     this.enabled = false;
     this.layout = 'mono';
     this.is180 = false;
@@ -64,13 +77,13 @@ class Viewer360 {
     this._onFsChange = () => this._onFullscreenChange();
   }
 
-  // Decide whether this is actually a 360 video; only then reveal the toggle.
+  // Decide whether this is actually a 360 asset; only then reveal the toggle.
   async detectAndMaybeShow() {
     let det;
     try { det = await this._detect(); }
     catch (e) { det = { is360: false }; }
     if (this._destroyed) return;
-    if (!det.is360) return;            // ordinary video -> no 360 UI
+    if (!det.is360) return;            // ordinary media -> no 360 UI
     this.layout = det.layout || 'mono';
     if (det.is180) this.is180 = true;
     this._buildControls();
@@ -78,17 +91,19 @@ class Viewer360 {
 
   async _detect() {
     const name = String(this.opts.name || '');
-    const url = this.video.currentSrc || this.video.src || this.opts.url || '';
     // 1) Spherical-video metadata — the authoritative signal (also gives the
-    //    stereo packing). Best-effort: a single small head range request.
-    try {
-      const meta = await _fetchSpherical(url);
-      if (meta && meta.spherical) {
-        return { is360: true, layout: meta.stereo || 'mono', is180: meta.is180 };
-      }
-    } catch (e) { /* range/CORS/edge — fall through */ }
+    //    stereo packing). Video only; best-effort single small head request.
+    if (!this.isImage) {
+      const url = this.el.currentSrc || this.el.src || this.opts.url || '';
+      try {
+        const meta = await _fetchSpherical(url);
+        if (meta && meta.spherical) {
+          return { is360: true, layout: meta.stereo || 'mono', is180: meta.is180 };
+        }
+      } catch (e) { /* range/CORS/edge — fall through */ }
+    }
     // 2) Filename hints.
-    const nameHit = /(^|[^a-z])(360|vr180|vr360|equirect(angular)?|insta360|gopromax|panoramic|spherical|monoscopic)([^a-z]|$)|_(tb|ou|lr|sbs)([^a-z]|$)/i.test(name);
+    const nameHit = /(^|[^a-z])(360|vr180|vr360|equirect(angular)?|insta360|gopromax|panoramic|spherical|monoscopic|pano)([^a-z]|$)|_(tb|ou|lr|sbs)([^a-z]|$)/i.test(name);
     if (nameHit) {
       const layout = /(_lr|_sbs|left.?right|side.?by.?side)/i.test(name) ? 'sbs'
         : /(_tb|_ou|top.?bottom|over.?under)/i.test(name) ? 'tb' : 'mono';
@@ -104,11 +119,20 @@ class Viewer360 {
   }
 
   _aspect() {
-    const v = this.video;
-    if (v.videoWidth && v.videoHeight) return Promise.resolve(v.videoWidth / v.videoHeight);
+    const el = this.el;
+    if (this.isImage) {
+      if (el.naturalWidth && el.naturalHeight) return Promise.resolve(el.naturalWidth / el.naturalHeight);
+      return new Promise((res) => {
+        const done = () => { el.removeEventListener('load', done); res(el.naturalWidth && el.naturalHeight ? el.naturalWidth / el.naturalHeight : 0); };
+        if (el.complete) return done();
+        el.addEventListener('load', done);
+        setTimeout(done, 4000);
+      });
+    }
+    if (el.videoWidth && el.videoHeight) return Promise.resolve(el.videoWidth / el.videoHeight);
     return new Promise((res) => {
-      const done = () => { v.removeEventListener('loadedmetadata', done); res(v.videoWidth && v.videoHeight ? v.videoWidth / v.videoHeight : 0); };
-      v.addEventListener('loadedmetadata', done);
+      const done = () => { el.removeEventListener('loadedmetadata', done); res(el.videoWidth && el.videoHeight ? el.videoWidth / el.videoHeight : 0); };
+      el.addEventListener('loadedmetadata', done);
       setTimeout(done, 4000); // don't hang forever on a stalled load
     });
   }
@@ -271,16 +295,18 @@ class Viewer360 {
   }
 
   async _enable() {
-    // Play SYNCHRONOUSLY inside the toggle's tap (a user gesture), BEFORE any
-    // await — iOS revokes the gesture across an await and would reject play(),
-    // leaving the video paused (black + no audio). three.js then textures the
-    // now-playing video.
-    try {
-      this.video.setAttribute('playsinline', '');
-      this.video.setAttribute('webkit-playsinline', '');
-      const p = this.video.play();
-      if (p && p.catch) p.catch(() => {});
-    } catch (e) { /* user can tap the view to play */ }
+    // For video, play SYNCHRONOUSLY inside the toggle's tap (a user gesture),
+    // BEFORE any await — iOS revokes the gesture across an await and would
+    // reject play(), leaving the video paused (black + no audio). three.js then
+    // textures the now-playing video. (Photos have nothing to play.)
+    if (!this.isImage) {
+      try {
+        this.el.setAttribute('playsinline', '');
+        this.el.setAttribute('webkit-playsinline', '');
+        const p = this.el.play();
+        if (p && p.catch) p.catch(() => {});
+      } catch (e) { /* user can tap the view to play */ }
+    }
 
     let THREE;
     try { THREE = await _loadThree(); }
@@ -304,7 +330,18 @@ class Viewer360 {
     this.camera = new THREE.PerspectiveCamera(this.fov * 180 / Math.PI, 1, 0.1, 1100);
     this.camera.rotation.order = 'YXZ';
 
-    const tex = new THREE.VideoTexture(this.video);
+    let tex;
+    if (this.isImage) {
+      // Load the equirect image three.js-side via TextureLoader — it fetches +
+      // fully decodes the pixels and flags the upload itself. (Wrapping a live
+      // DOM <img> in new THREE.Texture(img)+needsUpdate proved unreliable — the
+      // sphere rendered black.) Same-origin URL, so no CORS taint. The render
+      // loop is already running, so it appears as soon as the load resolves.
+      const url = this.el.currentSrc || this.el.src || this.opts.url || '';
+      tex = new THREE.TextureLoader().load(url);
+    } else {
+      tex = new THREE.VideoTexture(this.el);
+    }
     tex.minFilter = THREE.LinearFilter;
     tex.magFilter = THREE.LinearFilter;
     if ('colorSpace' in tex) tex.colorSpace = THREE.SRGBColorSpace;
@@ -313,6 +350,7 @@ class Viewer360 {
     this._buildSphere();
     this.frame.classList.add('video360-on');
     this._bindPointer();
+    if (!this.isImage) this._buildScrub();  // video gets a seek/scrub bar
     this._resize();
 
     this._ro = ('ResizeObserver' in window) ? new ResizeObserver(this._onResize) : null;
@@ -321,6 +359,94 @@ class Viewer360 {
 
     const loop = () => { this.raf = requestAnimationFrame(loop); this._render(); };
     this.raf = requestAnimationFrame(loop);
+  }
+
+  // ---- seek / scrub bar (video only; reuses widget classes + theme vars) ----
+  _buildScrub() {
+    const v = this.el;
+    const bar = document.createElement('div');
+    bar.className = 'video360-scrub';
+    bar.style.cssText = 'position:absolute;left:8px;right:8px;bottom:8px;z-index:3;'
+      + 'display:flex;align-items:center;gap:8px;padding:6px 10px;'
+      + 'background:color-mix(in srgb, var(--panel) 88%, transparent);'
+      + 'border:1px solid var(--border);border-radius:8px;';
+    bar.dataset.noSwipeDismiss = '';
+    // A drag on the bar (scrubbing) must not rotate the sphere or dismiss the sheet.
+    bar.addEventListener('pointerdown', (e) => e.stopPropagation());
+
+    const play = document.createElement('button');
+    play.type = 'button';
+    play.className = 'memory-toolbar-btn';
+    play.title = 'Play / pause';
+    const setIcon = () => { play.innerHTML = v.paused ? _ICON_PLAY : _ICON_PAUSE; };
+    play.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (v.paused) v.play().catch(() => {}); else v.pause();
+    });
+
+    const range = document.createElement('input');
+    range.type = 'range';
+    range.min = '0'; range.max = '1000'; range.step = '1'; range.value = '0';
+    range.className = 'video360-seek';
+    range.setAttribute('aria-label', 'Seek');
+    range.style.cssText = 'flex:1;min-width:0;cursor:pointer;accent-color:var(--accent-primary, var(--red));';
+
+    const time = document.createElement('span');
+    time.style.cssText = 'font-size:11px;color:var(--fg);opacity:0.8;font-variant-numeric:tabular-nums;white-space:nowrap;';
+
+    let scrubbing = false;
+    const fmt = (s) => {
+      s = Math.max(0, Math.floor(s || 0));
+      const m = Math.floor(s / 60);
+      return `${m}:${String(s % 60).padStart(2, '0')}`;
+    };
+    const sync = () => {
+      const d = v.duration || 0;
+      if (!scrubbing && d > 0 && isFinite(d)) range.value = String(Math.round((v.currentTime / d) * 1000));
+      time.textContent = `${fmt(v.currentTime)} / ${(isFinite(d) && d > 0) ? fmt(d) : '0:00'}`;
+    };
+    range.addEventListener('input', (e) => {
+      e.stopPropagation();
+      scrubbing = true;
+      const d = v.duration || 0;
+      if (isFinite(d) && d > 0) time.textContent = `${fmt((range.value / 1000) * d)} / ${fmt(d)}`;
+    });
+    const commit = (e) => {
+      if (e) e.stopPropagation();
+      const d = v.duration || 0;
+      if (isFinite(d) && d > 0) v.currentTime = (range.value / 1000) * d;
+      scrubbing = false;
+    };
+    range.addEventListener('change', commit);
+
+    // Keep the bar in sync with playback; remembered so _disable can unbind.
+    this._scrubHandlers = { timeupdate: sync, durationchange: sync, loadedmetadata: sync, play: setIcon, pause: setIcon };
+    v.addEventListener('timeupdate', sync);
+    v.addEventListener('durationchange', sync);
+    v.addEventListener('loadedmetadata', sync);
+    v.addEventListener('play', setIcon);
+    v.addEventListener('pause', setIcon);
+    setIcon();
+    sync();
+
+    bar.appendChild(play);
+    bar.appendChild(range);
+    bar.appendChild(time);
+    this.frame.appendChild(bar);
+    this.scrubBar = bar;
+  }
+
+  _teardownScrub() {
+    if (this.scrubBar && this._scrubHandlers && !this.isImage) {
+      const h = this._scrubHandlers;
+      this.el.removeEventListener('timeupdate', h.timeupdate);
+      this.el.removeEventListener('durationchange', h.durationchange);
+      this.el.removeEventListener('loadedmetadata', h.loadedmetadata);
+      this.el.removeEventListener('play', h.play);
+      this.el.removeEventListener('pause', h.pause);
+    }
+    if (this.scrubBar) { this.scrubBar.remove(); this.scrubBar = null; }
+    this._scrubHandlers = null;
   }
 
   // (Re)build the sphere mesh for the current 360-vs-180 mode. Equirect maps
@@ -376,7 +502,8 @@ class Viewer360 {
     this.camera.rotation.y = this.yaw;
     this.camera.rotation.x = this.pitch;
     this.camera.updateProjectionMatrix();
-    // VideoTexture refreshes from the playing <video> automatically each render.
+    // A VideoTexture refreshes from the playing <video> automatically each
+    // render; a still-image Texture is static (uploaded once).
     this.renderer.render(this.scene, this.camera);
   }
 
@@ -385,6 +512,7 @@ class Viewer360 {
     this.raf = 0;
     if (this._ro) { this._ro.disconnect(); this._ro = null; }
     else window.removeEventListener('resize', this._onResize);
+    this._teardownScrub();
     try {
       if (this.mesh) { this.mesh.geometry.dispose(); this.mesh.material.dispose(); }
       if (this.tex) this.tex.dispose();
@@ -421,7 +549,8 @@ class Viewer360 {
       this.pitch = Math.max(-Math.PI / 2 + 0.01, Math.min(Math.PI / 2 - 0.01, this.pitch - dy * k));
     };
     const up = () => {
-      if (dragging && moved < 6) { if (this.video.paused) this.video.play().catch(() => {}); else this.video.pause(); }
+      // Tap (no real drag) toggles play/pause — video only; a photo has nothing to play.
+      if (dragging && moved < 6 && !this.isImage) { if (this.el.paused) this.el.play().catch(() => {}); else this.el.pause(); }
       dragging = false; c.style.cursor = 'grab';
     };
     const wheel = (e) => { e.preventDefault(); this.fov = Math.max(0.5, Math.min(1.9, this.fov + (e.deltaY > 0 ? 0.05 : -0.05))); };
@@ -473,3 +602,5 @@ function _scanSpherical(b) {
 const _ICON_360 = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><ellipse cx="12" cy="12" rx="10" ry="5"/><path d="M2 12a10 5 0 0 0 20 0"/><path d="M12 2a5 10 0 0 0 0 20"/></svg>';
 const _ICON_EXPAND = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M21 8V5a2 2 0 0 0-2-2h-3"/><path d="M3 16v3a2 2 0 0 0 2 2h3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/></svg>';
 const _ICON_COMPRESS = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M8 3v3a2 2 0 0 1-2 2H3"/><path d="M21 8h-3a2 2 0 0 1-2-2V3"/><path d="M3 16h3a2 2 0 0 1 2 2v3"/><path d="M16 21v-3a2 2 0 0 1 2-2h3"/></svg>';
+const _ICON_PLAY = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="none" style="vertical-align:-2px"><path d="M7 4v16l13-8z"/></svg>';
+const _ICON_PAUSE = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="none" style="vertical-align:-2px"><rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/></svg>';

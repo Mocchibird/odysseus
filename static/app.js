@@ -69,7 +69,7 @@ import { initSectionCollapse, initSectionDrag } from './js/section-management.js
 // re-awaiting. (tasks/calendar are NOT lazy — they have boot side effects and
 // stay eagerly imported above.)
 const _lazyModule = (loader) => { let m; return async () => (m ||= (await loader()).default); };
-const _gallery  = _lazyModule(() => import('./js/gallery.js?v=456'));
+const _gallery  = _lazyModule(() => import('./js/gallery.js?v=525'));
 const _health   = _lazyModule(() => import('./js/health.js?v=524'));
 const _today    = _lazyModule(() => import('./js/today.js?v=422'));
 

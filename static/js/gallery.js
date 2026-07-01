@@ -1904,6 +1904,12 @@ function _openDetail(img) {
     const _vid = document.getElementById('gallery-detail-img');
     const _frame = _vid && _vid.closest('.gallery-detail-img-frame');
     if (_vid && _frame) video360.attach(_vid, _frame, { name: img.prompt || '', url: img.url });
+  } else {
+    // Equirectangular (2:1) still photos get the same 360 viewer — attachImage
+    // self-detects and only reveals the toggle for a genuine panorama.
+    const _photo = document.getElementById('gallery-detail-img');
+    const _frame = _photo && _photo.closest('.gallery-detail-img-frame');
+    if (_photo && _frame) video360.attachImage(_photo, _frame, { name: img.prompt || '', url: img.url });
   }
 
   document.getElementById('gallery-detail-back').addEventListener('click', () => {
