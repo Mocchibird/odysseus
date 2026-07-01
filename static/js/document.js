@@ -6690,7 +6690,18 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
         'white-space:pre-wrap;word-wrap:break-word;overflow-wrap:break-word;overflow:hidden;box-sizing:border-box;';
       wrap.appendChild(mirror);
     }
+    // getComputedStyle().font can serialize to "" (spec-defined, when the
+    // longhands don't fit shorthand grammar), which would silently no-op
+    // this assignment and leave the mirror on its CSS-default font — set
+    // every longhand explicitly so the copy can't fail. See doc-selection-mirror.
     mirror.style.font = style.font;
+    mirror.style.fontFamily = style.fontFamily;
+    mirror.style.fontSize = style.fontSize;
+    mirror.style.fontWeight = style.fontWeight;
+    mirror.style.fontStyle = style.fontStyle;
+    mirror.style.fontStretch = style.fontStretch;
+    mirror.style.fontVariant = style.fontVariant;
+    mirror.style.lineHeight = style.lineHeight;
     mirror.style.padding = style.padding;
     mirror.style.borderWidth = style.borderWidth;
     mirror.style.borderStyle = 'solid';
@@ -7256,8 +7267,14 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
   /** Measure the visual x,y position of a character index inside the
    *  mirror element by inserting a zero-width marker span there and
    *  reading its bounding rect. Returns {x, y} relative to the mirror's
-   *  content-box origin. */
-  function _measurePos(mirror, text, pos) {
+   *  content-box origin (mirror.getBoundingClientRect() is the border
+   *  box, so the mirror's own top/left padding is subtracted back out —
+   *  callers like addRect() in renderAllSelectionHighlights() re-add
+   *  paddingLeft/paddingTop exactly once to get the final position;
+   *  without the subtraction here that padding was counted twice,
+   *  shifting every prose-doc highlight down-right by a full
+   *  padding-box's worth of pixels). */
+  function _measurePos(mirror, text, pos, padLeft, padTop) {
     mirror.innerHTML = '';
     if (pos > 0) mirror.appendChild(document.createTextNode(text.substring(0, pos)));
     const marker = document.createElement('span');
@@ -7265,7 +7282,7 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
     mirror.appendChild(marker);
     const r = marker.getBoundingClientRect();
     const m = mirror.getBoundingClientRect();
-    return { x: r.left - m.left, y: r.top - m.top };
+    return { x: r.left - m.left - padLeft, y: r.top - m.top - padTop };
   }
 
   /** Render persistent highlight overlays for all selections */
@@ -7352,7 +7369,20 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
         'white-space:pre-wrap;word-wrap:break-word;overflow-wrap:break-word;overflow:hidden;box-sizing:border-box;';
       wrap.appendChild(mirror);
     }
+    // getComputedStyle().font can serialize to "" (spec-defined, when the
+    // longhands don't fit shorthand grammar), which would silently no-op
+    // this assignment and leave the mirror on its CSS-default font
+    // (Fira Code @ 16px) instead of the textarea's real font/size. That
+    // divergence is small for narrow Latin glyphs but huge for wide CJK
+    // text — set every font longhand explicitly so the copy can't fail.
     mirror.style.font = style.font;
+    mirror.style.fontFamily = style.fontFamily;
+    mirror.style.fontSize = style.fontSize;
+    mirror.style.fontWeight = style.fontWeight;
+    mirror.style.fontStyle = style.fontStyle;
+    mirror.style.fontStretch = style.fontStretch;
+    mirror.style.fontVariant = style.fontVariant;
+    mirror.style.lineHeight = style.lineHeight;
     mirror.style.padding = style.padding;
     mirror.style.borderWidth = style.borderWidth;
     mirror.style.borderStyle = 'solid';
@@ -7406,8 +7436,8 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
         // a marker span. Render one rect for single-line selections, or
         // three rects (first partial, middle full, last partial) for
         // multi-line selections.
-        const startPos = _measurePos(mirror, text, sel.start);
-        const endPos = _measurePos(mirror, text, sel.end);
+        const startPos = _measurePos(mirror, text, sel.start, paddingLeft, paddingTop);
+        const endPos = _measurePos(mirror, text, sel.end, paddingLeft, paddingTop);
         mirror.innerHTML = '';
 
         const addRect = (top, left, width, height) => {
