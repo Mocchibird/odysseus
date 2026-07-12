@@ -4788,7 +4788,7 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
       }
     } catch (_) {}
     if (!document.getElementById('notes-pane') && !document.getElementById('notes-pane-backdrop')) return;
-    import('./notes.js')
+    import('./notes.js?v=526')
       .then(mod => {
         const close = mod.closeNotes || mod.closePanel || mod.default?.closeNotes || mod.default?.closePanel;
         if (typeof close === 'function') close();

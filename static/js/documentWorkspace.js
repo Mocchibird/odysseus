@@ -13,7 +13,7 @@
 // Opened from the Documents rail button and the /workspace deep link.
 // ============================================
 
-import documentModule from './document.js?v=526';
+import documentModule from './document.js?v=527';
 import uiModule from './ui.js';
 import { langIcon } from './langIcons.js';
 import { attachMdShortcuts } from './mdShortcuts.js?v=478';

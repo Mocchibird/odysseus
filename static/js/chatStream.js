@@ -7,7 +7,7 @@ import Storage from './storage.js';
 import themeModule from './theme.js?v=397';
 import markdownModule from './markdown.js';
 import sessionModule from './sessions.js';
-import documentModule from './document.js?v=526';
+import documentModule from './document.js?v=527';
 
 /**
  * Handle a ui_control SSE event — AI-driven UI manipulation.
@@ -151,7 +151,7 @@ export function handleUIControl(uiData) {
           if (fn) fn();
         }).catch(function(){});
       } else if (panel === 'gallery') {
-        import('./gallery.js?v=526').then(function(mod) {
+        import('./gallery.js?v=527').then(function(mod) {
           var fn = mod.openGallery || (mod.default && mod.default.openGallery);
           if (fn) fn();
         }).catch(function(){});

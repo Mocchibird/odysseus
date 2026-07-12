@@ -8,7 +8,7 @@
 //   - Other static assets (images/fonts/libs): cache-first with bg refresh.
 //   - API / non-GET: never cached.
 // Bump CACHE_NAME whenever the precache list or SW logic changes.
-const CACHE_NAME = 'odysseus-v526';
+const CACHE_NAME = 'odysseus-v527';
 // Separate, long-lived cache for book content (PDF bytes / EPUB chapters) so
 // books you've opened stay readable offline AND survive app-shell version bumps
 // (the activate cleanup below deliberately keeps this one).
@@ -22,7 +22,7 @@ const PRECACHE = [
   '/static/manifest.json',
   '/static/style.css?v=526',
   '/static/fork.css?v=524',
-  '/static/app.js?v=526',
+  '/static/app.js?v=527',
   '/static/js/storage.js',
   '/static/js/i18n.js?v=523',
   '/static/js/i18n/ko.js',
@@ -42,23 +42,23 @@ const PRECACHE = [
   '/static/js/search.js',
   '/static/js/spinner.js',
   '/static/js/tts-ai.js',
-  '/static/js/document.js?v=526',
-  '/static/js/documentWorkspace.js?v=526',
+  '/static/js/document.js?v=527',
+  '/static/js/documentWorkspace.js?v=527',
   '/static/js/mdShortcuts.js?v=478',
-  '/static/js/gallery.js?v=526',
+  '/static/js/gallery.js?v=527',
   '/static/js/video360.js',
-  '/static/js/chatRenderer.js?v=526',
+  '/static/js/chatRenderer.js',
   '/static/js/codeRunner.js',
   '/static/js/chatStream.js',
-  '/static/js/chat.js?v=526',
+  '/static/js/chat.js?v=527',
   '/static/js/composerArrowUpRecall.js',
   '/static/js/cookbook.js',
   '/static/js/search-chat.js',
   '/static/js/compare/index.js',
   '/static/js/theme.js?v=397',
   '/static/js/censor.js',
-  '/static/js/settings.js?v=526',
-  '/static/js/admin.js?v=526',
+  '/static/js/settings.js?v=527',
+  '/static/js/admin.js?v=527',
   '/static/js/init.js',
   '/static/js/slashCommands.js',
   '/static/js/emailInbox.js',
@@ -72,7 +72,7 @@ const PRECACHE = [
   '/static/js/today.js?v=422',
   '/static/js/modalFullscreen.js?v=370',
   '/static/js/pdfReader.js?v=383',
-  '/static/js/tasks.js',
+  '/static/js/tasks.js?v=20260630tasksactivity',
   '/static/js/calendar.js',
   '/static/js/calendar/utils.js',
   '/static/js/group.js',

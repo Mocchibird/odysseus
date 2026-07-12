@@ -6,7 +6,7 @@ import markdownModule from './markdown.js';
 import { svgifyEmoji } from './markdown.js';
 import { addAITTSButton } from './tts-ai.js';
 import { providerLogo, providerLabel } from './providers.js';
-import settingsModule from './settings.js?v=526';
+import settingsModule from './settings.js?v=527';
 import spinnerModule from './spinner.js';
 import { bindMenuDismiss } from './escMenuStack.js';
 import { matchModelKey } from './model/matchKey.js';
@@ -1197,7 +1197,7 @@ document.addEventListener('click', function(e) {
       } catch {}
     });
   } else if (kind === 'document') {
-    import('./document.js?v=526').then(mod => {
+    import('./document.js?v=527').then(mod => {
       const open = mod.loadDocument
         || mod.openDocument
         || (mod.default && (mod.default.loadDocument || mod.default.openDocument));
@@ -1214,7 +1214,7 @@ document.addEventListener('click', function(e) {
       } catch (_) {}
     }).catch(() => {});
   } else if (kind === 'image') {
-    import('./gallery.js?v=526').then(mod => {
+    import('./gallery.js?v=527').then(mod => {
       const open = mod.openGalleryImage || (mod.default && mod.default.openGalleryImage);
       if (open) open(id);
     }).catch(() => {});
@@ -1229,7 +1229,7 @@ document.addEventListener('click', function(e) {
       if (open) open(id);
     }).catch(() => {});
   } else if (kind === 'task') {
-    import('./tasks.js').then(mod => {
+    import('./tasks.js?v=20260630tasksactivity').then(mod => {
       const open = mod.openTasks || (mod.default && mod.default.openTasks);
       if (open) open(id);
       else { const b = document.getElementById('tasks-btn'); if (b) b.click(); }
@@ -1240,7 +1240,7 @@ document.addEventListener('click', function(e) {
       if (open) open(id);
     }).catch(() => {});
   } else if (kind === 'research') {
-    import('./research/panel.js').then(mod => {
+    import('./research/panel.js?v=20260630researchthumb').then(mod => {
       const open = mod.openPanel || (mod.default && mod.default.openPanel);
       if (open) open(id);
     }).catch(() => {});
@@ -1338,7 +1338,7 @@ export function buildImageBubble(imageUrl, prompt, model, size, quality, imageId
     e.stopPropagation();
     try {
       const [galleryMod, editorMod] = await Promise.all([
-        import('./gallery.js?v=526'),
+        import('./gallery.js?v=527'),
         import('./galleryEditor.js'),
       ]);
       // Ensure the Gallery modal is open so the editor has a container
@@ -1372,7 +1372,7 @@ export function buildImageBubble(imageUrl, prompt, model, size, quality, imageId
     galleryBtn.addEventListener('click', async (e) => {
       e.stopPropagation();
       try {
-        const mod = await import('./gallery.js');
+        const mod = await import('./gallery.js?v=527');
         const open = mod.openGalleryImage || (mod.default && mod.default.openGalleryImage);
         if (open) open(imageId);
       } catch (err) {

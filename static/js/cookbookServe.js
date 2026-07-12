@@ -10,7 +10,7 @@ import { providerLogo } from './providers.js';
 import { modelColor } from './chatRenderer.js';
 import { bindMenuDismiss, dismissOrRemove, topPopupZ } from './escMenuStack.js';
 import { openCookbookDependencies } from './cookbook-diagnosis.js';
-import { _hwfitCache } from './cookbook-hwfit.js';
+import { _hwfitCache } from './cookbook-hwfit.js?v=440';
 import { topPortalZ } from './toolWindowZOrder.js';
 
 // Shared state/functions injected by init()
