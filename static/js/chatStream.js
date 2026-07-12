@@ -7,7 +7,7 @@ import Storage from './storage.js';
 import themeModule from './theme.js?v=397';
 import markdownModule from './markdown.js';
 import sessionModule from './sessions.js';
-import documentModule from './document.js';
+import documentModule from './document.js?v=526';
 
 /**
  * Handle a ui_control SSE event — AI-driven UI manipulation.
@@ -151,7 +151,7 @@ export function handleUIControl(uiData) {
           if (fn) fn();
         }).catch(function(){});
       } else if (panel === 'gallery') {
-        import('./gallery.js?v=525').then(function(mod) {
+        import('./gallery.js?v=526').then(function(mod) {
           var fn = mod.openGallery || (mod.default && mod.default.openGallery);
           if (fn) fn();
         }).catch(function(){});
@@ -171,7 +171,7 @@ export function handleUIControl(uiData) {
           if (fn) fn();
         }).catch(function(){});
       } else if (panel === 'notes') {
-        import('./notes.js?v=464').then(function(mod) {
+        import('./notes.js?v=526').then(function(mod) {
           var fn = mod.openPanel || mod.openNotes || (mod.default && (mod.default.openPanel || mod.default.openNotes));
           if (fn) fn();
         }).catch(function(){});
@@ -185,9 +185,17 @@ export function handleUIControl(uiData) {
 
     } else if (uiEvent === 'open_email_reply' || uiData.ui_event === 'open_email_reply') {
       try {
-        var existingDocId = documentModule && documentModule.findEmailDocId
-          ? documentModule.findEmailDocId(uiData.uid, uiData.folder || 'INBOX')
+        var activeCtx = documentModule && documentModule.getActiveEmailComposerContext
+          ? documentModule.getActiveEmailComposerContext()
           : null;
+        var sameActiveDraft = activeCtx
+          && String(activeCtx.sourceUid || '') === String(uiData.uid || '')
+          && String(activeCtx.sourceFolder || 'INBOX') === String(uiData.folder || 'INBOX');
+        var existingDocId = sameActiveDraft && activeCtx.docId
+          ? activeCtx.docId
+          : (documentModule && documentModule.findEmailDocId
+            ? documentModule.findEmailDocId(uiData.uid, uiData.folder || 'INBOX')
+            : null);
         if (existingDocId && documentModule.replaceEmailReplyBody) {
           if (documentModule.loadDocument) documentModule.loadDocument(existingDocId);
           documentModule.replaceEmailReplyBody(existingDocId, uiData.body || '', { force: true });

@@ -130,7 +130,9 @@ class TTSService:
             return bool(settings.get("azure_speech_key") and settings.get("azure_speech_region"))
         if provider == "elevenlabs":
             return bool(settings.get("elevenlabs_api_key"))
-        if provider.startswith("endpoint:"):
+        # isinstance guard (upstream #2034): a non-string tts_provider from a
+        # corrupted settings file must not crash .startswith().
+        if isinstance(provider, str) and provider.startswith("endpoint:"):
             return True  # assume reachable; errors surface at synthesis time
         return False
 

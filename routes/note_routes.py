@@ -13,6 +13,7 @@ from core.database import SessionLocal, Note
 from core.middleware import INTERNAL_TOOL_USER
 from src.auth_helpers import require_user
 from src.constants import DATA_DIR
+from src.upload_handler import reserve_upload_references
 from sqlalchemy.orm.attributes import flag_modified
 
 logger = logging.getLogger(__name__)
@@ -556,18 +557,32 @@ async def dispatch_reminder(
             )
             if intg:
                 ntfy_body = synthesis or note_body or title
-                result = await send_ntfy_notification(
-                    intg,
-                    topic,
-                    ntfy_body,
-                    title=title or _i18n_t("reminder_fallback_title", _lang),
-                    priority="high",
-                    tags="bell",
-                    actions=_reminder_ntfy_actions(note_id, owner),
-                )
-                ntfy_sent = result.get("exit_code") == 0
-                if not ntfy_sent:
-                    ntfy_error = result.get("error") or "ntfy send failed"
+                # SSRF guard (upstream #5142) — same check (and env knob) as the
+                # webhook branch above: link-local / metadata addresses are always
+                # rejected; REMINDER_WEBHOOK_BLOCK_PRIVATE_IPS=true also blocks
+                # RFC-1918 so a ntfy base_url can't point at internal services.
+                # (Non-ASCII titles are handled inside send_ntfy_notification via
+                # its JSON publish path — no lossy ASCII replace needed here.)
+                import os as _os
+                from src.url_safety import check_outbound_url as _chk
+                _block = _os.getenv("REMINDER_WEBHOOK_BLOCK_PRIVATE_IPS", "false").lower() == "true"
+                _ntfy_base = (intg.get("base_url") or "").rstrip("/")
+                _ok, _reason = _chk(f"{_ntfy_base}/{topic}", block_private=_block)
+                if not _ok:
+                    ntfy_error = f"ntfy URL rejected: {_reason}"
+                else:
+                    result = await send_ntfy_notification(
+                        intg,
+                        topic,
+                        ntfy_body,
+                        title=title or _i18n_t("reminder_fallback_title", _lang),
+                        priority="high",
+                        tags="bell",
+                        actions=_reminder_ntfy_actions(note_id, owner),
+                    )
+                    ntfy_sent = result.get("exit_code") == 0
+                    if not ntfy_sent:
+                        ntfy_error = result.get("error") or "ntfy send failed"
             else:
                 ntfy_error = "No enabled ntfy integration"
         except Exception as e:
@@ -658,7 +673,7 @@ async def dispatch_reminder(
 # Router factory
 # ---------------------------------------------------------------------------
 
-def setup_note_routes(task_scheduler=None):
+def setup_note_routes(task_scheduler=None, upload_handler=None):
     # Expose the scheduler to module-level `dispatch_reminder` so reminders
     # can also push to the in-app notification queue (the polling system
     # turns each entry into a real browser Notification + the existing
@@ -679,6 +694,11 @@ def setup_note_routes(task_scheduler=None):
         # path. fire_reminder below already gated this way; the CRUD routes
         # did not.
         return require_user(request) or None
+
+    def _reserve_note_uploads(owner: Optional[str], *values) -> None:
+        missing_id = reserve_upload_references(upload_handler, owner, *values)
+        if missing_id:
+            raise HTTPException(409, f"Referenced upload is no longer available: {missing_id}")
 
     def _is_admin_or_single_user(request: Request, user: str | None) -> bool:
         if user == INTERNAL_TOOL_USER:
@@ -729,6 +749,13 @@ def setup_note_routes(task_scheduler=None):
     @router.post("")
     def create_note(request: Request, body: NoteCreate):
         user = _owner(request)
+        _reserve_note_uploads(
+            user,
+            body.image_url,
+            body.color,
+            body.content,
+            json.dumps(body.items) if body.items is not None else None,
+        )
         db = SessionLocal()
         try:
             note = Note(
@@ -787,6 +814,13 @@ def setup_note_routes(task_scheduler=None):
             if user is not None and note.owner != user:
                 raise HTTPException(404, "Note not found")
 
+            _reserve_note_uploads(
+                user,
+                body.image_url,
+                body.color,
+                body.content,
+                json.dumps(body.items) if body.items is not None else None,
+            )
             if body.title is not None:
                 note.title = body.title
             if body.content is not None:

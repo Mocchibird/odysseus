@@ -2,7 +2,7 @@
 // Admin-only: users, endpoints, MCP, RAG, embeddings, tokens, webhooks, features
 
 import uiModule from './ui.js';
-import settingsModule from './settings.js?v=457';
+import settingsModule from './settings.js?v=526';
 import { providerLogo, providerLogoFromUrl } from './providers.js';
 import { sortModelObjects } from './modelSort.js';
 import { PROVIDER_DEVICE_FLOWS, formatDeviceFlowError, runProviderDeviceFlow } from './providerDeviceFlow.js';
@@ -471,7 +471,7 @@ async function loadEndpoints() {
   const listLegacy = el('adm-epList');
   // Refresh model picker so new endpoints show up in chat
   if (window.modelsModule && window.modelsModule.refreshModels) {
-    window.modelsModule.refreshModels();
+    window.modelsModule.refreshModels(true);
     setTimeout(() => {
       if (window.sessionModule && window.sessionModule.updateModelPicker) {
         window.sessionModule.updateModelPicker();
