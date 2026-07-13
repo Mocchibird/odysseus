@@ -305,7 +305,9 @@ def setup_health_routes(upload_handler=None):
             raise HTTPException(413, "CSV too large (max 5MB)")
         text = raw.decode("utf-8", "replace") if raw else ""
         try:
-            result = hs.import_csv(owner, kind, text)
+            # Off-thread: import_csv parses every row and opens a SQLite session
+            # per row — blocking the event loop for the whole import otherwise.
+            result = await asyncio.to_thread(hs.import_csv, owner, kind, text)
         except ValueError as e:
             raise HTTPException(400, str(e))
         return {"ok": True, **result}

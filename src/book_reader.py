@@ -30,8 +30,7 @@ def list_books(owner: str | None, query: str = "", limit: int = 50) -> list[dict
     return book_store.list_books(owner, query, limit)
 
 
-def save_uploaded_book(owner: str | None, filename: str, content: bytes, *, mime: str = "",
-                       index_content: bool = True) -> dict:
+def save_uploaded_book(owner: str | None, filename: str, content: bytes, *, mime: str = "") -> dict:
     return book_store.add_book(owner, filename, content, mime=mime)
 
 

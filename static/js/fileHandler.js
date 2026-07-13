@@ -462,8 +462,6 @@ export function cancelUpload() {
   }
 }
 
-var escapeHtml = uiModule.esc;
-
 const fileHandlerModule = {
   init,
   openPicker,

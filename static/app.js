@@ -35,7 +35,7 @@ import pingsModule from './js/pings.js?v=396';
 // immediately even if the panel was never opened) — which would silently
 // never run if deferred to first open.
 import galleryModule from './js/gallery.js?v=527';
-import tasksModule from './js/tasks.js?v=20260630tasksactivity';
+import tasksModule from './js/tasks.js?v=20260713taskescape';
 import calendarModule from './js/calendar.js';
 import adminModule from './js/admin.js?v=527';
 import settingsModule from './js/settings.js?v=527';
@@ -1119,12 +1119,6 @@ function initializeEventListeners() {
   // Tasks tool button
   const toolTasksBtn = el('tool-tasks-btn');
   if (toolTasksBtn) {
-  // Agents buttons (sidebar + rail)
-  const agentsBtns = [el("rail-agents"), el("tool-agents-btn")].filter(Boolean);
-  agentsBtns.forEach(btn => {
-    btn.addEventListener("click", () => {
-    });
-  });
     toolTasksBtn.addEventListener('click', () => {
       if (tasksModule) {
         tasksModule.isTasksOpen() ? tasksModule.closeTasks() : tasksModule.openTasks();
@@ -3385,7 +3379,7 @@ function initializeEventListeners() {
       // Focus the composer synchronously so mobile keyboards pop open.
       // iOS Safari only honours programmatic focus inside the original click
       // callback — a setTimeout breaks the user-gesture chain.
-      const _input = el('message-input');
+      const _input = el('message');   // composer id is 'message' (no 'message-input' exists)
       if (_input) { try { _input.focus(); } catch (_) {} }
     });
   }

@@ -62,7 +62,10 @@ def setup_book_routes() -> APIRouter:
 
     @router.get("")
     async def list_books(request: Request, q: str = "", limit: int = 50):
-        return {"ok": True, "books": book_reader.list_books(_owner(request), q, limit)}
+        # Off-thread: list_books hits SQLite + builds excerpts; blocking DB I/O
+        # in an async handler stalls the single-worker event loop.
+        books = await asyncio.to_thread(book_reader.list_books, _owner(request), q, limit)
+        return {"ok": True, "books": books}
 
     @router.post("/upload")
     async def upload_book(request: Request, file: UploadFile = File(...)):
@@ -80,11 +83,14 @@ def setup_book_routes() -> APIRouter:
 
     @router.get("/open")
     async def open_book(request: Request, path: str):
-        return {"ok": True, "book": book_reader.open_book(_owner(request), path)}
+        # Off-thread: open_book parses the whole PDF/EPUB (pypdf / zip + XML),
+        # which would otherwise block the event loop for a large book.
+        book = await asyncio.to_thread(book_reader.open_book, _owner(request), path)
+        return {"ok": True, "book": book}
 
     @router.get("/file")
     async def open_book_file(request: Request, path: str):
-        file_path = book_reader.pdf_file_path(_owner(request), path)
+        file_path = await asyncio.to_thread(book_reader.pdf_file_path, _owner(request), path)
         safe_name = file_path.name.replace('"', "")
         return FileResponse(
             file_path,
@@ -100,11 +106,14 @@ def setup_book_routes() -> APIRouter:
 
     @router.get("/chapter")
     async def read_chapter(request: Request, path: str, chapter_index: int = 0):
-        return {"ok": True, "chapter": book_reader.read_book_chapter(_owner(request), path, chapter_index)}
+        # Off-thread: reads/parses a PDF page or EPUB chapter (pypdf / zip).
+        chapter = await asyncio.to_thread(book_reader.read_book_chapter, _owner(request), path, chapter_index)
+        return {"ok": True, "chapter": chapter}
 
     @router.post("/progress")
     async def save_progress(body: BookProgressRequest, request: Request):
-        progress = book_reader.save_progress(
+        progress = await asyncio.to_thread(
+            book_reader.save_progress,
             _owner(request),
             body.path,
             chapter_index=body.chapter_index,
@@ -118,11 +127,13 @@ def setup_book_routes() -> APIRouter:
 
     @router.post("/title")
     async def save_title(body: BookTitleRequest, request: Request):
-        return {"ok": True, "book": book_reader.save_title(_owner(request), body.path, body.title)}
+        book = await asyncio.to_thread(book_reader.save_title, _owner(request), body.path, body.title)
+        return {"ok": True, "book": book}
 
     @router.post("/favorite")
     async def save_favorite(body: BookFavoriteRequest, request: Request):
-        return {"ok": True, "book": book_reader.set_favorite(_owner(request), body.path, body.favorite)}
+        book = await asyncio.to_thread(book_reader.set_favorite, _owner(request), body.path, body.favorite)
+        return {"ok": True, "book": book}
 
     @router.delete("")
     async def delete_book(request: Request, path: str):
@@ -131,7 +142,7 @@ def setup_book_routes() -> APIRouter:
         `path` is the book's kb_id — the same identifier every other book
         route uses (query-param idiom matches delete_annotation below).
         """
-        removed = book_reader.delete_book(_owner(request), path)
+        removed = await asyncio.to_thread(book_reader.delete_book, _owner(request), path)
         if not removed:
             raise HTTPException(404, "Book not found")
         return {"ok": True}
@@ -148,20 +159,34 @@ def setup_book_routes() -> APIRouter:
 
     @router.get("/cover")
     async def book_cover(request: Request, path: str):
-        cover = book_reader.get_cover(_owner(request), path)
+        cover = await asyncio.to_thread(book_reader.get_cover, _owner(request), path)
         if not cover:
             raise HTTPException(404, "No cover available")
         data, content_type = cover
+        # A cover comes from an untrusted uploaded EPUB. An SVG served inline as
+        # image/svg+xml can carry <script> that runs on the app origin (stored
+        # XSS). Force a non-executable image type + attachment disposition +
+        # a strict CSP so a hostile cover can't script the page.
+        if "svg" in (content_type or "").lower():
+            content_type = "application/octet-stream"
         # identity = skip GZipMiddleware for already-compressed cover images.
-        return Response(content=data, media_type=content_type, headers={"Cache-Control": "public, max-age=86400", "Content-Encoding": "identity"})
+        return Response(content=data, media_type=content_type, headers={
+            "Cache-Control": "public, max-age=86400",
+            "Content-Encoding": "identity",
+            "Content-Disposition": "inline",
+            "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; sandbox",
+            "X-Content-Type-Options": "nosniff",
+        })
 
     @router.get("/annotations")
     async def list_annotations(request: Request, path: str):
-        return {"ok": True, **book_reader.list_annotations(_owner(request), path)}
+        data = await asyncio.to_thread(book_reader.list_annotations, _owner(request), path)
+        return {"ok": True, **data}
 
     @router.post("/annotations")
     async def add_annotation(body: BookAnnotationRequest, request: Request):
-        item = book_reader.add_annotation(
+        item = await asyncio.to_thread(
+            book_reader.add_annotation,
             _owner(request), body.path,
             type=body.type, chapter_index=body.chapter_index, chapter_title=body.chapter_title,
             text=body.text, note=body.note, color=body.color, scroll_percent=body.scroll_percent,
@@ -170,7 +195,7 @@ def setup_book_routes() -> APIRouter:
 
     @router.delete("/annotations")
     async def delete_annotation(request: Request, path: str, id: str):
-        removed = book_reader.delete_annotation(_owner(request), path, id)
+        removed = await asyncio.to_thread(book_reader.delete_annotation, _owner(request), path, id)
         if not removed:
             raise HTTPException(404, "Annotation not found")
         return {"ok": True}

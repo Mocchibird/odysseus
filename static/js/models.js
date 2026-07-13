@@ -188,18 +188,22 @@ export async function refreshModels(force = false) {
         // back — newly-served endpoints don't appear until the cache
         // ages out. (Bug repro: serve a model, picker is empty for ~30s
         // even though the endpoint is in the DB and online.)
-        const _seq = ++_fetchSeq;
         const _url = `${API_BASE}/api/models` + (force ? '?refresh=true' : '?background=false');
         _fetchInflight = fetch(_url, { credentials: 'same-origin' })
           .then(async (res) => {
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
-            const data = await res.json();
-            return { data, seq: _seq };
+            return res.json();
           })
           .finally(() => { _fetchInflight = null; });
       }
-      const { data, seq } = await _fetchInflight;
-      if (seq < _fetchSeq) return;
+      // Capture the sequence in the closure (NOT in the resolved value):
+      // _fetchInflight is shared with getModelsData(), which resolves the raw
+      // JSON. Wrapping it as {data, seq} here made whichever function reused the
+      // other's in-flight promise read the wrong shape — corrupting/emptying
+      // _cachedItems or throwing "(scan failed)" on a boot-time race.
+      const _seq = ++_fetchSeq;
+      const data = await _fetchInflight;
+      if (_seq < _fetchSeq) return;
       _lastFetchTime = Date.now();
       _cachedItems = data.items || [];
     } catch (e) {
