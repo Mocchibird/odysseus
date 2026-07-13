@@ -191,7 +191,10 @@ function _heatmapSVG(cells, { cell = 12, gap = 3 } = {}) {
     const slot = lead + i;
     const col = Math.floor(slot / 7);
     const row = slot % 7;
-    return { ...c, x: padLeft + col * step, y: padTop + row * step };
+    // `row` must be on the object: the month-label loop below tests `g.row === 0`
+    // to find each column's top cell. Without it, g.row was undefined and NO
+    // month label ever rendered.
+    return { ...c, x: padLeft + col * step, y: padTop + row * step, row };
   });
   const cols = Math.ceil((lead + cells.length) / 7);
   const width = padLeft + cols * step + 2;

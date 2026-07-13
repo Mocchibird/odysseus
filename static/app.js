@@ -70,7 +70,7 @@ import { initSectionCollapse, initSectionDrag } from './js/section-management.js
 // stay eagerly imported above.)
 const _lazyModule = (loader) => { let m; return async () => (m ||= (await loader()).default); };
 const _gallery  = _lazyModule(() => import('./js/gallery.js?v=527'));
-const _health   = _lazyModule(() => import('./js/health.js?v=524'));
+const _health   = _lazyModule(() => import('./js/health.js?v=529'));
 const _today    = _lazyModule(() => import('./js/today.js?v=422'));
 
 const API_BASE = window.location.origin;
@@ -824,7 +824,10 @@ function initializeEventListeners() {
     'memory-modal': null,
     'theme-modal': null,
   };
-  const _dynamicModalIds = ['library-modal', 'archive-modal', 'doclib-modal', 'gallery-modal', 'tasks-modal'];
+  // email-lib-modal is dynamically created (openEmailLibrary removes any existing
+  // one + recreates), so a backdrop-dismiss must REMOVE it, not just hide it —
+  // a hidden zombie left in the DOM otherwise swallowed the next Escape press.
+  const _dynamicModalIds = ['library-modal', 'archive-modal', 'doclib-modal', 'gallery-modal', 'tasks-modal', 'email-lib-modal'];
   function dismissModal(modal) {
     if (!modal || modal.classList.contains('hidden')) return;
     if (modal.id === 'gallery-modal') {
@@ -4053,18 +4056,15 @@ function startOdysseusApp() {
         return;
       }
 
-      // If streaming, this is the Stop button — abort the run (handleSubmit
-      // detects isStreaming and stops it). MUST come before the mic/record
-      // branch below: while streaming the composer is empty and STT may be on,
-      // which would otherwise START A VOICE RECORDING instead of stopping.
-      if (sendBtn.dataset.mode === 'streaming') {
-        handleSubmit(e);
-        return;
-      }
-
       const hasText = messageInput && messageInput.value.trim().length > 0;
       const hasFiles = _hasAttachments();
 
+      // If streaming, this is the Stop button — abort the run (handleSubmit
+      // detects isStreaming and stops it). MUST come before the mic/record
+      // branch below: while streaming the composer may be empty and STT may be
+      // on, which would otherwise START A VOICE RECORDING instead of stopping.
+      // If the user typed a follow-up while the run streamed, queue it so it
+      // auto-submits once this run stops (mobile "enter to queue" prompts).
       if (sendBtn.dataset.mode === 'streaming') {
         if (hasText) window.__odysseusQueueStreamingSubmit = Date.now();
         handleSubmit(e);

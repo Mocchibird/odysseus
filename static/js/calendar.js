@@ -1746,60 +1746,6 @@ async function _renderAgenda() {
   _updateBadge();
 }
 
-// ── Search View ──
-
-async function _renderSearch() {
-  const body = document.getElementById('cal-body');
-  if (!body) return;
-  // Search across all events in pool (no fetch needed — use what we have)
-  const q = _searchQuery.toLowerCase();
-  const results = Object.values(_allEvents)
-    .filter(ev => !!_eventVisible(ev))
-    .filter(ev =>
-      (ev.summary || '').toLowerCase().includes(q) ||
-      (ev.description || '').toLowerCase().includes(q) ||
-      (ev.location || '').toLowerCase().includes(q)
-    )
-    .sort((a, b) => a.dtstart < b.dtstart ? -1 : 1);
-
-  let h = _headerHTML() + _filtersRowHTML() + '<div class="cal-search-results">';
-  h += `<div class="cal-search-count">${results.length} result${results.length !== 1 ? 's' : ''} for "${_e(_searchQuery)}"</div>`;
-  if (!results.length) {
-    h += '<div class="cal-empty">No events match your search</div>';
-  } else {
-    for (const ev of results) {
-      const evDate = _localDateOf(ev.dtstart);
-      const t = ev.all_day ? 'All day' : _fmtTime(ev.dtstart) + ' – ' + _fmtTime(ev.dtend);
-      h += `<div class="cal-agenda-event" data-uid="${_e(ev.uid)}">
-        <div class="cal-event-dot" style="background:${_calColor(ev)}"></div>
-        <div class="cal-event-info">
-          <div class="cal-event-name">${_e(ev.summary)}</div>
-          <div class="cal-event-time">${_fmtDate(evDate)} · ${t}${ev.location ? ' · ' + _locHTML(ev.location) : ''}</div>
-        </div>
-        <button class="cal-event-more" data-uid="${_e(ev.uid)}" title="More">${_moreIcon}</button>
-      </div>`;
-    }
-  }
-  h += '</div>';
-  // If the user grabbed the quick-add field mid-fetch, skip the swap (which
-  // would destroy the focused input + drop the keyboard) and defer until blur.
-  if (_qaTyping()) { _renderPending = true; return; }
-  body.innerHTML = h;
-  _wireAll(body);
-  _wireQuickDelete(body);
-  body.querySelectorAll('.cal-agenda-event').forEach(el => el.addEventListener('click', (e) => {
-    if (e.target.closest('.cal-event-more')) return;
-    const ev = _allEvents[el.dataset.uid];
-    if (ev) _showEventForm(ev);
-  }));
-  // Focus search input after re-render
-  const searchInput = document.getElementById('cal-search');
-  if (searchInput && document.activeElement !== searchInput) {
-    searchInput.focus();
-    searchInput.setSelectionRange(searchInput.value.length, searchInput.value.length);
-  }
-}
-
 // ── Year View ──
 
 async function _renderYear() {
@@ -3603,7 +3549,7 @@ async function openCalendarTo(target) {
       const now = new Date();
       await _fetchEvents(`${now.getFullYear()}-01-01`, `${now.getFullYear() + 2}-01-01`);
       _currentDate = now;
-      _selectedDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      _selectedDay = _ds(now);   // 'YYYY-MM-DD' string — matches every other _selectedDay path
       _view = 'month';
       _render();
       return;
@@ -3617,18 +3563,15 @@ async function openCalendarTo(target) {
       // Treat as an event uid — find it among loaded events.
       const ev = Object.values(_allEvents || {}).find(e => e.uid === targetStr || (e.uid || '').startsWith(targetStr));
       if (ev && ev.dtstart) dt = new Date(ev.dtstart);
-      if (ev) _highlightEventUid = ev.uid;
     }
     if (dt && !isNaN(dt.getTime())) {
       _currentDate = new Date(dt);
-      _selectedDay = new Date(dt.getFullYear(), dt.getMonth(), dt.getDate());
+      _selectedDay = _ds(dt);   // 'YYYY-MM-DD' string — matches every other _selectedDay path
       _view = 'month';
       _render();
     }
   } catch (e) { /* best-effort focus */ }
 }
-
-let _highlightEventUid = null;
 
 function _doCloseCalendar() {
   _open = false;

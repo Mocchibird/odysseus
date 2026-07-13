@@ -8,7 +8,7 @@
 //   - Other static assets (images/fonts/libs): cache-first with bg refresh.
 //   - API / non-GET: never cached.
 // Bump CACHE_NAME whenever the precache list or SW logic changes.
-const CACHE_NAME = 'odysseus-v528';
+const CACHE_NAME = 'odysseus-v529';
 // Separate, long-lived cache for book content (PDF bytes / EPUB chapters) so
 // books you've opened stay readable offline AND survive app-shell version bumps
 // (the activate cleanup below deliberately keeps this one).
@@ -22,7 +22,7 @@ const PRECACHE = [
   '/static/manifest.json',
   '/static/style.css?v=526',
   '/static/fork.css?v=524',
-  '/static/app.js?v=528',
+  '/static/app.js?v=529',
   '/static/js/storage.js',
   '/static/js/i18n.js?v=523',
   '/static/js/i18n/ko.js',
@@ -67,7 +67,7 @@ const PRECACHE = [
   '/static/js/emailLibrary/state.js',
   '/static/js/notes.js?v=526',
   '/static/js/bookTools.js?v=395',
-  '/static/js/health.js?v=524',
+  '/static/js/health.js?v=529',
   '/static/js/pings.js?v=396',
   '/static/js/today.js?v=422',
   '/static/js/modalFullscreen.js?v=370',
