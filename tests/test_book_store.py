@@ -10,7 +10,7 @@ import pytest
 
 pytest.importorskip("sqlalchemy")
 
-from core.database import Base, engine  # noqa: E402
+from core.database import Base, engine, SessionLocal, Book  # noqa: E402
 from src import book_store  # noqa: E402
 from fastapi import HTTPException  # noqa: E402
 
@@ -20,7 +20,21 @@ def _tables_and_tmp(monkeypatch, tmp_path):
     Base.metadata.create_all(bind=engine)
     monkeypatch.setattr("src.book_store._books_dir", lambda: str(tmp_path / "books"))
     monkeypatch.setattr("src.rag_singleton.get_rag_manager", lambda: None)
+
+    def _clear_books():
+        db = SessionLocal()
+        try:
+            db.query(Book).delete()
+            db.commit()
+        finally:
+            db.close()
+
+    # These tests assert exact per-owner book sets, so start (and leave) from a
+    # clean Book table — otherwise a book left by any earlier test in the run
+    # makes list/count assertions flaky under a given collection order.
+    _clear_books()
     yield
+    _clear_books()
 
 
 def test_add_book_appears_in_books_owner_scoped():

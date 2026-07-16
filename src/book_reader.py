@@ -63,11 +63,43 @@ def _metadata_text(value) -> str:
         return ""
 
 
+# Parsed-structure cache (see epub_reader for the rationale). pypdf re-parses
+# the xref/trailer/page-tree on every PdfReader(), so page turns re-parse the
+# whole file; cache the parsed structure per file keyed on (mtime_ns, size) and
+# on include_pages (the two shapes differ), reading progress fresh each call.
+_PDF_CACHE: dict = {}
+_PDF_CACHE_MAX = 16
+
+
+def _file_sig(path: Path):
+    try:
+        st = path.stat()
+        return (st.st_mtime_ns, st.st_size)
+    except OSError:
+        return None
+
+
 def parse_pdf(owner: str | None, kb_id: str, *, include_pages: bool = True) -> dict:
     b = _require_book(owner, kb_id)
     path = book_store.resolve_book_file(owner, kb_id)
     if not path.is_file():
         raise HTTPException(404, "PDF not found")
+    sig = _file_sig(path)
+    key = (str(path), include_pages)
+    hit = _PDF_CACHE.get(key)
+    if hit is not None and sig is not None and hit[0] == sig:
+        base = hit[1]
+    else:
+        base = _parse_pdf_structure(b, path, kb_id, include_pages)
+        if sig is not None:
+            _PDF_CACHE[key] = (sig, base)
+            while len(_PDF_CACHE) > _PDF_CACHE_MAX:
+                _PDF_CACHE.pop(next(iter(_PDF_CACHE)))
+    return {**base, "progress": book_store.get_progress(owner, kb_id)}
+
+
+def _parse_pdf_structure(b: dict, path: Path, kb_id: str, include_pages: bool) -> dict:
+    """The (cacheable) PDF parse, without reading progress."""
     try:
         from pypdf import PdfReader
         reader = PdfReader(str(path))
@@ -99,7 +131,6 @@ def parse_pdf(owner: str | None, kb_id: str, *, include_pages: bool = True) -> d
         "id": kb_id, "kind": "pdf", "path": kb_id,
         "title": b["title"], "author": author,
         "chapter_count": len(chapters), "chapters": chapters,
-        "progress": book_store.get_progress(owner, kb_id),
     }
 
 

@@ -199,7 +199,41 @@ def _epub_toc_titles(zf: zipfile.ZipFile, manifest: dict, opf_dir: str, opf: ET.
     return titles
 
 
+# Parsed-structure cache. Reading a book re-hits parse_epub_toc constantly
+# (every page turn calls it; search calls it once) and each miss re-opens the
+# zip and re-parses container.xml + OPF + nav/NCX. Cache the structure per file,
+# keyed on (mtime_ns, size) so an out-of-band change invalidates it, and always
+# read reading-progress fresh (it changes as the user reads).
+_TOC_CACHE: dict = {}
+_TOC_CACHE_MAX = 16
+
+
+def _file_sig(path: Path):
+    try:
+        st = path.stat()
+        return (st.st_mtime_ns, st.st_size)
+    except OSError:
+        return None
+
+
 def parse_epub_toc(owner: str | None, kb_id: str) -> dict:
+    path = book_store.resolve_book_file(owner, kb_id)
+    sig = _file_sig(path)
+    key = str(path)
+    hit = _TOC_CACHE.get(key)
+    if hit is not None and sig is not None and hit[0] == sig:
+        base = hit[1]
+    else:
+        base = _parse_epub_structure(owner, kb_id)
+        if sig is not None:
+            _TOC_CACHE[key] = (sig, base)
+            while len(_TOC_CACHE) > _TOC_CACHE_MAX:
+                _TOC_CACHE.pop(next(iter(_TOC_CACHE)))
+    return {**base, "progress": book_store.get_progress(owner, kb_id)}
+
+
+def _parse_epub_structure(owner: str | None, kb_id: str) -> dict:
+    """The (cacheable) TOC + metadata parse, without reading progress."""
     path, _kb, opf_dir, opf = _epub_package(owner, kb_id)
     metadata = opf.find("opf:metadata", _NS)
     title = _text_or_empty(metadata.find("dc:title", _NS) if metadata is not None else None) or path.stem
@@ -241,7 +275,6 @@ def parse_epub_toc(owner: str | None, kb_id: str) -> dict:
         "author": author,
         "chapter_count": len(chapters),
         "chapters": chapters,
-        "progress": book_store.get_progress(owner, kb_id),
     }
 
 
