@@ -13,7 +13,7 @@ import pytest
 
 pytest.importorskip("sqlalchemy")
 
-from core.database import Base, engine  # noqa: E402
+from core.database import Base, engine, SessionLocal, FileItem  # noqa: E402
 from src import file_store as fs  # noqa: E402
 
 
@@ -23,6 +23,15 @@ def _tables_and_tmp(monkeypatch, tmp_path):
     monkeypatch.setattr("src.file_store._files_dir", lambda: str(tmp_path / "files"))
     monkeypatch.setattr("src.rag_singleton.get_rag_manager", lambda: None)
     yield
+    # Isolation: the documented dev workflow runs against a file-backed DB where
+    # rows persist across runs, so count()/exact-count assertions would
+    # false-fail as they accumulate. Clear the FileItem table after each test.
+    db = SessionLocal()
+    try:
+        db.query(FileItem).delete()
+        db.commit()
+    finally:
+        db.close()
 
 
 def _ingest(owner, name, content, mime="text/plain", tags=""):

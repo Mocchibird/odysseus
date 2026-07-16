@@ -9,7 +9,10 @@ import pytest
 
 pytest.importorskip("sqlalchemy")
 
-from core.database import Base, engine  # noqa: E402
+from core.database import (  # noqa: E402
+    Base, engine, SessionLocal,
+    Habit, HabitLog, Meal, WeightEntry, HealthProfile, TrainingSession,
+)
 from src import health_store as hs  # noqa: E402
 
 
@@ -17,6 +20,17 @@ from src import health_store as hs  # noqa: E402
 def _tables():
     Base.metadata.create_all(bind=engine)
     yield
+    # Isolation: the documented dev workflow runs against a file-backed DB where
+    # rows persist across runs, so exact-count assertions would false-fail as
+    # they accumulate. Clear every fork table these tests touch after each test.
+    # HabitLog before Habit (FK), the rest are independent.
+    db = SessionLocal()
+    try:
+        for M in (HabitLog, Habit, Meal, WeightEntry, TrainingSession, HealthProfile):
+            db.query(M).delete()
+        db.commit()
+    finally:
+        db.close()
 
 
 def test_habit_create_toggle_streak_heatmap():
