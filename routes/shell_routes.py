@@ -48,6 +48,13 @@ from core.platform_compat import (
     find_bash,
 )
 
+# rembg install extra. Defaults to "cpu": the default Odysseus image is CPU-only
+# and rembg[gpu] pulls onnxruntime-gpu, which clobbers the CPU onnxruntime that
+# fastembed/magika depend on (taking down RAG, semantic memory, and tool
+# selection — a documented cascade). Overridable via env for GPU images, but the
+# default MUST stay "cpu" so a bad merge can't silently revert to [gpu].
+_REMBG_EXTRA = (os.getenv("ODYSSEUS_REMBG_EXTRA") or "cpu").strip()
+
 
 def _require_admin(request: Request):
     """Reject non-admin callers. Shell exec is admin-only — never expose to
@@ -1220,7 +1227,8 @@ def setup_shell_routes() -> APIRouter:
                 # CUDA build can't load (libcudart.so.* missing) AND clobbers the
                 # CPU onnxruntime that fastembed/magika depend on — taking down
                 # RAG, semantic memory, and tool selection. [cpu] is safe here.
-                "pip": "rembg[cpu]",
+                # Spec is built from _REMBG_EXTRA (env-overridable, default cpu).
+                "pip": f"rembg[{_REMBG_EXTRA}]",
                 "desc": "AI background removal for image editor",
                 "category": "Image",
                 "target": "local",
@@ -1577,6 +1585,7 @@ def setup_shell_routes() -> APIRouter:
             return {"ok": False, "error": "No package specified"}
         # Validate against known packages to prevent arbitrary pip install
         known = {
+            f"rembg[{_REMBG_EXTRA}]",
             "rembg[cpu]",
             "rembg[gpu]",
             "hf_transfer",
