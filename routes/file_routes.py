@@ -13,7 +13,7 @@ import os
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 from fastapi.responses import FileResponse
 
-from src.auth_helpers import get_current_user
+from src.auth_helpers import require_user
 from src import file_store as fs
 
 logger = logging.getLogger(__name__)
@@ -24,18 +24,18 @@ def setup_file_routes(upload_handler) -> APIRouter:
 
     @router.get("")
     async def files_search(request: Request, q: str = "", tags: str = "", limit: int = 50):
-        owner = get_current_user(request)
+        owner = require_user(request) or None
         tag_list = [t.strip() for t in (tags or "").split(",") if t.strip()]
         return {"files": await asyncio.to_thread(fs.search, owner, q=q, tags=tag_list, limit=limit)}
 
     @router.get("/tags")
     async def files_tags(request: Request):
-        owner = get_current_user(request)
+        owner = require_user(request) or None
         return {"tags": await asyncio.to_thread(fs.list_tags, owner)}
 
     @router.get("/{file_id}")
     async def files_get(request: Request, file_id: str):
-        owner = get_current_user(request)
+        owner = require_user(request) or None
         rec = await asyncio.to_thread(fs.get, owner, file_id)
         if not rec:
             raise HTTPException(404, "Not found")
@@ -44,7 +44,7 @@ def setup_file_routes(upload_handler) -> APIRouter:
     @router.get("/{file_id}/raw")
     async def files_raw(request: Request, file_id: str):
         """Serve the ACTUAL stored file — the open-and-verify path."""
-        owner = get_current_user(request)
+        owner = require_user(request) or None
         path = await asyncio.to_thread(fs.file_abspath, owner, file_id)
         if not path:
             raise HTTPException(404, "File not found")
@@ -59,7 +59,7 @@ def setup_file_routes(upload_handler) -> APIRouter:
     async def files_add(request: Request, background_tasks: BackgroundTasks):
         """Ingest an already-uploaded file into the Files store. Upload the bytes
         via /api/upload, then POST its id here to extract + index + tag it."""
-        owner = get_current_user(request)
+        owner = require_user(request) or None
         body = await request.json()
         upload_id = str(body.get("upload_id") or "").strip()
         if not upload_id:
@@ -85,7 +85,7 @@ def setup_file_routes(upload_handler) -> APIRouter:
 
     @router.put("/{file_id}/tags")
     async def files_set_tags(request: Request, file_id: str):
-        owner = get_current_user(request)
+        owner = require_user(request) or None
         body = await request.json()
         rec = fs.set_tags(owner, file_id, body.get("tags") or "")
         if not rec:
@@ -96,7 +96,7 @@ def setup_file_routes(upload_handler) -> APIRouter:
     async def files_update(request: Request, file_id: str):
         """Edit a file's content / searchable text (and optionally its name).
         Re-indexes RAG, so it's off-threaded."""
-        owner = get_current_user(request)
+        owner = require_user(request) or None
         body = await request.json()
         text = body.get("text")
         filename = body.get("filename")
@@ -109,7 +109,7 @@ def setup_file_routes(upload_handler) -> APIRouter:
 
     @router.post("/{file_id}/autotag")
     async def files_autotag(request: Request, file_id: str):
-        owner = get_current_user(request)
+        owner = require_user(request) or None
         rec = await asyncio.to_thread(fs.generate_ai_tags, owner, file_id)
         if not rec:
             raise HTTPException(404, "Not found")
@@ -117,7 +117,7 @@ def setup_file_routes(upload_handler) -> APIRouter:
 
     @router.delete("/{file_id}")
     async def files_delete(request: Request, file_id: str):
-        owner = get_current_user(request)
+        owner = require_user(request) or None
         if not fs.delete(owner, file_id):
             raise HTTPException(404, "Not found")
         return {"ok": True}

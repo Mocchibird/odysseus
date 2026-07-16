@@ -177,8 +177,15 @@ def _normalize_ics_feed_url(url: str) -> str:
 
 
 def _ics_block_private_ips() -> bool:
-    return _os.environ.get("ODYSSEUS_ICS_BLOCK_PRIVATE_IPS", "0").strip().lower() in {
-        "1", "true", "yes", "on"
+    # Default TRUE: subscribing a calendar FEED to a loopback/LAN address is not a
+    # legitimate use case, and an agent steered by a prompt-injected "add this to
+    # my calendar" must not become an internal-network read/scan primitive against
+    # the box's neighbours (admin UI, dockge, sibling containers, router). Set
+    # ODYSSEUS_ICS_BLOCK_PRIVATE_IPS=0 only if you genuinely subscribe to a
+    # calendar served on your LAN. (Unlike the local-first embedding-endpoint
+    # rationale in src/url_safety.py, there is no local-first case for ICS feeds.)
+    return _os.environ.get("ODYSSEUS_ICS_BLOCK_PRIVATE_IPS", "1").strip().lower() not in {
+        "0", "false", "no", "off"
     }
 
 
@@ -290,11 +297,15 @@ def _import_ics_content(
 
     deleted_existing = 0
     if replace_existing:
+        # Stage the delete in the SAME transaction as the re-import below — do NOT
+        # commit it here. If a malformed VEVENT raises mid-loop, the final commit
+        # never runs and this delete rolls back with it; committing here would
+        # wipe the subscribed calendar and leave it empty whenever the feed can't
+        # be fully parsed (silent data loss on every re-sync of a flaky feed).
         deleted_existing = db.query(CalendarEvent).filter(
             CalendarEvent.calendar_id == target_cal.id,
             CalendarEvent.origin == "ics",
         ).delete()
-        db.commit()
 
     imported = skipped = repaired = 0
     for comp in cal_data.walk():

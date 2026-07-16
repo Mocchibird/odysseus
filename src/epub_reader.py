@@ -24,11 +24,34 @@ _NS = {
 }
 
 
-def _zip_read_text(zf: zipfile.ZipFile, name: str) -> str:
+# Per-entry decompression cap. A legit EPUB chapter/cover is well under this;
+# the cap stops a decompression bomb (a tiny compressed entry that inflates to
+# hundreds of GB) from OOM-killing the single worker on the resource-light box.
+# The compressed-upload cap (MAX_BOOK_UPLOAD_BYTES) does NOT bound this — deflate
+# reaches ~1000x — so guard at read time, per entry.
+_MAX_ZIP_ENTRY_BYTES = 25 * 1024 * 1024  # 25 MiB
+
+
+def _zip_read_bytes(zf: zipfile.ZipFile, name: str, max_bytes: int = _MAX_ZIP_ENTRY_BYTES) -> bytes:
+    """Read one zip entry with a hard decompression cap (SSRF/DoS: zip bomb)."""
     try:
-        return zf.read(name).decode("utf-8", errors="replace")
+        info = zf.getinfo(name)
     except KeyError:
         raise HTTPException(422, f"EPUB item not found: {name}")
+    # Declared (uncompressed) size is a cheap first gate...
+    if info.file_size > max_bytes:
+        raise HTTPException(413, f"EPUB item too large: {name}")
+    # ...but the central-directory size can lie, so bound the ACTUAL decompression
+    # by streaming at most max_bytes+1 decompressed bytes.
+    with zf.open(name) as fh:
+        data = fh.read(max_bytes + 1)
+    if len(data) > max_bytes:
+        raise HTTPException(413, f"EPUB item too large: {name}")
+    return data
+
+
+def _zip_read_text(zf: zipfile.ZipFile, name: str) -> str:
+    return _zip_read_bytes(zf, name).decode("utf-8", errors="replace")
 
 
 def _join_epub_path(base_dir: str, href: str) -> str:
@@ -116,7 +139,7 @@ def _epub_package(owner: str | None, kb_id: str) -> tuple[Path, str, str, ET.Ele
     try:
         with zipfile.ZipFile(path) as zf:
             try:
-                container_xml = zf.read("META-INF/container.xml")
+                container_xml = _zip_read_bytes(zf, "META-INF/container.xml")
             except KeyError:
                 raise HTTPException(422, "EPUB container.xml not found")
             root = _xml_fromstring(container_xml)
@@ -124,7 +147,7 @@ def _epub_package(owner: str | None, kb_id: str) -> tuple[Path, str, str, ET.Ele
             opf_path = rootfile.attrib.get("full-path", "") if rootfile is not None else ""
             if not opf_path:
                 raise HTTPException(422, "EPUB root package not found")
-            opf = _xml_fromstring(zf.read(opf_path))
+            opf = _xml_fromstring(_zip_read_bytes(zf, opf_path))
     except zipfile.BadZipFile:
         raise HTTPException(422, "Invalid EPUB zip file")
     except ValueError as e:
@@ -157,7 +180,7 @@ def _epub_toc_titles(zf: zipfile.ZipFile, manifest: dict, opf_dir: str, opf: ET.
     ncx_item = manifest.get(toc_id) or next((item for item in manifest.values() if item.get("media_type") == "application/x-dtbncx+xml"), None)
     if ncx_item:
         try:
-            root = _xml_fromstring(zf.read(ncx_item["href"]))
+            root = _xml_fromstring(_zip_read_bytes(zf, ncx_item["href"]))
             ns = {"ncx": "http://www.daisy.org/z3986/2005/ncx/"}
             base = str(Path(ncx_item["href"]).parent)
             if base == ".":
@@ -279,7 +302,7 @@ def extract_cover(owner: str | None, kb_id: str) -> tuple[bytes, str] | None:
 
     try:
         with zipfile.ZipFile(path) as zf:
-            data = zf.read(cover_href)
+            data = _zip_read_bytes(zf, cover_href)
     except Exception:
         return None
     if not data:
