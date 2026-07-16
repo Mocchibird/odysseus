@@ -54,6 +54,29 @@ def test_habit_create_toggle_streak_heatmap():
     assert hs.set_habit_day(owner, hid, day=today)["done"] is False  # toggle off
 
 
+def test_streak_spans_beyond_load_window():
+    """A streak longer than the list-load window must be counted EXACTLY (the
+    full-history fallback), not capped at the window."""
+    owner = "streak-long"
+    hid = hs.create_habit(owner, "Daily")["id"]
+    n = hs._HABIT_LIST_WINDOW_DAYS + 15  # consecutive days incl. today, past the window
+    for i in range(n):
+        hs.set_habit_day(owner, hid, day=(date.today() - timedelta(days=i)).isoformat(), done=True)
+    assert hs.list_habits(owner)[0]["streak"] == n
+
+
+def test_streak_stops_at_gap_within_window():
+    """A gap inside the window ends the streak at the right length (older done
+    days beyond the gap don't inflate it)."""
+    owner = "streak-gap"
+    hid = hs.create_habit(owner, "Daily")["id"]
+    for i in list(range(0, 5)) + [6, 7, 8]:  # done today..-4, gap at -5, then -6..-8
+        hs.set_habit_day(owner, hid, day=(date.today() - timedelta(days=i)).isoformat(), done=True)
+    listed = hs.list_habits(owner)[0]
+    assert listed["streak"] == 5
+    assert listed["done_7d"] == 6  # today..-4 (5) + -6 (1) within the 7-day window
+
+
 def test_owner_isolation():
     hs.create_habit("iso-a", "A only")
     hs.create_habit("iso-b", "B only")

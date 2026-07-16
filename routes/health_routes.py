@@ -69,11 +69,10 @@ def setup_health_routes(upload_handler=None):
     async def create_habit(request: Request):
         owner = _owner(request)
         body = await request.json()
+        fields = {k: body.get(k) for k in
+                  ("category", "cadence", "cadence_n", "target_time", "color", "icon", "description")}
         try:
-            habit = hs.create_habit(owner, body.get("name", ""), **{
-                k: body.get(k) for k in
-                ("category", "cadence", "cadence_n", "target_time", "color", "icon", "description")
-            })
+            habit = await asyncio.to_thread(hs.create_habit, owner, body.get("name", ""), **fields)
         except ValueError as e:
             raise HTTPException(400, str(e))
         return {"ok": True, "habit": habit}
@@ -82,7 +81,7 @@ def setup_health_routes(upload_handler=None):
     async def update_habit(habit_id: int, request: Request):
         owner = _owner(request)
         body = await request.json()
-        habit = hs.update_habit(owner, habit_id, **body)
+        habit = await asyncio.to_thread(hs.update_habit, owner, habit_id, **body)
         if not habit:
             raise HTTPException(404, "Habit not found")
         return {"ok": True, "habit": habit}
@@ -97,8 +96,8 @@ def setup_health_routes(upload_handler=None):
     async def check_habit(habit_id: int, request: Request):
         owner = _owner(request)
         body = await request.json() if request.headers.get("content-length") else {}
-        res = hs.set_habit_day(
-            owner, habit_id,
+        res = await asyncio.to_thread(
+            hs.set_habit_day, owner, habit_id,
             day=body.get("day"),
             done=body.get("done"),
             duration_min=body.get("duration_min"),
@@ -178,20 +177,16 @@ def setup_health_routes(upload_handler=None):
     async def log_meal(request: Request):
         owner = _owner(request)
         body = await request.json()
-        meal = hs.log_meal(
-            owner, body.get("description", ""), body.get("kcal", 0),
-            **{k: body.get(k) for k in ("eaten_at", "protein_g", "carbs_g", "fat_g", "sugar_g", "source", "notes", "photo_upload_id")},
-        )
+        fields = {k: body.get(k) for k in ("eaten_at", "protein_g", "carbs_g", "fat_g", "sugar_g", "source", "notes", "photo_upload_id")}
+        meal = await asyncio.to_thread(hs.log_meal, owner, body.get("description", ""), body.get("kcal", 0), **fields)
         return {"ok": True, "meal": meal}
 
     @router.put("/meals/{meal_id}")
     async def update_meal(meal_id: int, request: Request):
         owner = _owner(request)
         body = await request.json()
-        meal = hs.update_meal(
-            owner, meal_id,
-            **{k: body[k] for k in ("description", "kcal", "protein_g", "carbs_g", "fat_g", "sugar_g", "eaten_at", "notes", "photo_upload_id") if k in body},
-        )
+        fields = {k: body[k] for k in ("description", "kcal", "protein_g", "carbs_g", "fat_g", "sugar_g", "eaten_at", "notes", "photo_upload_id") if k in body}
+        meal = await asyncio.to_thread(hs.update_meal, owner, meal_id, **fields)
         if meal is None:
             raise HTTPException(404, "Meal not found")
         return {"ok": True, "meal": meal}
@@ -216,7 +211,10 @@ def setup_health_routes(upload_handler=None):
         owner = _owner(request)
         body = await request.json()
         try:
-            entry = hs.log_weight(owner, body.get("kg"), measured_at=body.get("measured_at"), notes=body.get("notes", ""))
+            entry = await asyncio.to_thread(
+                hs.log_weight, owner, body.get("kg"),
+                measured_at=body.get("measured_at"), notes=body.get("notes", ""),
+            )
         except (ValueError, TypeError) as e:
             raise HTTPException(400, str(e) or "kg is required")
         return {"ok": True, "weight": entry}
@@ -225,10 +223,8 @@ def setup_health_routes(upload_handler=None):
     async def update_weight(entry_id: int, request: Request):
         owner = _owner(request)
         body = await request.json()
-        entry = hs.update_weight(
-            owner, entry_id,
-            **{k: body[k] for k in ("kg", "measured_at", "notes") if k in body},
-        )
+        fields = {k: body[k] for k in ("kg", "measured_at", "notes") if k in body}
+        entry = await asyncio.to_thread(hs.update_weight, owner, entry_id, **fields)
         if entry is None:
             raise HTTPException(404, "Weight entry not found")
         return {"ok": True, "weight": entry}
@@ -249,8 +245,9 @@ def setup_health_routes(upload_handler=None):
     async def set_profile(request: Request):
         owner = _owner(request)
         body = await request.json()
-        profile = hs.set_profile(owner, **body)
-        return {"ok": True, "profile": profile, "tdee": hs.tdee(owner)}
+        profile = await asyncio.to_thread(hs.set_profile, owner, **body)
+        tdee = await asyncio.to_thread(hs.tdee, owner)
+        return {"ok": True, "profile": profile, "tdee": tdee}
 
     # ── Training ─────────────────────────────────────────────────────────────
     @router.get("/training")
@@ -261,19 +258,16 @@ def setup_health_routes(upload_handler=None):
     async def log_training(request: Request):
         owner = _owner(request)
         body = await request.json()
-        session = hs.log_training(owner, body.get("kind", ""), **{
-            k: body.get(k) for k in ("session_at", "duration_min", "rpe", "kcal_burned", "summary")
-        })
+        fields = {k: body.get(k) for k in ("session_at", "duration_min", "rpe", "kcal_burned", "summary")}
+        session = await asyncio.to_thread(hs.log_training, owner, body.get("kind", ""), **fields)
         return {"ok": True, "session": session}
 
     @router.put("/training/{session_id}")
     async def update_training(session_id: int, request: Request):
         owner = _owner(request)
         body = await request.json()
-        session = hs.update_training(
-            owner, session_id,
-            **{k: body[k] for k in ("kind", "duration_min", "rpe", "kcal_burned", "summary", "session_at") if k in body},
-        )
+        fields = {k: body[k] for k in ("kind", "duration_min", "rpe", "kcal_burned", "summary", "session_at") if k in body}
+        session = await asyncio.to_thread(hs.update_training, owner, session_id, **fields)
         if session is None:
             raise HTTPException(404, "Training session not found")
         return {"ok": True, "session": session}

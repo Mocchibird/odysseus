@@ -92,24 +92,39 @@ def _habit_dict(h: Habit) -> Dict[str, Any]:
     }
 
 
+# Habit-list load window. done_today/yesterday and the 7/30-day counts only need
+# the last month; the streak needs consecutive days back from today. Load a
+# bounded window instead of the ENTIRE completed-log history on every call (the
+# today dashboard hits this constantly), and only fall back to a full per-habit
+# load when a streak fills the window — a 90+ day run, rare, and it genuinely
+# needs the older rows to count.
+_HABIT_LIST_WINDOW_DAYS = 90
+
+
 def list_habits(owner: str, include_archived: bool = False) -> List[Dict[str, Any]]:
-    """Habits with today's done flag, current streak, and a 30-day count."""
+    """Habits with today's done flag, current streak, and 7/30-day counts."""
     owner = _owner(owner)
     today = _today()
+    today_d = date.fromisoformat(today)
+    win_start_d = today_d - timedelta(days=_HABIT_LIST_WINDOW_DAYS - 1)
+    win_start = win_start_d.isoformat()
     with _session() as db:
         q = db.query(Habit).filter(Habit.owner == owner)
         if not include_archived:
             q = q.filter(Habit.status == "active")
         habits = q.order_by(Habit.sort_order.asc(), Habit.id.asc()).all()
-        # Batch-load all completed-log days for these habits in ONE query (was
-        # N+1: a HabitLog query per habit). No date bound — _streak_from_days
-        # walks history back indefinitely, so it needs the full set.
+        # ONE bounded query for the recent window (was one query with NO date
+        # bound, materializing every completed log for every habit each load).
         habit_ids = [h.id for h in habits]
         days_by_habit: Dict[int, set] = {hid: set() for hid in habit_ids}
         if habit_ids:
             for habit_id, day in (
                 db.query(HabitLog.habit_id, HabitLog.day)
-                .filter(HabitLog.habit_id.in_(habit_ids), HabitLog.done == True)  # noqa: E712
+                .filter(
+                    HabitLog.habit_id.in_(habit_ids),
+                    HabitLog.done == True,  # noqa: E712
+                    HabitLog.day >= win_start,
+                )
                 .all()
             ):
                 days_by_habit[habit_id].add(day)
@@ -118,14 +133,22 @@ def list_habits(owner: str, include_archived: bool = False) -> List[Dict[str, An
             d = _habit_dict(h)
             done_days = days_by_habit[h.id]
             d["done_today"] = today in done_days
-            d["done_yesterday"] = (date.fromisoformat(today) - timedelta(days=1)).isoformat() in done_days
-            d["streak"] = _streak_from_days(done_days, today)
-            d["done_30d"] = sum(
-                1 for ds in done_days if ds >= (date.today() - timedelta(days=30)).isoformat()
-            )
-            d["done_7d"] = sum(
-                1 for ds in done_days if ds >= (date.today() - timedelta(days=6)).isoformat()
-            )
+            d["done_yesterday"] = (today_d - timedelta(days=1)).isoformat() in done_days
+            streak = _streak_from_days(done_days, today)
+            # If the streak reaches the oldest loaded day, it may extend before
+            # the window — recompute it exactly from this habit's full history.
+            start_d = today_d if today in done_days else today_d - timedelta(days=1)
+            if streak and (start_d - timedelta(days=streak)) < win_start_d:
+                full = {
+                    day for (day,) in db.query(HabitLog.day).filter(
+                        HabitLog.habit_id == h.id,
+                        HabitLog.done == True,  # noqa: E712
+                    ).all()
+                }
+                streak = _streak_from_days(full, today)
+            d["streak"] = streak
+            d["done_30d"] = sum(1 for ds in done_days if ds >= (today_d - timedelta(days=30)).isoformat())
+            d["done_7d"] = sum(1 for ds in done_days if ds >= (today_d - timedelta(days=6)).isoformat())
             out.append(d)
         return out
 
