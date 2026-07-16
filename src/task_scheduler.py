@@ -276,7 +276,6 @@ def _resolve_task_display_tz(db, task) -> str | None:
 # "cron" uses cron_expression.
 HOUSEKEEPING_DEFAULTS = {
     "tidy_sessions":        {"name": "Chat Sessions Tidy",       "trigger_type": "event", "trigger_event": "session_created", "trigger_count": 5, "schedule": None, "scheduled_time": None, "cron_expression": None, "legacy_names": ["Tidy Chat Sessions"]},
-    "tidy_pings":           {"name": "Pings Tidy",               "schedule": "cron",  "scheduled_time": None,    "cron_expression": "0 3 * * *", "legacy_names": []},
     "tidy_documents":       {"name": "Documents Tidy",           "trigger_type": "event", "trigger_event": "document_created", "trigger_count": 5, "schedule": None, "scheduled_time": None, "cron_expression": None, "legacy_names": ["Tidy Documents"]},
     "consolidate_memory":   {"name": "Memory Tidy",              "trigger_type": "event", "trigger_event": "memory_added", "trigger_count": 5, "schedule": None, "scheduled_time": None, "cron_expression": None, "legacy_names": ["Tidy Memory"]},
     "tidy_research":        {"name": "Research Tidy",            "trigger_type": "event", "trigger_event": "research_completed", "trigger_count": 5, "schedule": None, "scheduled_time": None, "cron_expression": None, "legacy_names": ["Tidy Research"]},
@@ -288,6 +287,11 @@ HOUSEKEEPING_DEFAULTS = {
     "check_email_urgency":   {"name": "Email Tags",               "schedule": "cron",  "scheduled_time": None,    "cron_expression": "0 * * * *", "ship_paused": True, "old_cron_expressions": ["*/15 * * * *"], "legacy_names": ["Email Triage", "Urgent Email"]},
     "audit_skills":          {"name": "Skills Audit",             "trigger_type": "event", "trigger_event": "skill_added", "trigger_count": 5, "schedule": None, "scheduled_time": None, "cron_expression": None, "legacy_names": ["Audit Skills"]},
 }
+
+# Fork-additive housekeeping defaults, merged in from a sibling module so the
+# upstream literal above stays byte-identical (see additive-fork-policy).
+from src.task_scheduler_fork import FORK_HOUSEKEEPING  # noqa: E402
+HOUSEKEEPING_DEFAULTS.update(FORK_HOUSEKEEPING)
 
 RETIRED_HOUSEKEEPING_ACTIONS = frozenset({
     "tidy_calendar",

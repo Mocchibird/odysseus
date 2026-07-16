@@ -32,7 +32,10 @@ def test_send_ping_registered_everywhere():
 
 
 def test_send_ping_uses_ntfy_integration_and_settings_topic():
-    source = (ROOT / "src" / "tool_implementations.py").read_text()
+    # do_send_ping (and the other fork tools) live in src/tool_implementations_fork.py,
+    # merged back via a re-export (see docs/fork-additive-policy.md).
+    source = ((ROOT / "src" / "tool_implementations.py").read_text()
+              + (ROOT / "src" / "tool_implementations_fork.py").read_text())
     assert "async def do_send_ping" in source
     assert "resolve_ntfy_integration(" in source
     assert "load_integrations()" in source
