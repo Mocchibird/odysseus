@@ -9,9 +9,9 @@ ensure the album exists, and insert the GalleryImage row.
 """
 from __future__ import annotations
 
-import hashlib
 import logging
 import os
+import shutil
 import uuid
 from typing import Optional
 
@@ -81,9 +81,12 @@ def ingest_upload(owner: Optional[str], upload_id: str, *, album: Optional[str] 
         raise ValueError(f"Not an image/video (.{ext or '?'}) — use manage_files for other types")
     is_video = ext in _VIDEO_EXTS
 
-    with open(src_path, "rb") as fh:
-        content = fh.read()
-    file_hash = hashlib.sha256(content).hexdigest()
+    # Hash by streaming off disk — do NOT read the whole file into RAM. A
+    # gallery ingest can be a multi-GB video (the direct /api/gallery/upload
+    # route was rewritten to stream for exactly this reason); buffering the
+    # whole upload here OOM'd the single worker on the resource-light box.
+    from src import content_extract
+    file_hash = content_extract.sha256_file(src_path)
 
     db = SessionLocal()
     try:
@@ -104,9 +107,8 @@ def ingest_upload(owner: Optional[str], upload_id: str, *, album: Optional[str] 
         os.makedirs(GENERATED_IMAGES_DIR, exist_ok=True)
         filename = f"{uuid.uuid4().hex[:12]}.{ext}"
         dest_path = os.path.join(GENERATED_IMAGES_DIR, filename)
-        with open(dest_path, "wb") as out:
-            out.write(content)
-        file_size = len(content)
+        shutil.copyfile(src_path, dest_path)   # chunked copy — flat memory
+        file_size = os.path.getsize(dest_path)
         # Make H.264 videos iOS-decodable (lossless level-cap + faststart);
         # best-effort, leaves the file unchanged on any failure.
         if is_video:
@@ -120,9 +122,12 @@ def ingest_upload(owner: Optional[str], upload_id: str, *, album: Optional[str] 
 
         exif = {}
         if not is_video:
+            # Images are small enough to read for EXIF; videos (the OOM risk)
+            # are never read into memory. Read the copied file (== source bytes).
             try:
                 from routes.gallery_helpers import _extract_exif
-                exif = _extract_exif(content) or {}
+                with open(dest_path, "rb") as _img:
+                    exif = _extract_exif(_img.read()) or {}
             except Exception:
                 exif = {}
 
