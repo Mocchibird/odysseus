@@ -1652,6 +1652,11 @@ async def action_ping_notes(owner: str, **kwargs) -> Tuple[str, bool]:
             reping_cutoff = now - _td(minutes=REPING_MIN)
             seen_ids = set()
             sent = []
+            # Keys this scan actually wrote (the per-day `<id>#rem` gates). Used
+            # by the merge-before-write below so we overlay only our own entries
+            # and never clobber dispatch_reminder's concurrent {at, channel}
+            # markers for the due-date `<id>` keys.
+            written = set()
 
             def _all_checked(n):
                 """True only for a checklist whose every item is done/checked.
@@ -1690,11 +1695,22 @@ async def action_ping_notes(owner: str, **kwargs) -> Tuple[str, bool]:
                         pass
                 body = "\n\n".join(p for p in body_parts if p) or title
                 from routes.note_routes import dispatch_reminder
-                await dispatch_reminder(
+                result = await dispatch_reminder(
                     title=title, note_body=body, note_id=n.id,
                     owner=n.owner or owner or "",
                 )
-                return title
+                return title, (result or {})
+
+            def _dispatch_sent(result) -> bool:
+                """True unless dispatch_reminder reported a dedup SKIP.
+
+                dispatch_reminder returns ``{..., "skipped": True}`` only when its
+                per-channel dedup already fired this note (the frontend/scanner
+                race) — that no-op must not be counted as sent or re-arm the daily
+                gate. ANY other result (a real push with *_sent flags, or a
+                generic success) arms the gate exactly as the pre-existing code
+                did by recording after every _fire()."""
+                return not (result or {}).get("skipped")
 
             for n in notes:
                 seen_ids.add(n.id)
@@ -1718,8 +1734,23 @@ async def action_ping_notes(owner: str, **kwargs) -> Tuple[str, bool]:
                             pass
                     if not recent:
                         try:
-                            sent.append(await _fire(n))
-                            cache[n.id] = now.isoformat()
+                            title, result = await _fire(n)
+                            # Only record a real push. On a dedup skip we still
+                            # mark `fired` so we don't also fire the reminder_at
+                            # nudge for the same note in this tick, but we leave
+                            # dispatch's on-disk {at, channel} marker untouched
+                            # (the merge below preserves it) and don't re-count.
+                            if _dispatch_sent(result):
+                                sent.append(title)
+                                _sent_ch = (
+                                    "email" if result.get("email_sent")
+                                    else "ntfy" if result.get("ntfy_sent")
+                                    else "webhook" if result.get("webhook_sent")
+                                    else "quiet" if result.get("quiet_hours")
+                                    else "browser"
+                                )
+                                cache[n.id] = {"at": now.isoformat(), "channel": _sent_ch}
+                                written.add(n.id)
                             fired = True
                         except Exception as e:
                             logger.warning(f"ping_notes: due dispatch failed for {n.id}: {e}")
@@ -1741,17 +1772,39 @@ async def action_ping_notes(owner: str, **kwargs) -> Tuple[str, bool]:
                         today_key = now_local.date().isoformat()
                         if ok_time and cache.get(f"{n.id}#rem") != today_key:
                             try:
-                                sent.append(await _fire(n))
-                                cache[f"{n.id}#rem"] = today_key
+                                title, result = await _fire(n)
+                                # Arm the once-per-day gate only on a real push;
+                                # a dedup skip means nothing went out, so leave
+                                # the gate open to retry once the dedup window
+                                # clears instead of silently swallowing the day.
+                                if _dispatch_sent(result):
+                                    sent.append(title)
+                                    cache[f"{n.id}#rem"] = today_key
+                                    written.add(f"{n.id}#rem")
                             except Exception as e:
                                 logger.warning(f"ping_notes: reminder dispatch failed for {n.id}: {e}")
 
-            # Prune cache entries for notes that no longer exist.
-            for stale in [k for k in cache if k not in seen_ids]:
-                cache.pop(stale, None)
+            # Merge with a FRESH read of disk before writing. dispatch_reminder
+            # writes per-note {at, channel} markers to THIS same file — from the
+            # frontend-fired path or our own _fire() calls during this tick — for
+            # its per-channel dedup. Blindly writing our in-memory `cache` would
+            # clobber those concurrent markers and re-open the duplicate-push
+            # race. So start from disk (authoritative for the dispatch-owned
+            # `<id>` markers), overlay only the keys this scan actually wrote,
+            # then prune entries for notes that no longer exist.
+            try:
+                _disk = _json.loads(STATE.read_text(encoding="utf-8")) if STATE.exists() else {}
+            except Exception:
+                _disk = {}
+            merged = dict(_disk)
+            for k in written:
+                if k in cache:
+                    merged[k] = cache[k]
+            for stale in [k for k in merged if k not in seen_ids]:
+                merged.pop(stale, None)
 
             try:
-                STATE.write_text(_json.dumps(cache), encoding="utf-8")
+                STATE.write_text(_json.dumps(merged), encoding="utf-8")
             except Exception as e:
                 logger.warning(f"ping_notes: cache write failed: {e}")
 

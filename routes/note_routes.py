@@ -1034,18 +1034,31 @@ def setup_note_routes(task_scheduler=None, upload_handler=None):
                 raise HTTPException(404, "Reminder not found")
             from src.i18n import get_user_language as _get_lang, t as _i18n_t
             _lang = _get_lang(owner)
-            # Act on the field that drives the nudge: the daily "Remind me"
-            # (reminder_at) when set, else the one-shot "Due by" (due_date).
-            _field = "reminder_at" if getattr(note, "reminder_at", None) else "due_date"
+            # A note can carry BOTH the daily "Remind me" (reminder_at) AND the
+            # one-shot "Due by" (due_date); act on whichever field(s) are set so
+            # the action actually silences/snoozes the nudge. Snooze/tomorrow
+            # keep both fields consistent by applying the new time to each set
+            # field; "done" clears both (below) so nothing keeps firing.
+            _set_fields = [
+                f for f in ("reminder_at", "due_date")
+                if getattr(note, f, None)
+            ] or ["due_date"]
             if action == "done":
-                setattr(note, _field, None)
+                # Clear BOTH fields — clearing only one would leave the other
+                # to keep re-firing, so dismissing wouldn't truly silence it.
+                note.reminder_at = None
+                note.due_date = None
                 msg = _i18n_t("ack_dismissed", _lang)
             elif action == "snooze1h":
-                setattr(note, _field, (_dt.now() + _td(hours=1)).isoformat())
+                _new = (_dt.now() + _td(hours=1)).isoformat()
+                for _f in _set_fields:
+                    setattr(note, _f, _new)
                 msg = _i18n_t("ack_snoozed_1h", _lang)
             else:  # tomorrow
                 t = (_dt.now() + _td(days=1)).replace(hour=9, minute=0, second=0, microsecond=0)
-                setattr(note, _field, t.isoformat())
+                _new = t.isoformat()
+                for _f in _set_fields:
+                    setattr(note, _f, _new)
                 msg = _i18n_t("ack_snoozed_tomorrow", _lang)
             db.commit()
         finally:

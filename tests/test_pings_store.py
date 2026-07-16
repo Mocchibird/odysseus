@@ -17,6 +17,15 @@ from src import pings_store as ps  # noqa: E402
 def _tables():
     Base.metadata.create_all(bind=engine)
     yield
+    # Isolation: the documented dev workflow runs against a file-backed DB where
+    # rows persist across runs, so exact-count assertions would false-fail as
+    # they accumulate. Clear the Ping table after each test.
+    db = SessionLocal()
+    try:
+        db.query(Ping).delete()
+        db.commit()
+    finally:
+        db.close()
 
 
 def test_create_list_owner_isolation():
@@ -38,12 +47,19 @@ def test_unread_and_mark_read():
 
 
 def test_keep_exempt_age_expiry():
+    # keep: aged + read but keep-exempt -> must survive.
     keep = ps.create("p-exp", "Keep me", "", kind="ping")
     ps.set_keep("p-exp", keep["id"], True)
+    ps.mark_read("p-exp", keep["id"], True)
+    # old: aged + read + non-kept -> the only entry eligible to expire.
     old = ps.create("p-exp", "Old", "", kind="ping")
+    ps.mark_read("p-exp", old["id"], True)
+    # unread: aged + non-kept but UNREAD -> must persist. expire_old only
+    # drops acknowledged (read) pings so nothing the user hasn't seen is lost.
+    unread = ps.create("p-exp", "Unread old", "", kind="ping")
     db = SessionLocal()
     try:
-        for pid in (keep["id"], old["id"]):
+        for pid in (keep["id"], old["id"], unread["id"]):
             row = db.query(Ping).filter(Ping.id == pid).first()
             row.created_at = datetime.utcnow() - timedelta(days=40)
         db.commit()
@@ -52,7 +68,9 @@ def test_keep_exempt_age_expiry():
     removed = ps.expire_old(days=30)
     assert removed == 1
     ids = {p["id"] for p in ps.list_pings("p-exp")}
-    assert keep["id"] in ids and old["id"] not in ids
+    assert keep["id"] in ids       # keep-exempt survives
+    assert unread["id"] in ids     # unread survives (nothing unseen is lost)
+    assert old["id"] not in ids    # read + non-kept + aged expires
 
 
 def test_delete():

@@ -153,13 +153,16 @@ def delete(owner: Optional[str], ping_id: str) -> bool:
 
 def expire_old(days: int = 30) -> int:
     """Delete read, non-kept pings older than `days`. Returns the count removed.
-    Used by the `tidy_pings` housekeeping action."""
+    Used by the `tidy_pings` housekeeping action. UNREAD pings are preserved
+    regardless of age — the Pings feed's "nothing is lost" contract means only
+    entries the user has already acknowledged (read) are eligible to expire."""
     from core.database import SessionLocal, Ping
     cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=max(1, days))
     db = SessionLocal()
     try:
         n = db.query(Ping).filter(
             Ping.keep == False,  # noqa: E712
+            Ping.read == True,  # noqa: E712
             Ping.created_at < cutoff,
         ).delete(synchronize_session=False)
         db.commit()
