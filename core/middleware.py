@@ -77,6 +77,9 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         is_document_pdf_preview = path.startswith("/api/document/") and path.endswith("/render-pdf")
         # Visual report pages are self-contained HTML — need inline scripts + external images
         is_report = path.startswith("/api/research/report/")
+        # User-uploaded HTML rendered inline (Files tab "live view"). Untrusted
+        # content that would otherwise run on the app origin — sandbox it.
+        is_html_file_view = path.startswith("/api/files/") and path.endswith("/view")
 
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["Referrer-Policy"] = "no-referrer"
@@ -98,6 +101,17 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
                 "img-src 'self' data: blob: https:; "
                 "connect-src 'self'; "
                 "frame-ancestors 'none'"
+            )
+        elif is_html_file_view:
+            # Sandbox user-uploaded HTML to an OPAQUE origin (NO allow-same-origin):
+            # its own scripts run for a faithful live view, but it cannot read the
+            # app's cookies/localStorage or hit same-origin APIs with the user's
+            # session. allow-scripts/forms/popups/modals give normal page behavior;
+            # allow-downloads lets a "save" link work. Opened in a new tab, so no
+            # framing header is needed.
+            response.headers["Content-Security-Policy"] = (
+                "sandbox allow-scripts allow-forms allow-popups allow-modals "
+                "allow-popups-to-escape-sandbox allow-downloads"
             )
         elif is_tool_render:
             # Skip framing headers for tools.

@@ -11,7 +11,7 @@ import logging
 import os
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 
 from src.auth_helpers import require_user
 from src import file_store as fs
@@ -53,6 +53,39 @@ def setup_file_routes(upload_handler) -> APIRouter:
             path,
             media_type=rec.get("mime") or None,
             filename=rec.get("filename") or os.path.basename(path),
+        )
+
+    @router.get("/{file_id}/view")
+    async def files_view(request: Request, file_id: str):
+        """Render a stored HTML file inline as a live page (opens in a new tab).
+
+        /raw serves with Content-Disposition: attachment (downloads); this
+        serves inline as text/html so the browser renders it — the way to view
+        an .html file on a device (e.g. iOS) that won't open a local file.
+
+        SECURITY: the file is untrusted user content that would run on the app
+        origin. SecurityHeadersMiddleware tags this exact path with a
+        `Content-Security-Policy: sandbox` (NO allow-same-origin), so the
+        rendered document gets an OPAQUE origin — its scripts run for a faithful
+        view but it cannot read the app's cookies/localStorage or call
+        same-origin APIs with the user's session. Owner-scoped like /raw.
+        """
+        owner = require_user(request) or None
+        rec = await asyncio.to_thread(fs.get, owner, file_id)
+        if not rec:
+            raise HTTPException(404, "Not found")
+        fname = (rec.get("filename") or "").lower()
+        mime = (rec.get("mime") or "").lower()
+        if not (fname.endswith(".html") or fname.endswith(".htm") or "html" in mime):
+            raise HTTPException(400, "Not an HTML file")
+        path = await asyncio.to_thread(fs.file_abspath, owner, file_id)
+        if not path:
+            raise HTTPException(404, "File not found")
+        data = await asyncio.to_thread(lambda p: open(p, "rb").read(), path)
+        return Response(
+            content=data,
+            media_type="text/html; charset=utf-8",
+            headers={"Content-Disposition": "inline", "Content-Encoding": "identity"},
         )
 
     @router.post("")
