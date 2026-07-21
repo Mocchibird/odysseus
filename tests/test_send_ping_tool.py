@@ -49,7 +49,11 @@ def test_send_ping_uses_ntfy_integration_and_settings_topic():
     assert "\"Authorization\"" in ntfy_source
     assert "\"Bearer" in ntfy_source
 
-    notes_source = (ROOT / "routes" / "note_routes.py").read_text()
+    # note_routes moved to the routes/note/ subpackage (upstream slice 2f);
+    # routes/note_routes.py is now a sys.modules shim. Read the canonical file,
+    # falling back to the old path for pre-move checkouts.
+    _canon = ROOT / "routes" / "note" / "note_routes.py"
+    notes_source = (_canon if _canon.exists() else ROOT / "routes" / "note_routes.py").read_text()
     assert "send_ntfy_notification(" in notes_source
     assert "resolve_ntfy_integration(" in notes_source
     assert "get_user_setting" in notes_source

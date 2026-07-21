@@ -295,7 +295,7 @@ def build_headers(api_key: Optional[str], base: str) -> Dict[str, str]:
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
     if provider == "openrouter":
-        headers.setdefault("HTTP-Referer", "https://github.com/pewdiepie-archdaemon/odysseus")
+        headers.setdefault("HTTP-Referer", "https://github.com/odysseus-dev/odysseus")
         headers.setdefault("X-OpenRouter-Title", "Odysseus")
     # Xiaomi MiMo (api.xiaomimimo.com) is OpenAI-compatible for the request
     # body but authenticates with an `api-key` header rather than
