@@ -1757,6 +1757,15 @@ body.gallery-selecting .gallery-card-menu-btn,
    (documentLibrary.js). */
 .doclib-tag-chip { font-size: 10px; padding: 1px 7px; border: 1px solid var(--border); border-radius: 10px; background: color-mix(in srgb, var(--fg) 10%, transparent); opacity: 0.8; }
 
+/* Files-tab card action row mixes <a> (Open / Live view) with <button>
+   (rename / tags / delete). The global top-level `.modal-body button {
+   margin-top: 6px }` drops only the <button> icons 6px, so the row reads as
+   "2 icons up, 3 down" — the anchors sit on one line, the buttons a row lower.
+   Zero it so every icon shares one centre line (same reset the task-card and
+   fork-panel rows use); justify-content re-centres the glyph inside the wider
+   32px touch target on mobile. */
+.doclib-file-row .memory-item-actions .memory-item-btn { margin-top: 0; justify-content: center; }
+
 @media (hover: none) {
   .gallery-card-menu-btn { opacity: 0.55; }
   .notes-vault-file-actions { opacity: 1; }
