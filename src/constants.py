@@ -120,6 +120,15 @@ LOCAL_HOSTS = frozenset({"localhost", "127.0.0.1", "0.0.0.0", "::1"})
 CLEANUP_ENABLED = os.getenv("CLEANUP_ENABLED", "True").lower() == "true"
 CLEANUP_INTERVAL_HOURS = int(os.getenv("CLEANUP_INTERVAL_HOURS", "24"))
 
+# Optional SEPARATE origin for serving user-uploaded HTML as full-capability
+# standalone pages (see src/usercontent.py). Empty = feature off, and uploaded
+# HTML stays sandboxed on the app origin (routes/file_routes.py /view). When set
+# (e.g. "https://files.example.com"), HTML files also get an unguessable,
+# signed standalone link served un-sandboxed on this origin. It MUST be a
+# different host than the app so the untrusted HTML lands on its own origin and
+# can never read the app's session (the app's cookie is host-only).
+USERCONTENT_ORIGIN = (os.getenv("ODYSSEUS_USERCONTENT_ORIGIN") or "").strip().rstrip("/")
+
 # Auth policy
 PASSWORD_MIN_LENGTH = 8
 

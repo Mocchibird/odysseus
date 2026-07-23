@@ -290,6 +290,12 @@ if AUTH_ENABLED:
     import re as _re
     AUTH_EXEMPT_PATTERNS = [
         _re.compile(r"^/api/tasks/[^/]+/webhook/[^/]+/?$"),
+        # User-content standalone HTML pages (src/usercontent.py). The signed
+        # token in the path IS the credential — validated in the /f/ handler,
+        # which 404s on mismatch — so a share link works with no session cookie
+        # (a separate content origin never receives it). Same pattern as the
+        # task-webhook URLs above.
+        _re.compile(r"^/f/[^/]+/?$"),
     ]
 
     def _is_auth_exempt(path: str) -> bool:
@@ -1004,6 +1010,58 @@ async def serve_login(request: Request):
     if not AUTH_ENABLED:
         return RedirectResponse(url="/", status_code=302)
     return serve_html_with_nonce(request, abs_join(BASE_DIR, "static/login.html"))
+
+@app.get("/f/{token}")
+async def serve_usercontent(request: Request, token: str):
+    """Serve a user-uploaded HTML file as a full-capability standalone page on
+    the configured content origin (see src/usercontent.py). Access is gated by
+    the signed token in the path (an unguessable "unlisted link"), NOT the
+    session — a separate content origin never receives the app's cookie. Off
+    entirely unless ODYSSEUS_USERCONTENT_ORIGIN is set.
+    """
+    from src import usercontent
+    from src import file_store as fs
+    from src.constants import USERCONTENT_ORIGIN
+    from starlette.responses import Response
+
+    if not usercontent.is_enabled():
+        raise HTTPException(404, "Not found")
+    file_id = usercontent.verify_token(token)
+    if not file_id:
+        raise HTTPException(404, "Not found")
+    # NEVER serve untrusted user HTML same-origin as the app. If this was reached
+    # on any host other than the content origin, bounce to the content origin so
+    # the page always lands on its own isolated origin.
+    req_host = (
+        (request.headers.get("x-forwarded-host") or request.headers.get("host") or "")
+        .split(",")[0].strip().split(":")[0].lower()
+    )
+    if req_host != usercontent.content_hostname():
+        return RedirectResponse(url=f"{USERCONTENT_ORIGIN}/f/{token}", status_code=302)
+    # Defense-in-depth: the isolated content origin must NEVER receive the app's
+    # session cookie. If it did, this origin shares cookies with the app (a
+    # same-host / misconfigured content origin, or parent-domain cookie), so
+    # serving untrusted HTML here would be same-origin-equivalent — refuse.
+    if request.cookies.get(SESSION_COOKIE):
+        raise HTTPException(404, "Not found")
+    # Token is the capability, so this is owner-agnostic (owner=None).
+    rec = await asyncio.to_thread(fs.get, None, file_id)
+    if not rec:
+        raise HTTPException(404, "Not found")
+    fname = (rec.get("filename") or "").lower()
+    mime = (rec.get("mime") or "").lower()
+    if not (fname.endswith(".html") or fname.endswith(".htm") or "html" in mime):
+        raise HTTPException(404, "Not found")
+    path = await asyncio.to_thread(fs.file_abspath, None, file_id)
+    if not path:
+        raise HTTPException(404, "Not found")
+    data = await asyncio.to_thread(lambda p: open(p, "rb").read(), path)
+    return Response(
+        content=data,
+        media_type="text/html; charset=utf-8",
+        headers={"Content-Disposition": "inline", "Content-Encoding": "identity"},
+    )
+
 
 @app.get("/api/version")
 async def get_version():

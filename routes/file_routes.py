@@ -15,8 +15,20 @@ from fastapi.responses import FileResponse, Response
 
 from src.auth_helpers import require_user
 from src import file_store as fs
+from src import usercontent
 
 logger = logging.getLogger(__name__)
+
+
+def _with_standalone_url(rec: dict) -> dict:
+    """Attach the content-origin standalone-page URL to an HTML file record when
+    the feature is configured (no-op / absent key otherwise). Stateless — just a
+    signed URL, so it's free to compute per-response (see src/usercontent.py)."""
+    if isinstance(rec, dict):
+        url = usercontent.standalone_url(rec)
+        if url:
+            rec["standalone_url"] = url
+    return rec
 
 
 def setup_file_routes(upload_handler) -> APIRouter:
@@ -26,7 +38,8 @@ def setup_file_routes(upload_handler) -> APIRouter:
     async def files_search(request: Request, q: str = "", tags: str = "", limit: int = 50):
         owner = require_user(request) or None
         tag_list = [t.strip() for t in (tags or "").split(",") if t.strip()]
-        return {"files": await asyncio.to_thread(fs.search, owner, q=q, tags=tag_list, limit=limit)}
+        files = await asyncio.to_thread(fs.search, owner, q=q, tags=tag_list, limit=limit)
+        return {"files": [_with_standalone_url(f) for f in files]}
 
     @router.get("/tags")
     async def files_tags(request: Request):
@@ -39,7 +52,7 @@ def setup_file_routes(upload_handler) -> APIRouter:
         rec = await asyncio.to_thread(fs.get, owner, file_id)
         if not rec:
             raise HTTPException(404, "Not found")
-        return rec
+        return _with_standalone_url(rec)
 
     @router.get("/{file_id}/raw")
     async def files_raw(request: Request, file_id: str):

@@ -80,6 +80,12 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         # User-uploaded HTML rendered inline (Files tab "live view"). Untrusted
         # content that would otherwise run on the app origin — sandbox it.
         is_html_file_view = path.startswith("/api/files/") and path.endswith("/view")
+        # Standalone user-content pages (src/usercontent.py) served on a SEPARATE
+        # origin. Isolation comes from the distinct origin, not a sandbox, so the
+        # page runs as a normal full-capability web page (localStorage, inline
+        # scripts, external resources) — deliberately NOT given the app's
+        # restrictive default CSP.
+        is_usercontent_page = path.startswith("/f/")
 
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["Referrer-Policy"] = "no-referrer"
@@ -113,6 +119,10 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
                 "sandbox allow-scripts allow-forms allow-popups allow-modals "
                 "allow-popups-to-escape-sandbox allow-downloads"
             )
+        elif is_usercontent_page:
+            # Isolated on its own origin — serve as a plain web page with no
+            # app CSP or framing restriction so arbitrary uploaded HTML works.
+            pass
         elif is_tool_render:
             # Skip framing headers for tools.
             pass

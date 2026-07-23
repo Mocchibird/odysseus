@@ -2250,15 +2250,27 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
         const openLink = f.has_file
           ? `<a class="memory-item-btn" href="${_esc(f.url)}" target="_blank" rel="noopener" title="Open the original file" aria-label="Open"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg></a>`
           : '';
-        // HTML files get a "Live view" that RENDERS the page in a new tab
-        // (/view serves it inline + sandboxed), vs the plain Open which
-        // downloads the .html — the way to actually view HTML on iOS etc.
+        // HTML files get a "Live view" that RENDERS the page in a new tab, vs the
+        // plain Open which downloads the .html — the way to actually view HTML on
+        // iOS etc. When a separate content origin is configured (backend sends
+        // f.standalone_url), the eye opens the file as a full standalone PAGE on
+        // that origin (localStorage/scripts work, and it's shareable); otherwise
+        // it opens the sandboxed same-origin /view preview.
         const _isHtml = /\.html?$/i.test(f.filename || '') || (f.mime || '').toLowerCase().includes('html');
+        const _viewHref = f.standalone_url || `/api/files/${encodeURIComponent(f.id)}/view`;
+        const _viewTitle = f.standalone_url
+          ? 'Open as a live page in a new tab'
+          : 'Live view — render this HTML page in a new tab';
         const viewLink = (_isHtml && f.has_file)
-          ? `<a class="memory-item-btn" href="/api/files/${encodeURIComponent(f.id)}/view" target="_blank" rel="noopener" title="Live view — render this HTML page in a new tab" aria-label="Live view"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/><circle cx="12" cy="12" r="3"/></svg></a>`
+          ? `<a class="memory-item-btn" href="${_esc(_viewHref)}" target="_blank" rel="noopener" title="${_viewTitle}" aria-label="Live view"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/><circle cx="12" cy="12" r="3"/></svg></a>`
+          : '';
+        // Copy the shareable standalone-page link — only when one exists.
+        const copyLink = f.standalone_url
+          ? `<button class="memory-item-btn doclib-file-copylink" data-share-url="${_esc(f.standalone_url)}" title="Copy shareable page link" aria-label="Copy link"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg></button>`
           : '';
         const rowActions = _filesSelectMode ? '' : `<div class="memory-item-actions" style="display:flex;gap:2px;flex-shrink:0;">
               ${viewLink}
+              ${copyLink}
               ${openLink}
               <button class="memory-item-btn doclib-file-rename" data-file-id="${_esc(f.id)}" data-name="${_esc(f.filename)}" title="Rename"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg></button>
               <button class="memory-item-btn doclib-file-tags" data-file-id="${_esc(f.id)}" data-tags="${_esc((f.tags || []).join(', '))}" title="Edit tags"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.59 13.41 13.42 20.58a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.83z"/><circle cx="7" cy="7" r="1.5"/></svg></button>
@@ -2314,6 +2326,18 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
             if (r.ok) { _renderLibFiles(); if (uiModule) uiModule.showToast('Tags saved'); }
             else if (uiModule) uiModule.showError('Saving tags failed');
           } catch (_) { if (uiModule) uiModule.showError('Saving tags failed'); }
+        });
+      });
+      grid.querySelectorAll('.doclib-file-copylink[data-share-url]').forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          const url = btn.dataset.shareUrl;
+          if (!url) return;
+          try {
+            if (uiModule && uiModule.copyToClipboard) await uiModule.copyToClipboard(url);
+            else await navigator.clipboard.writeText(url);
+            if (uiModule) uiModule.showToast('Link copied');
+          } catch (_) { if (uiModule) uiModule.showError('Failed to copy link'); }
         });
       });
       grid.querySelectorAll('.doclib-file-delete').forEach(btn => {
