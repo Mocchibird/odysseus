@@ -724,8 +724,15 @@ async def _cookbook_kill_session(session_id: str, *, remote_host: str = "",
     """
     from src.tool_implementations import _internal_headers, _INTERNAL_BASE  # shared, lives in facade
     import httpx
+    import re as _re
     import shlex
     headers = _internal_headers()
+    # Validate at this choke point: session_id arrives straight from the model's
+    # tool args (do_stop_served_model / do_cancel_download only check that it is
+    # non-empty) or from cookbook_state.json, and it ends up inside a shell
+    # string sent to /api/shell/exec. Same allowlist do_tail_serve_output uses.
+    if not _re.fullmatch(r"[a-zA-Z0-9_-]+", str(session_id or "")):
+        return {"error": "Invalid session_id format", "exit_code": 1}
     remote = remote_host or ""
     sport = ssh_port or ""
 
@@ -755,9 +762,14 @@ async def _cookbook_kill_session(session_id: str, *, remote_host: str = "",
         except HTTPException as e:
             return {"error": str(getattr(e, "detail", e)), "exit_code": 1}
         _pf = f"-p {shlex.quote(str(sport))} " if sport and str(sport) != "22" else ""
+        # Quote the remote command ONCE, as a single argument. Interpolating
+        # shlex.quote() *inside* a hand-written '...' literal is unsafe: quote()
+        # supplies its own single quotes, which terminate the surrounding literal
+        # and leave the payload unquoted in the LOCAL shell.
+        _remote_cmd = f"tmux kill-session -t {shlex.quote(session_id)}"
         cmd = (
             f"ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no "
-            f"{_pf}{shlex.quote(remote)} 'tmux kill-session -t {shlex.quote(session_id)}'"
+            f"{_pf}{shlex.quote(remote)} {shlex.quote(_remote_cmd)}"
         )
         target_label = f"{session_id} on {remote}"
     else:
@@ -1051,6 +1063,7 @@ async def do_adopt_served_model(content: str, owner: Optional[str] = None) -> Di
     """
     from src.tool_implementations import _internal_headers, _INTERNAL_BASE  # shared, lives in facade
     import httpx
+    import re as _re
     import shlex
     try:
         args = _parse_tool_args(content)
@@ -1066,6 +1079,9 @@ async def do_adopt_served_model(content: str, owner: Optional[str] = None) -> Di
 
     if not sess or not model:
         return {"error": "tmux_session and model are required", "exit_code": 1}
+    # tmux_session comes from the model's tool args and lands in a shell string.
+    if not _re.fullmatch(r"[a-zA-Z0-9_-]+", sess):
+        return {"error": "Invalid tmux_session format", "exit_code": 1}
 
     # Verify tmux session exists on the target host
     if host:
@@ -1076,7 +1092,10 @@ async def do_adopt_served_model(content: str, owner: Optional[str] = None) -> Di
 
     headers = _internal_headers()
     if host:
-        check = f"ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no {shlex.quote(host)} 'tmux has-session -t {shlex.quote(sess)} 2>&1'"
+        # Single quoting level (see _cookbook_kill_session): quote the whole
+        # remote command as one argument rather than nesting quote() in '...'.
+        _remote_check = f"tmux has-session -t {shlex.quote(sess)} 2>&1"
+        check = f"ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no {shlex.quote(host)} {shlex.quote(_remote_check)}"
     else:
         check = f"tmux has-session -t {shlex.quote(sess)} 2>&1"
     try:

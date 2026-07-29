@@ -639,8 +639,23 @@ async def do_app_api(content: str, owner: Optional[str] = None) -> Dict:
         return {"error": "path is required (e.g. '/api/cookbook/gpus')", "exit_code": 1}
     if not path.startswith("/"):
         path = "/" + path
+    # Canonicalize dot segments BEFORE the blocklists below. httpx applies RFC
+    # 3986 dot-segment removal when it builds the URL, so a raw startswith()
+    # check and the request that follows would see DIFFERENT paths:
+    # "/api/cookbook/../shell/exec" passes the prefix test, then gets requested
+    # as "/api/shell/exec". Normalize once and use the canonical value for both.
+    import posixpath
+    _query = ""
+    if "?" in path:
+        path, _query = path.split("?", 1)
+        _query = "?" + _query
+    _trailing = "/" if path.endswith("/") and len(path) > 1 else ""
+    path = posixpath.normpath(path) + _trailing
+    if not path.startswith("/") or path.startswith("//") or ".." in path.split("/"):
+        return {"error": f"Path blocked for safety: {path}. Sensitive endpoints are off-limits via app_api.", "exit_code": 1}
     if any(path.startswith(p) for p in _APP_API_BLOCKLIST_PREFIXES):
         return {"error": f"Path blocked for safety: {path}. Sensitive endpoints are off-limits via app_api.", "exit_code": 1}
+    path = path + _query
 
     method = (args.get("method") or "GET").upper()
     if method not in ("GET", "POST", "PUT", "PATCH", "DELETE"):
