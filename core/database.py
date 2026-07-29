@@ -2315,7 +2315,16 @@ def _migrate_add_notes_reminder_at():
 # _migrate_add_calendar_recurrence_exdates(); bumped so DBs stamped at v1
 # re-run the (idempotent) block and pick up the gallery `caption` and
 # calendar_events `recurrence_exdates` columns.
-SCHEMA_VERSION = 2
+#
+# v3: _migrate_chat_messages_fts() was REWRITTEN (its triggers now substitute a
+# placeholder for base64 data: URLs) and _scrub_legacy_chat_message_fts_media()
+# was added to clean rows already indexed. Nothing was *added* to the call list,
+# so the version was not bumped and the change was dead code on every existing
+# DB — the old triggers stayed installed and kept stuffing whole base64 images
+# into the chat search index. Note the rule is broader than the comment above
+# implies: bump when an existing migration's BODY changes, not only when a new
+# _migrate_* call is added.
+SCHEMA_VERSION = 3
 
 
 def _get_user_version() -> int:
@@ -2333,6 +2342,63 @@ def _set_user_version(v: int) -> None:
             conn.commit()
     except Exception as e:
         logging.getLogger(__name__).warning(f"could not stamp schema user_version: {e}")
+
+
+# Columns that the ALTER-based migrations below are responsible for adding. Every
+# _migrate_* helper swallows its own exception and only logs a warning, so a
+# transient failure (e.g. "database is locked" from a concurrent WAL writer at
+# startup) used to be stamped as success — and the fast-skip gate then made the
+# missing column PERMANENT, breaking every query that touched it. Verify the
+# outcome before stamping instead of trusting that the helpers succeeded.
+_REQUIRED_MIGRATED_COLUMNS = {
+    "sessions": ("owner", "last_message_at"),
+    "documents": ("archived",),
+    "meals": ("sugar_g", "photo_upload_id"),
+    "training_sessions": ("kcal_burned", "photo_upload_id"),
+    "gallery_images": ("media_type", "hidden"),
+    "calendar_events": ("recurrence_exdates",),
+}
+
+
+def _migrated_schema_is_complete() -> bool:
+    """True if every column the migrations should have added is present.
+
+    SQLite-only (PRAGMA); other backends are assumed managed and return True.
+    A table that does not exist is skipped rather than treated as a failure —
+    create_all() runs first, so that would mean the model itself is absent.
+    """
+    if _sqlite_db_path(engine.url) is None:
+        return True
+    import sqlite3
+    db_path = _sqlite_db_path(engine.url)
+    conn = None
+    missing = []
+    try:
+        conn = sqlite3.connect(db_path)
+        for table, columns in _REQUIRED_MIGRATED_COLUMNS.items():
+            have = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
+            if not have:
+                continue
+            missing.extend(f"{table}.{c}" for c in columns if c not in have)
+    except Exception as e:
+        # Can't verify -> don't claim success; the block is idempotent so the
+        # next boot simply retries.
+        logging.getLogger(__name__).warning(f"schema verification failed: {e}")
+        return False
+    finally:
+        try:
+            if conn is not None:
+                conn.close()
+        except Exception:
+            pass
+    if missing:
+        logging.getLogger(__name__).error(
+            "Schema incomplete after migrations (%s) — NOT stamping user_version "
+            "so the next start retries. Check the migration warnings above.",
+            ", ".join(missing),
+        )
+        return False
+    return True
 
 
 def init_db():
@@ -2439,8 +2505,11 @@ def init_db():
     _migrate_encrypt_signatures()
     _migrate_encrypt_endpoint_keys()
     _migrate_backfill_task_folders()
-    # All migrations applied — stamp so the next boot skips this block.
-    _set_user_version(SCHEMA_VERSION)
+    # Stamp ONLY if the columns actually landed. The helpers above swallow their
+    # exceptions, so stamping unconditionally could freeze a half-migrated schema
+    # forever behind the fast-skip gate.
+    if _migrated_schema_is_complete():
+        _set_user_version(SCHEMA_VERSION)
 
 
 def _migrate_backfill_task_folders():
