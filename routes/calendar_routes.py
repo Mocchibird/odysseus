@@ -1,5 +1,6 @@
 """Calendar routes — local SQLite-backed calendar CRUD."""
 
+import asyncio
 import logging
 import json
 import re
@@ -429,7 +430,13 @@ async def _sync_ics_subscriptions(owner: str) -> dict:
         db = SessionLocal()
         try:
             content, final_url = await _fetch_ics_feed(feed["source_url"])
-            result = _import_ics_content(
+            # Off-thread: _import_ics_content is fully synchronous — it parses up
+            # to ICS_MAX_BYTES (10 MB) of iCal and then runs one dedupe SELECT per
+            # VEVENT with no await anywhere. On this single-worker server that
+            # stalls EVERY concurrent request for the whole import (a ~20k-event
+            # Google feed is tens of seconds).
+            result = await asyncio.to_thread(
+                _import_ics_content,
                 db,
                 owner=owner,
                 content=content,
@@ -1674,7 +1681,9 @@ def setup_calendar_routes(upload_handler=None) -> APIRouter:
         try:
             if file is not None:
                 content = await read_upload_limited(file, ICS_MAX_BYTES, "ICS file")
-                return _import_ics_content(
+                # Off-thread — see the note in _sync_ics_subscriptions.
+                return await asyncio.to_thread(
+                    _import_ics_content,
                     db,
                     owner=owner,
                     content=content,
@@ -1691,7 +1700,9 @@ def setup_calendar_routes(upload_handler=None) -> APIRouter:
                 raise HTTPException(400, "Provide an .ics file or an ICS feed URL")
 
             content, final_url = await _fetch_ics_feed(url)
-            return _import_ics_content(
+            # Off-thread — see the note in _sync_ics_subscriptions.
+            return await asyncio.to_thread(
+                _import_ics_content,
                 db,
                 owner=owner,
                 content=content,

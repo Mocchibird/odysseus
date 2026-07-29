@@ -453,9 +453,14 @@ def setup_codex_routes(
         if documents_library_endpoint is None:
             raise HTTPException(503, "Documents integration is not available")
         offset, limit = _clamp_pagination(offset, limit)
+        # KEYWORD args — the borrowed handler's signature is not ours to rely on
+        # positionally. It gained a `tag` parameter at position 4, which silently
+        # shifted every later argument by one (tag="recent", sort=0, offset=50,
+        # limit=False), so this endpoint returned zero documents for every query.
         result = await _as_owner(
             request, owner, documents_library_endpoint,
-            request, search, language, sort, offset, limit, archived,
+            request, search=search, language=language, sort=sort,
+            offset=offset, limit=limit, archived=archived,
         )
         if isinstance(result, dict):
             docs = result.get("documents")
@@ -635,7 +640,7 @@ def setup_codex_routes(
 
     @router.post("/cookbook/serve")
     async def codex_cookbook_serve(request: Request, body: dict[str, Any] = Body(default_factory=dict)):
-        _require_cookbook_scope(request, COOKBOOK_LAUNCH_SCOPES)
+        owner = _require_cookbook_scope(request, COOKBOOK_LAUNCH_SCOPES)
         # Wraps /api/model/serve with the SAME validation the UI uses.
         # _validate_serve_cmd (called inside model_serve) rejects shell
         # metachars and requires the leading binary to be in the
@@ -670,7 +675,11 @@ def setup_codex_routes(
                     break
         if serve_endpoint is None:
             raise HTTPException(503, "model serve endpoint unavailable")
-        return await serve_endpoint(request, req)
+        # Run as the scope-gated owner: the borrowed /api/model/serve handler
+        # starts with require_admin(request), which for a bearer-token caller
+        # would see the "api" pseudo-user and 403 — so a legitimately-scoped
+        # cookbook:launch token could never actually serve a model.
+        return await _as_owner(request, owner, serve_endpoint, request, req)
 
     @router.post("/cookbook/stop/{session_id}")
     async def codex_cookbook_stop(request: Request, session_id: str):
@@ -694,7 +703,7 @@ def setup_codex_routes(
         """List cached models on a configured server (or local if host is omitted).
         Mirrors `list_cached_models` from the chat agent so external agents have
         the same inventory view before deciding what to serve/download."""
-        _require_cookbook_scope(request, COOKBOOK_READ_SCOPES)
+        owner = _require_cookbook_scope(request, COOKBOOK_READ_SCOPES)
         # Hit /api/model/cached internally, with the same modelDirs the chat
         # agent's list_cached_models would resolve from cookbook state.
         state = _read_cookbook_state()
@@ -742,8 +751,11 @@ def setup_codex_routes(
                     break
         if cached_endpoint is None:
             raise HTTPException(503, "model cached endpoint unavailable")
-        # The endpoint reads host/model_dir/ssh_port/platform as kwargs.
-        return await cached_endpoint(
+        # The endpoint reads host/model_dir/ssh_port/platform as kwargs. Run it as
+        # the scope-gated owner — it begins with require_admin(request), which
+        # would otherwise 403 a validly-scoped cookbook:read bearer token.
+        return await _as_owner(
+            request, owner, cached_endpoint,
             request,
             host=params.get("host") or None,
             model_dir=params.get("model_dir") or None,
@@ -776,7 +788,7 @@ def setup_codex_routes(
     async def codex_cookbook_serve_preset(request: Request, name: str):
         """Launch a saved preset by name. Reuses the working cmd + host the
         user already saved, avoiding the cmd-allowlist trial-and-error loop."""
-        _require_cookbook_scope(request, COOKBOOK_LAUNCH_SCOPES)
+        owner = _require_cookbook_scope(request, COOKBOOK_LAUNCH_SCOPES)
         import re as _re
         if not _re.fullmatch(r"[A-Za-z0-9 _.:@\-]+", name):
             raise HTTPException(400, "Invalid preset name")
@@ -820,7 +832,9 @@ def setup_codex_routes(
                     break
         if serve_endpoint is None:
             raise HTTPException(503, "model serve endpoint unavailable")
-        return await serve_endpoint(request, req)
+        # As the scope-gated owner — /api/model/serve calls require_admin (see
+        # codex_cookbook_serve above for the full rationale).
+        return await _as_owner(request, owner, serve_endpoint, request, req)
 
     @router.post("/cookbook/adopt")
     async def codex_cookbook_adopt(request: Request, body: dict[str, Any] = Body(default_factory=dict)):
