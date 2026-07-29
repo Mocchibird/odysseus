@@ -17,9 +17,12 @@ from core.database import (
     CalendarEvent,
     Document,
     DocumentVersion,
+    FileItem,
     GalleryImage,
+    Meal,
     Note,
     Session as DbSession,
+    TrainingSession,
 )
 from src.auth_helpers import effective_user
 from src.attachment_refs import attachment_refs_from_metadata
@@ -137,6 +140,24 @@ def _collect_persisted_upload_references() -> tuple[set[str], set[str]]:
         ).yield_per(500):
             for value in (color, description, location):
                 referenced_ids.update(_upload_ids_from_persisted_text(value))
+
+        # Rows that store a canonical upload id in a DEDICATED COLUMN rather than
+        # embedded in text. These are the only pointer to those bytes — unlike
+        # Gallery, no copy is made — so omitting them let cleanup_old_uploads
+        # delete meal / training photos that are still displayed in Health, and
+        # Files-store originals, once they aged past the retention window.
+        for model_col in (
+            Meal.photo_upload_id,
+            TrainingSession.photo_upload_id,
+            FileItem.upload_id,
+        ):
+            for (upload_id,) in db.query(model_col).filter(
+                model_col.isnot(None)
+            ).yield_per(500):
+                if upload_id:
+                    referenced_ids.add(str(upload_id))
+                    # Belt-and-braces: also honor any id embedded in a longer value.
+                    referenced_ids.update(_upload_ids_from_persisted_text(upload_id))
 
         return referenced_ids, referenced_hashes
     finally:
