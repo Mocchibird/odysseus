@@ -802,6 +802,11 @@ function _wireChipDrag(chip, dock) {
     // window + snapping it there (top → maximize/fullscreen, right → right
     // dock). Releasing in the zone commits it (see onPointerUp).
     if (e.pointerType !== 'touch' && window.innerWidth > 768) {
+      // Resolve the window this chip represents — `modal` is not in scope here
+      // (onPointerUp declares its own). Passing an unbound identifier threw a
+      // ReferenceError on the first drag past the threshold, which aborted every
+      // later pointermove: chips never followed the cursor and reordering died.
+      const modal = document.getElementById(chip.dataset.modalId);
       const z = previewZoneAt(e.clientX, e.clientY, modal);
       // Ignore the bottom zone — the dock lives at the bottom, so horizontal
       // chip reordering must not get hijacked into a bottom-half snap.

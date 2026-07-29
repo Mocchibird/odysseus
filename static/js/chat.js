@@ -901,6 +901,12 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
     let finalMeta = null;
     let spinner = null;
     let timedOut = false;
+    // Declared out here (not in the try body) because the `catch (err)` below is a
+    // SIBLING block: a `const` inside the try is not visible to it, so reading
+    // these from the catch threw a ReferenceError and killed the entire
+    // error/abort UI path (interrupted marker, Continue button, error text).
+    let _isAgent = false;
+    let streamingTTS = false;
     let processingProbeTimer = null;
     let processingProbeAbort = null;
     let _renderStream = () => {};
@@ -1247,7 +1253,7 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
       currentAbort = abortCtrl;
 
       const _tState = Storage.loadToggleState();
-      const _isAgent = (_tState.mode || 'agent') === 'agent';
+      _isAgent = (_tState.mode || 'agent') === 'agent';
 
       // Timeout: 6 min for research and agent mode, 3 min otherwise
       const timeoutMs = el('research-toggle').checked || _isAgent ? RESEARCH_TIMEOUT_MS : DEFAULT_TIMEOUT_MS;
@@ -1415,7 +1421,7 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
       let isThinking = false;
       let thinkingStartTime = null;
       // Streaming TTS: synthesize sentence-by-sentence during streaming
-      const streamingTTS = !!(window.aiTTSManager && window.aiTTSManager.autoPlay && window.aiTTSManager.available);
+      streamingTTS = !!(window.aiTTSManager && window.aiTTSManager.autoPlay && window.aiTTSManager.available);
       if (streamingTTS) window.aiTTSManager.streamingStart();
       // Multi-bubble agent tracking
       let roundHolder = holder;       // Current AI text bubble (changes per round)
@@ -2832,10 +2838,13 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
 
               } else if (json.type === 'plan_update') {
                 if (_isBg) continue;
-                // Agent wrote back to the plan (ticked a step / revised). Update
-                // the stored plan + live-refresh the docked plan window.
-                const _pu = (json.data && json.data.plan) ? json.data.plan : '';
-                if (_pu) _setStoredPlan(_pu);
+                // The agent ticked/revised a plan step. This fork removed the
+                // docked plan window, so there is nothing to update — swallow the
+                // event. (It previously called _setStoredPlan(), which the fork
+                // deleted along with the window: the leftover call threw a
+                // ReferenceError inside the SSE loop and truncated the reply.)
+                // The branch is kept so `if (_isBg) continue` still short-circuits
+                // background streams exactly as before.
 
               } else if (json.type === 'agent_step') {
                 if (_isBg) continue;

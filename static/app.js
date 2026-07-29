@@ -12,7 +12,7 @@ import modelsModule from './js/models.js';
 import ragModule from './js/rag.js';
 import presetsModule from './js/presets.js';
 import searchModule from './js/search.js';
-import chatModule from './js/chat.js?v=532';
+import chatModule from './js/chat.js?v=535';
 import compareModule from './js/compare/index.js';
 import documentModule from './js/document.js?v=532';
 import documentWorkspaceModule from './js/documentWorkspace.js?v=532';
