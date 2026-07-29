@@ -172,5 +172,8 @@ export function createHistoryPanel({ undo, redo }) {
     if (cur) cur.scrollIntoView({ block: 'center' });
   }
 
-  return { toggleHistoryPanel, refreshHistoryPanelIfOpen, jumpToHistory };
+  // closeHistoryPanel is exported so the editor's "close every popup" routine can
+  // actually dismiss this panel — it was calling an unbound _closeHistoryPanel()
+  // inside a try/catch, so the panel silently stayed open.
+  return { toggleHistoryPanel, refreshHistoryPanelIfOpen, jumpToHistory, closeHistoryPanel };
 }

@@ -16,7 +16,7 @@ import spinnerModule from './spinner.js';
 import presetsModule from './presets.js';
 import fileHandlerModule from './fileHandler.js';
 import searchModule from './search.js';
-import documentModule from './document.js?v=532';
+import documentModule from './document.js?v=536';
 import * as emailInbox from './emailInbox.js';
 import codeRunnerModule from './codeRunner.js';
 import slashCommands, { initSlashCommands, isCommand, handleSlashCommand, handleSetupInput, handleSetupWizard, typewriterInto } from './slashCommands.js';

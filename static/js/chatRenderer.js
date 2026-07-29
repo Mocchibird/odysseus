@@ -1197,7 +1197,7 @@ document.addEventListener('click', function(e) {
       } catch {}
     });
   } else if (kind === 'document') {
-    import('./document.js?v=532').then(mod => {
+    import('./document.js?v=536').then(mod => {
       const open = mod.loadDocument
         || mod.openDocument
         || (mod.default && (mod.default.loadDocument || mod.default.openDocument));

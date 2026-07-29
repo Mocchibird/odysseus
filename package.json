@@ -4,10 +4,13 @@
     "url": "https://github.com/odysseus-dev/odysseus.git"
   },
   "scripts": {
-    "lint:css": "stylelint static/style.css static/fork.css"
+    "lint:css": "stylelint static/style.css static/fork.css",
+    "lint:js": "eslint static/app.js static/js"
   },
   "devDependencies": {
     "@antithesishq/bombadil": "^0.6.1",
+    "eslint": "^9.0.0",
+    "globals": "^15.0.0",
     "stylelint": "^16.0.0"
   }
 }

@@ -7,6 +7,11 @@ import { providerLogo, providerLogoFromUrl } from './providers.js';
 import { sortModelObjects } from './modelSort.js';
 import { PROVIDER_DEVICE_FLOWS, formatDeviceFlowError, runProviderDeviceFlow } from './providerDeviceFlow.js';
 
+// Same module-scope declaration every sibling module makes (app.js, emailShared.js,
+// emailInbox.js, …). The CalDAV config panel below interpolated a bare `API_BASE`
+// that was never bound here, so opening it threw a ReferenceError.
+const API_BASE = window.location.origin;
+
 let initialized = false;
 let modalEl = null;
 // When the user adds an endpoint, store its id so the next render of

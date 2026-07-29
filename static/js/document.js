@@ -6890,7 +6890,12 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
     });
 
     requestAnimationFrame(syncOverflow);
-    _syncOverflow = syncOverflow;
+    // Expose on the element for external calls, mirroring the markdown toolbar's
+    // `toolbar._syncOverflow = syncMdOverflow` above. This was a bare
+    // `_syncOverflow = syncOverflow`, and since modules are strict mode an
+    // assignment to an undeclared name throws — so initActionOverflow() blew up
+    // on its last line every time, taking the rest of the caller with it.
+    actionsEl._syncOverflow = syncOverflow;
   }
 
   /** Divider drag to resize the editor pane */

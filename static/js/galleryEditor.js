@@ -1200,6 +1200,7 @@ const _historyPanel = createHistoryPanel({ undo, redo });
 const _jumpToHistory             = _historyPanel.jumpToHistory;
 const _toggleHistoryPanel        = _historyPanel.toggleHistoryPanel;
 const _refreshHistoryPanelIfOpen = _historyPanel.refreshHistoryPanelIfOpen;
+const _closeHistoryPanel         = _historyPanel.closeHistoryPanel;
 
 // _relTime lives in editor/layer-helpers.js.
 

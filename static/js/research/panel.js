@@ -598,7 +598,10 @@ async function _handleStart() {
   if (_mobile) _dismissKeyboard(queryEl); else queryEl.focus();
   _resetCategoryToAuto();
   jobs.startJob(query, settings).catch((e) => {
-    if (typeof uiModule !== 'undefined' && uiModule?.showError) uiModule.showError('Failed to start research');
+    // window.uiModule (assigned in app.js) — this module never imports uiModule,
+    // so `typeof uiModule !== 'undefined'` was always false and a failed research
+    // start reported nothing to the user.
+    if (window.uiModule?.showError) window.uiModule.showError('Failed to start research');
     queryEl.value = query; // restore so user can retry
   });
 }

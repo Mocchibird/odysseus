@@ -12,10 +12,10 @@ import modelsModule from './js/models.js';
 import ragModule from './js/rag.js';
 import presetsModule from './js/presets.js';
 import searchModule from './js/search.js';
-import chatModule from './js/chat.js?v=535';
+import chatModule from './js/chat.js?v=536';
 import compareModule from './js/compare/index.js';
-import documentModule from './js/document.js?v=532';
-import documentWorkspaceModule from './js/documentWorkspace.js?v=532';
+import documentModule from './js/document.js?v=536';
+import documentWorkspaceModule from './js/documentWorkspace.js?v=536';
 import searchChatModule from './js/search-chat.js';
 import { makeWindowDraggable } from './js/windowDrag.js';
 import markdownModule from './js/markdown.js';
@@ -37,7 +37,7 @@ import pingsModule from './js/pings.js?v=396';
 import galleryModule from './js/gallery.js?v=527';
 import tasksModule from './js/tasks.js?v=20260713taskescape';
 import calendarModule from './js/calendar.js';
-import adminModule from './js/admin.js?v=527';
+import adminModule from './js/admin.js?v=536';
 import settingsModule from './js/settings.js?v=527';
 // FORK: runtime-inject fork-only UI (e.g. the API Tokens panel) into stable
 // upstream anchors, so index.html stays aligned with upstream. Side-effect
@@ -4446,7 +4446,11 @@ function startOdysseusApp() {
 
   // Section collapse/expand + drag reorder (extracted to js/section-management.js)
   initSectionCollapse(Storage);
-  initSectionDrag(Storage, loadUIVis);
+  // window.loadUIVis, not a bare reference: the function is declared inside
+  // another scope and is NOT visible here, so `loadUIVis` threw a ReferenceError
+  // and section drag-reorder never initialized. (It is assigned to window at its
+  // definition site precisely so callers like this one can reach it.)
+  initSectionDrag(Storage, window.loadUIVis);
   
   // Handle drag over and out for individual sections
   const sections = document.querySelectorAll('.section[draggable="true"]');

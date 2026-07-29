@@ -7,7 +7,7 @@ import Storage from './storage.js';
 import themeModule from './theme.js?v=397';
 import markdownModule from './markdown.js';
 import sessionModule from './sessions.js';
-import documentModule from './document.js?v=532';
+import documentModule from './document.js?v=536';
 
 /**
  * Handle a ui_control SSE event — AI-driven UI manipulation.

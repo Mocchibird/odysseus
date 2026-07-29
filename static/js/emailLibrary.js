@@ -5191,7 +5191,10 @@ async function _toggleFromSenderPanel(reader, data, btn) {
 
   const fromAddr = String(data.from_address || '').trim();
   if (!fromAddr) {
-    if (typeof showError === 'function') showError('No sender address available');
+    // uiModule.showError — ui.js's showError is NOT among this module's named
+    // imports, so the bare `typeof showError` guard was always false and this
+    // validation failure told the user nothing.
+    uiModule.showError('No sender address available');
     return;
   }
 
@@ -5721,7 +5724,7 @@ function _wireAttachmentHandlers(reader, folder) {
               ownerModal.classList.add('hidden');
             }
           }
-          const docMod = await import('./document.js?v=532');
+          const docMod = await import('./document.js?v=536');
           const load = (docMod && docMod.loadDocument) || (docMod && docMod.default && docMod.default.loadDocument);
           if (typeof load === 'function') {
             await load(json.doc_id);

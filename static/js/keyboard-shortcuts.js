@@ -161,7 +161,9 @@ export function initKeyboardShortcuts(modules) {
         if (ir) ir.classList.remove('rail-hidden');
         if (sb) sb.classList.remove('hidden');
       }
-      if (typeof syncRailSide === 'function') syncRailSide();
+      // window.syncRailSide — see init.js: a bare reference is unbound here, so
+      // this guard was always false and the rail never re-synced.
+      if (typeof window.syncRailSide === 'function') window.syncRailSide();
       return;
     }
     if (_matchesCombo(e, kb.tts)) {
