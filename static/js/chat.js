@@ -16,13 +16,13 @@ import spinnerModule from './spinner.js';
 import presetsModule from './presets.js';
 import fileHandlerModule from './fileHandler.js';
 import searchModule from './search.js';
-import documentModule from './document.js?v=536';
+import documentModule from './document.js?v=537';
 import * as emailInbox from './emailInbox.js';
 import codeRunnerModule from './codeRunner.js';
 import slashCommands, { initSlashCommands, isCommand, handleSlashCommand, handleSetupInput, handleSetupWizard, typewriterInto } from './slashCommands.js';
 import createResearchSynapse from './researchSynapse.js';
 import { createStreamRenderer } from './streamingRenderer.js';
-import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composerArrowUpRecall.js';
+import { wireArrowUpRecall, getUserMessagesFromChatHistory } from './composerArrowUpRecall.js';
 
   const RESEARCH_TIMEOUT_MS = 360000;
   const DEFAULT_TIMEOUT_MS = 120000;
@@ -95,6 +95,41 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
       }
     };
   }
+
+  function _hashSessionCandidate() {
+    try {
+      const hashId = String(window.location.hash || '').replace(/^#/, '').trim();
+      if (!hashId) return '';
+      if (/^(document|note|image|email|event|task|skill|research)-/.test(hashId) || /^open=notes&note=/.test(hashId)) return '';
+      return hashId;
+    } catch (_) {
+      return '';
+    }
+  }
+
+  async function _adoptOpenedSessionBeforeAutoCreate() {
+    if (!sessionModule || !sessionModule.getCurrentSessionId || sessionModule.getCurrentSessionId()) return true;
+    // Don't adopt a stale session when the user explicitly started a New Chat
+    // (pending state set) — the send path must materialize the pending session.
+    if (sessionModule.hasPendingChat && sessionModule.hasPendingChat()) return false;
+    const activeRowId = document.querySelector('.list-item.active-session[data-session-id], .session-item.active[data-session-id]')?.dataset?.sessionId || '';
+    const hashId = _hashSessionCandidate();
+    const lastSelectedId = String(window.__odysseusLastSelectedSessionId || '').trim();
+    const targetId = activeRowId || hashId || lastSelectedId;
+    if (!targetId) return false;
+    try {
+      window.__odysseusComposerUserEdited = true;
+      if (sessionModule.selectSession) {
+        await sessionModule.selectSession(targetId, { keepSidebar: true, showLoading: false });
+      } else if (sessionModule.setCurrentSessionId) {
+        sessionModule.setCurrentSessionId(targetId);
+      }
+      return !!(sessionModule.getCurrentSessionId && sessionModule.getCurrentSessionId());
+    } catch (_) {
+      return false;
+    }
+  }
+
   // ── Auto-recovery: when a turn's stream silently dies (connection drop) or
   // goes quiet while the connection is alive, re-engage the model with a
   // completion handshake instead of leaving it hung. Capped so it can't loop.
@@ -352,7 +387,7 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
 
     // ArrowUp on empty composer recalls last user message (like many chat apps).
     const _wireArrowUpRecall = (composer) =>
-      wireArrowUpRecall(composer, () => getLastUserMessageFromChatHistory(), {
+      wireArrowUpRecall(composer, () => getUserMessagesFromChatHistory(), {
         autoResize: uiModule?.autoResize,
       });
 
@@ -902,11 +937,11 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
     let spinner = null;
     let timedOut = false;
     // Declared out here (not in the try body) because the `catch (err)` below is a
-    // SIBLING block: a `const` inside the try is not visible to it, so reading
-    // these from the catch threw a ReferenceError and killed the entire
-    // error/abort UI path (interrupted marker, Continue button, error text).
+    // SIBLING block: a `const` inside the try is not visible to it, so reading it
+    // from the catch threw a ReferenceError and killed the entire error/abort UI
+    // path (interrupted marker, Continue button, error text). Upstream hoists
+    // `streamingTTS` itself just above the try; `_isAgent` is ours to hoist.
     let _isAgent = false;
-    let streamingTTS = false;
     let processingProbeTimer = null;
     let processingProbeAbort = null;
     let _renderStream = () => {};
@@ -948,6 +983,8 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
     currentAccumulated = '';
     currentHolder = null;
     
+    let abortCtrl = null;
+    let streamingTTS = false;
     try {
       // Re-enable auto-scroll when user sends a message
       uiModule.setAutoScroll(true);
@@ -1248,7 +1285,7 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
       }
 
 
-      const abortCtrl = new AbortController();
+      abortCtrl = new AbortController();
       abortCtrl._reason = '';
       currentAbort = abortCtrl;
 
@@ -4312,7 +4349,8 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
     if (msgIndex < 0) return;
 
     const bodyEl = userMsgElement.querySelector('.body');
-    const currentText = bodyEl ? bodyEl.textContent.trim().replace(/\s*\[\d+ attachment\(s\)\]$/, '') : '';
+    let currentText = (userMsgElement.dataset.raw || (bodyEl ? bodyEl.textContent : '') || '').trim();
+    currentText = currentText.replace(/\s*\[\d+ attachment\(s\)\]$/, '');
 
     // Replace body with an editable textarea
     const editor = document.createElement('textarea');

@@ -12,10 +12,10 @@ import modelsModule from './js/models.js';
 import ragModule from './js/rag.js';
 import presetsModule from './js/presets.js';
 import searchModule from './js/search.js';
-import chatModule from './js/chat.js?v=536';
+import chatModule from './js/chat.js?v=537';
 import compareModule from './js/compare/index.js';
-import documentModule from './js/document.js?v=536';
-import documentWorkspaceModule from './js/documentWorkspace.js?v=536';
+import documentModule from './js/document.js?v=537';
+import documentWorkspaceModule from './js/documentWorkspace.js?v=537';
 import searchChatModule from './js/search-chat.js';
 import { makeWindowDraggable } from './js/windowDrag.js';
 import markdownModule from './js/markdown.js';
@@ -37,7 +37,7 @@ import pingsModule from './js/pings.js?v=396';
 import galleryModule from './js/gallery.js?v=527';
 import tasksModule from './js/tasks.js?v=20260713taskescape';
 import calendarModule from './js/calendar.js';
-import adminModule from './js/admin.js?v=536';
+import adminModule from './js/admin.js?v=537';
 import settingsModule from './js/settings.js?v=527';
 // FORK: runtime-inject fork-only UI (e.g. the API Tokens panel) into stable
 // upstream anchors, so index.html stays aligned with upstream. Side-effect
@@ -1800,11 +1800,19 @@ function initializeEventListeners() {
   
   const newMemoryInput = el('new-memory-input');
   if (newMemoryInput) {
-    newMemoryInput.addEventListener('keypress', (e) => {
-      if (e.key === 'Enter') {
+    // keydown, not the deprecated keypress: keypress is not guaranteed to
+    // fire for Enter everywhere, which left the Add Memory form with no
+    // working submit path (#5828).
+    newMemoryInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.isComposing) {
+        e.preventDefault();
         memoryModule.addNewMemory();
       }
     });
+  }
+  const newMemoryAddBtn = el('new-memory-add-btn');
+  if (newMemoryAddBtn) {
+    newMemoryAddBtn.addEventListener('click', () => memoryModule.addNewMemory());
   }
 
 // Voice recording is handled by the dual-purpose send/mic button (see below)
@@ -3922,6 +3930,11 @@ function startOdysseusApp() {
   const sendBtn = document.querySelector('.send-btn');
   const messageInput = el('message');
   const modelPickerWrap = document.getElementById('model-picker-wrap');
+
+  // ArrowUp/ArrowDown prompt recall on #message lives in
+  // static/js/composerArrowUpRecall.js (wired from chat.js). Do not re-add a
+  // copy here: two capture-phase listeners on the same textarea meant the one
+  // without the draft guard won and ate unsent multi-line prompts (#5862).
 
   const _sendIcon = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg>';
   const _micIcon = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>';

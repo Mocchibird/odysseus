@@ -2315,9 +2315,24 @@ export async function materializePendingSession() {
     payload = { detail: await res.text() };
   }
 
+  // Ours: bail out before the success path below if the create actually failed.
   if (!res.ok) {
     uiModule.showError(`Session create failed (${res.status}) ${payload.detail || JSON.stringify(payload)}`);
     return false;
+  }
+
+  // Upstream (#5872): adopt the new session and restore the URL hash write.
+  // Re-indented to this fork's 2-space context — upstream's copy sits inside a
+  // `materializePromise` async wrapper that this fork does not have.
+  // Clear any leftover document text selection from the previous session
+  if (window.documentModule?.clearSelection) {
+    try { window.documentModule.clearSelection(); } catch {}
+  }
+  _pendingChat = null;
+  currentSessionId = payload.id;
+  if (!isIncognito) {
+    Storage.set('lastSessionId', payload.id);
+    history.replaceState(null, '', '#' + payload.id);
   }
 
   if (isIncognito && payload.id) {

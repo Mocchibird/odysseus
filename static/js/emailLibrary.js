@@ -13,7 +13,7 @@ import { makeWindowDraggable } from './windowDrag.js';
 import {
   _esc, _escLinkify, _extractName, _parseTurnMeta,
   _formatBubbleDate, _formatRecipients, _senderColor, _initials,
-  _sanitizeHtml,
+  _sanitizeHtml, _renderEmailSummaryError,
   _TALON_WROTE, _TALON_FROM, _TALON_SENT, _TALON_SUBJ, _TALON_TO,
   _TALON_ORIG_RE, _SIG_BLOAT_MIN_CHARS,
 } from './emailLibrary/utils.js';
@@ -5724,7 +5724,7 @@ function _wireAttachmentHandlers(reader, folder) {
               ownerModal.classList.add('hidden');
             }
           }
-          const docMod = await import('./document.js?v=536');
+          const docMod = await import('./document.js?v=537');
           const load = (docMod && docMod.loadDocument) || (docMod && docMod.default && docMod.default.loadDocument);
           if (typeof load === 'function') {
             await load(json.doc_id);
@@ -6654,12 +6654,11 @@ async function _generateSummary(reader, data, btn) {
         if (label) label.textContent = 'Summary';
       }
     } else {
-      content.innerHTML = `<span style="color:var(--red)">${_esc(result.error || 'Failed to summarize')}</span>`;
-      panel.remove();
+      _renderEmailSummaryError(content, result);
     }
   } catch (e) {
     sp.destroy();
-    panel.remove();
+    _renderEmailSummaryError(content, null);
     if (uiModule) uiModule.showError?.('Failed to summarize');
   } finally {
     if (btn) btn.disabled = false;

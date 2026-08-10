@@ -226,11 +226,11 @@
       }, { once: true });
     })();
   </script>
-  <link rel="stylesheet" href="/static/style.css?v=526">
+  <link rel="stylesheet" href="/static/style.css?v=537">
   <!-- FORK: fork-only CSS, loaded after style.css so style.css stays aligned with upstream. -->
   <link rel="stylesheet" href="/static/fork.css?v=531">
-  <link rel="modulepreload" href="/static/app.js?v=536">
-  <link rel="modulepreload" href="/static/js/chat.js?v=536">
+  <link rel="modulepreload" href="/static/app.js?v=537">
+  <link rel="modulepreload" href="/static/js/chat.js?v=537">
   <link rel="modulepreload" href="/static/js/ui.js">
   <link rel="modulepreload" href="/static/js/sessions.js">
   <link rel="modulepreload" href="/static/js/markdown.js">
@@ -331,6 +331,7 @@
                 <span class="skill-rich-ph"><span class="k">Add a memory</span> &mdash; e.g. 'I prefer concise replies' <svg class="k" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-left:4px;" aria-hidden="true"><polyline points="9 10 4 15 9 20"/><path d="M20 4v7a4 4 0 0 1-4 4H4"/></svg></span>
               </div>
               <select id="new-memory-category" class="memory-edit-cat-select" aria-label="Memory category"></select>
+              <button type="button" id="new-memory-add-btn" class="theme-io-btn" title="Save this memory" style="flex:none;height:28px;font-size:12px;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:4px;" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>Add</button>
             </div>
           </div>
           <div class="admin-card">
@@ -1075,7 +1076,7 @@
       var tips = mobile ? phone : desktop;
       var el = document.getElementById('welcome-tip');
       if (el) {
-        el.textContent = 'Type /setup, then choose Local models or API.';
+        el.textContent = tips[Math.floor(Math.random() * tips.length)];
       }
       fetch('/api/version').then(function(r){return r.json()}).then(function(d){
         if (d.version) window._appVersion = d.version;
@@ -2632,13 +2633,13 @@
 <script type="module" src="/static/js/search.js"></script>
 <script type="module" src="/static/js/spinner.js"></script>
 <script type="module" src="/static/js/tts-ai.js"></script>
-<script type="module" src="/static/js/document.js?v=536"></script>
-<script type="module" src="/static/js/documentWorkspace.js?v=536"></script>
+<script type="module" src="/static/js/document.js?v=537"></script>
+<script type="module" src="/static/js/documentWorkspace.js?v=537"></script>
 <script type="module" src="/static/js/gallery.js?v=527"></script>
 <script type="module" src="/static/js/chatRenderer.js"></script>
 <script type="module" src="/static/js/codeRunner.js"></script>
 <script type="module" src="/static/js/chatStream.js"></script>
-<script type="module" src="/static/js/chat.js?v=536"></script>
+<script type="module" src="/static/js/chat.js?v=537"></script>
 <script type="module" src="/static/js/cookbook.js"></script>
 <script src="/static/js/cookbookSchedule.js"></script>
 <script type="module" src="/static/js/search-chat.js"></script>
@@ -2646,9 +2647,9 @@
 <script type="module" src="/static/js/theme.js?v=397"></script>
 <script type="module" src="/static/js/censor.js"></script>
 <script type="module" src="/static/js/settings.js?v=527"></script>
-<script type="module" src="/static/js/admin.js?v=536"></script>
+<script type="module" src="/static/js/admin.js?v=537"></script>
 <script type="module" src="/static/js/assistant.js"></script>
-<script type="module" src="/static/app.js?v=536"></script>  <!-- app.js must be LAST -->
+<script type="module" src="/static/app.js?v=537"></script>  <!-- app.js must be LAST -->
 <script type="module" src="/static/js/init.js"></script>
 <script type="module" src="/static/js/a11y.js"></script>
 <script nonce="{{CSP_NONCE}}">if('serviceWorker' in navigator){navigator.serviceWorker.register('/static/sw.js').catch(()=>{});}</script>
