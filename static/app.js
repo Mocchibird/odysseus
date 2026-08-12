@@ -17,6 +17,12 @@ import compareModule from './js/compare/index.js';
 import documentModule from './js/document.js?v=537';
 import searchChatModule from './js/search-chat.js';
 import { makeWindowDraggable } from './js/windowDrag.js';
+import {
+  revealApplicationShellAfterPaint,
+  runDeferredRouteOpener,
+  deferRouteOpener,
+  settleSessionHydration
+} from './js/startupShell.js';
 import markdownModule from './js/markdown.js';
 import chatRenderer from './js/chatRenderer.js';
 import sessionModule from './js/sessions.js';
@@ -25,6 +31,7 @@ import voiceRecorderModule from './js/voiceRecorder.js';
 import censorModule from './js/censor.js';
 import notesModule from './js/notes.js?v=526';
 import pingsModule from './js/pings.js?v=396';
+import { UI_VIS_DEFAULT_OFF, resolveVisibility } from './js/ui_visibility.js';
 // tasks.js + calendar.js + gallery.js are imported EAGERLY (not lazy): they
 // run boot-time side effects at module load — tasks.js starts background-task
 // notification polling, calendar.js populates the sidebar today-events badge
@@ -33,7 +40,7 @@ import pingsModule from './js/pings.js?v=396';
 // immediately even if the panel was never opened) — which would silently
 // never run if deferred to first open.
 import galleryModule from './js/gallery.js?v=527';
-import tasksModule from './js/tasks.js?v=20260713taskescape';
+import tasksModule from './js/tasks.js?v=20260723tasksbulkfeedback1';
 import calendarModule from './js/calendar.js';
 import adminModule from './js/admin.js?v=537';
 import settingsModule from './js/settings.js?v=527';
@@ -1305,12 +1312,13 @@ function initializeEventListeners() {
     '/library':  () => sessionModule && sessionModule.openLibrary && sessionModule.openLibrary(),
   };
   const _opener = _routeOpen[urlPath];
-  // Defer the opener — at this point in init, the modules whose handlers
-  // we trigger (#rail-new-session click handler, the email-section header
-  // click handler in emailInbox, sessionModule's loaded session list) are
-  // still being wired up further down in this same function. Stash the
-  // opener so it runs from sessionModule.loadSessions().finally() below.
-  if (_opener) window._odysseusRouteOpener = _opener;
+  // Defer the opener — at this point in init, the modules whose handlers we
+  // trigger (#rail-new-session click handler, the email-section header click
+  // handler in emailInbox, sessionModule) are still being wired up further
+  // down in this same function. startupShell decides when it can run: as soon
+  // as wiring completes, or — for the routes that read the session list —
+  // once /api/sessions has settled.
+  deferRouteOpener(urlPath, _opener);
 
   // Archive browser tool button
   const toolLibraryBtn = el('tool-library-btn');
@@ -2688,51 +2696,6 @@ function initializeEventListeners() {
   // ── UI Visibility (Customize UI modal) ──
   const UI_VIS_KEY = 'odysseus-ui-visibility';
 
-  // Selector map: key → CSS selector(s) for targets
-  const UI_VIS_MAP = {
-    'sidebar-brand':       '.sidebar-brand-title',
-    'sidebar-new-chat':    '#sidebar-new-chat-btn',
-    'sidebar-search':      '#sidebar-search-btn',
-    'sessions-section':    '#sessions-section',
-    'email-section':       '#email-section',
-    'models-section':      '#models-section',
-    'planner-section':     '#planner-section',
-    'tools-section':       '#tools-section',
-    'library-section':     '#library-section',
-    'ai-section':          '#ai-section',
-    'theme-section':       '#theme-section',
-    // Per-tool visibility — fine-grained control over which entries show
-    // inside the Tools section in the sidebar.
-    'tool-calendar':       '#tool-calendar-btn',
-    'tool-compare':        '#tool-compare-btn',
-    'tool-cookbook':       '#tool-cookbook-btn',
-    'tool-research':       '#tool-research-btn',
-    'tool-gallery':        '#tool-gallery-btn',
-    'tool-library':        '#tool-library-btn',
-    'tool-memory':         '#tool-memory-btn',
-    'tool-notes':          '#tool-notes-btn',
-    'tool-tasks':          '#tool-tasks-btn',
-    'tool-theme':          '#tool-theme-btn',
-    'user-bar':            '#user-bar-profile',
-    'sidebar-settings-btn':'#user-bar-settings',
-    'chat-meta':           '.chat-meta-overlay',
-    'welcome-text':        '.welcome-name, .welcome-sub, #welcome-tip',
-    'incognito-btn':       '.incognito-btn',
-    'web-toggle-btn':      '#web-toggle-btn',
-    'doc-toggle-btn':      '#overflow-doc-btn',
-    'rag-toggle-btn':      '#overflow-rag-btn',
-    'bash-toggle-btn':     '#bash-toggle-btn',
-    'overflow-plus-btn':   '.overflow-wrapper',
-    'mode-toggle':         '.mode-toggle',
-    'preset-mini-btn':     '#overflow-preset-btn',
-    'attach-btn':          '#overflow-attach-btn',
-    'research-btn':        '#overflow-research-btn',
-    'rail-new-chat':       '#rail-new-session',
-  };
-
-  // Keys hidden by default on first run (no localStorage yet)
-  const UI_VIS_DEFAULT_OFF = new Set(['models-section', 'rag-toggle-btn', 'text-emojis', 'chat-fullwidth']);
-
   // Keys that need admin to toggle off (reserved for future use)
   const UI_VIS_ADMIN_ONLY = new Set([]);
 
@@ -2745,14 +2708,14 @@ function initializeEventListeners() {
   }
 
   function applyUIVis(state) {
-    Object.entries(UI_VIS_MAP).forEach(([key, selector]) => {
-      // section-drag-reorder uses a body class instead of inline styles
-      if (key === 'section-drag-reorder') return;
-      const visible = key in state ? state[key] !== false : !UI_VIS_DEFAULT_OFF.has(key);
+    // resolveVisibility computes selector→visible (pure; ui_visibility.js),
+    // including the tools-section parent rule that hides every tool rail
+    // launcher when Tools is off. Apply the result to the DOM here.
+    for (const [selector, visible] of Object.entries(resolveVisibility(state))) {
       document.querySelectorAll(selector).forEach(el => {
         el.style.display = visible ? '' : 'none';
       });
-    });
+    }
     // Drag reorder: use body class so dynamically created handles are covered
     const dragEnabled = state['section-drag-reorder'] === true;
     document.body.classList.toggle('rearrange-mode', dragEnabled);
@@ -4297,6 +4260,10 @@ function startOdysseusApp() {
   // Load initial data
   presetsModule.loadPresets(uiModule.showError);
 
+  // Core wiring is complete for this turn — reveal the shell independently of
+  // the session-list request.
+  revealApplicationShellAfterPaint();
+
   if (sessionModule) {
     sessionModule.initDependencies({
       API_BASE: API_BASE,
@@ -4308,21 +4275,19 @@ function startOdysseusApp() {
       scrollHistory: uiModule.scrollHistoryInstant
     });
 
-    // Load sessions first (critical path) — remove loader when done
-    sessionModule.loadSessions()
-      .catch(e => console.warn('loadSessions error:', e))
-      .finally(() => {
-        const loader = document.getElementById('app-loader');
-        if (loader) { loader.style.opacity = '0'; setTimeout(() => loader.remove(), 300); }
-        // Fire any URL route opener now that sessions + module wiring are
-        // ready. Deferred from up top of init for exactly this reason.
-        if (window._odysseusRouteOpener) {
-          try { window._odysseusRouteOpener(); } catch (_) {}
-          window._odysseusRouteOpener = null;
-        }
-      });
+    // sessionModule is now wired, so every route opener has the modules it
+    // drives. The ones that read no session data open here rather than
+    // queueing behind /api/sessions.
+    runDeferredRouteOpener();
+
+    // The shell is already usable at this point; session hydration is
+    // sidebar-local and settles on its own schedule.
+    settleSessionHydration(() => sessionModule.loadSessions());
   } else {
     console.error('Session module not loaded!');
+    // Nothing will hydrate. Settle immediately so the sidebar exposes the
+    // failure; session-dependent routes must remain unopened without data.
+    settleSessionHydration(null);
   }
 
   const runNonCriticalStartup = (fn, delay = 4000) => {

@@ -20,6 +20,7 @@ from src import agent_runs
 from src.model_context import estimate_tokens
 from src.chat_helpers import coerce_message_and_session
 from src.endpoint_resolver import normalize_base as _normalize_base, build_chat_url
+from src.foreground_model_routing import build_foreground_model_candidates
 from src.session_search import search_session_messages
 from src.prompt_security import untrusted_context_message
 from core.exceptions import SessionNotFoundError
@@ -1187,14 +1188,14 @@ def setup_chat_routes(
             thinking_response = ""
             last_metrics = None
 
-            # Configured fallback chain for the default chat model. Tried in
-            # order if the session's primary model fails before producing
-            # output. Resolved once per request.
-            try:
-                from src.endpoint_resolver import resolve_chat_fallback_candidates
-                _fallback_candidates = resolve_chat_fallback_candidates(owner=_user)
-            except Exception:
-                _fallback_candidates = []
+            # Foreground Chat and Agent requests use one owner-aware policy
+            # boundary. Legacy `default_model_fallbacks` data is not eligible.
+            _foreground_candidates = build_foreground_model_candidates(
+                sess.endpoint_url,
+                sess.model,
+                sess.headers,
+                owner=_user,
+            )
 
             # Send model name early so the frontend can show it during streaming
             _model_suffix = "Research" if effective_do_research else None
@@ -1251,14 +1252,16 @@ def setup_chat_routes(
                 _actual_model = None
                 # ── Chat mode: call stream_llm directly, NO tools, NO document access ──
                 try:
-                    _vision_override = ctx.preprocessed.vision_override
+                    _vision_override = getattr(ctx.preprocessed, "vision_override", None)
                     if _vision_override:
                         # Image + text-only session model → answer THIS message with
                         # the admin's default vision model (raw image), then revert.
-                        _chat_candidates = [_vision_override, (sess.endpoint_url, sess.model, sess.headers)] + _fallback_candidates
+                        # Prepended to the owner-aware foreground list, which already
+                        # carries the selected model plus its eligible fallbacks.
+                        _chat_candidates = [_vision_override] + _foreground_candidates
                         _requested_model = _vision_override[1]
                     else:
-                        _chat_candidates = [(sess.endpoint_url, sess.model, sess.headers)] + _fallback_candidates
+                        _chat_candidates = _foreground_candidates
                     async for chunk in stream_llm_with_fallback(
                         _chat_candidates,
                         messages,
@@ -1419,17 +1422,18 @@ def setup_chat_routes(
                         _max_rounds = _DEFAULT_ROUNDS
                     _max_rounds = max(1, min(_max_rounds, 200))
 
-                    _vision_override = ctx.preprocessed.vision_override
+                    _vision_override = getattr(ctx.preprocessed, "vision_override", None)
                     if _vision_override:
                         # Image + text-only session model → run THIS agent turn on
                         # the admin's default vision model (raw image), keeping the
                         # session model as a fallback. Reverts on the next message.
                         _agent_url, _agent_model, _agent_headers = _vision_override
-                        _agent_fallbacks = [(sess.endpoint_url, sess.model, sess.headers)] + _fallback_candidates
+                        _agent_fallbacks = _foreground_candidates
                         _requested_model = _agent_model
                     else:
                         _agent_url, _agent_model, _agent_headers = sess.endpoint_url, sess.model, sess.headers
-                        _agent_fallbacks = _fallback_candidates
+                        # Primary is _foreground_candidates[0]; the rest are fallbacks.
+                        _agent_fallbacks = _foreground_candidates[1:]
 
                     _meal_photo_linked = False  # link an attached food photo to the first meal Iris logs this turn
                     _training_photo_linked = False  # ditto for the first training session logged this turn

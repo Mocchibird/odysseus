@@ -1720,8 +1720,25 @@ export async function loadSessions() {
       sessionStorage.removeItem('ody-prefetch-sessions');
       fetched = JSON.parse(prefetched);
     } else {
-      const res = await fetch(`${API_BASE}/api/sessions`);
+      let url = `${API_BASE}/api/sessions`;
+      if (currentSessionId && _isIncognitoSession(currentSessionId)) {
+        url += `?active_incognito_id=${encodeURIComponent(currentSessionId)}`;
+      }
+      const res = await fetch(url);
+      if (!res.ok) {
+        let detail = '';
+        try {
+          const payload = await res.json();
+          detail = payload?.detail || payload?.error || '';
+        } catch (_) {}
+        const error = new Error(detail || `Session request failed (HTTP ${res.status})`);
+        error.status = res.status;
+        throw error;
+      }
       fetched = await res.json();
+    }
+    if (!Array.isArray(fetched)) {
+      throw new Error('Session request returned an invalid response');
     }
     sessions = _normalizeSessionsList(fetched);
     renderSessionList();
@@ -1856,9 +1873,15 @@ export async function loadSessions() {
         _autoCreateInProgress = false;
       }
     }
+    return true;
   } catch (error) {
     console.error('Error in loadSessions:', error);
-    uiModule.showError('Failed to load sessions: ' + error.message);
+    // app.js's global fetch wrapper owns expired-auth navigation. Avoid
+    // flashing a redundant session error while that 401 redirect is pending.
+    if (error?.status !== 401) {
+      uiModule.showError('Failed to load sessions: ' + error.message);
+    }
+    return false;
   }
 }
 

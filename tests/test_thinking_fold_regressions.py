@@ -44,8 +44,18 @@ def test_think_wrapper_closes_at_agent_round_boundaries():
     closing </think> never comes from a delta — the round-boundary handlers
     must close and reset the wrapper or rounds 2+ stream tag-less."""
     chat = _read("static/js/chat.js")
-    closer = "if (_thinkOpen) { accumulated += '</think>'; roundText += '</think>'; _thinkOpen = false; }"
-    assert chat.count(closer) >= 2  # tool_start + agent_step
+    # The close is centralised in _closeOpenThinkingMarkup() (upstream #5931 moved
+    # live-thinking into helpers); assert the helper still does the work and that
+    # both round boundaries still call it.
+    assert "accumulated += '</think>';" in chat and "roundText += '</think>';" in chat
+    assert "_thinkOpen = false;" in chat
+    for handler in (
+        "} else if (json.type === 'tool_start') {",
+        "} else if (json.type === 'agent_step') {",
+    ):
+        idx = chat.index(handler)
+        # the closer is the first thing each boundary handler does
+        assert "_closeOpenThinkingMarkup(" in chat[idx:idx + 400], handler
     # teacher takeover abandons the student bubble — flag reset there too
     assert "_thinkOpen = false; // student bubble abandoned" in chat
 
