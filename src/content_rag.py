@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 # Every store's text lands in the one collection, discriminated by `kind`.
 # "knowledge" is the legacy kind written by the Knowledge base (retired in a
 # later phase); the per-domain stores write their own kind.
-CONTENT_KINDS = ("knowledge", "book", "file", "document", "image")
+CONTENT_KINDS = ("knowledge", "file", "document", "image")
 
 
 def index_text(owner: Optional[str], source_id: str, text: str, kind: str,

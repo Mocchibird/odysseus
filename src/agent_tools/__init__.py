@@ -159,6 +159,3 @@ from src.tool_implementations import (  # noqa: E402, F401
     do_api_call,
 )
 
-# Fork-only tool implementation re-export (kept out of the upstream block above
-# so it stays byte-identical). See docs/fork-additive-policy.md.
-from src.tool_implementations import do_manage_books  # noqa: E402, F401

@@ -16,7 +16,6 @@ FORK_ALWAYS_AVAILABLE = frozenset({
     'list_cookbook_servers',
     'list_serve_presets',
     'list_served_models',
-    'manage_books',
     'manage_health',
     'search_files',
     'send_ping',
@@ -30,7 +29,6 @@ FORK_ALWAYS_AVAILABLE = frozenset({
 
 # Same, for the personal-assistant tool surface.
 FORK_ASSISTANT_ALWAYS_AVAILABLE = frozenset({
-    'manage_books',
     'manage_health',
     'search_files',
     'send_ping',
@@ -38,7 +36,6 @@ FORK_ASSISTANT_ALWAYS_AVAILABLE = frozenset({
 
 # Descriptions for the fork's net-new builtin tools.
 FORK_TOOL_DESCRIPTIONS = {
-    'manage_books': 'EPUB/PDF e-reader: list books, read EPUB chapters or PDF pages, and save/read reading progress. Use for books, ebooks, EPUBs, PDFs, chapter/page status, and what the user has read.',
     'send_ping': "Send an immediate ntfy push notification/ping to the user through the configured ntfy integration and reminder topic. Use for 'ping me now', 'send me a notification', or proactive assistant pings. For reminders at a future time, use manage_notes with due_date.",
     'search_files': "Search the user's content — their Files (uploaded docs), Books (PDF/EPUB), and authored Documents — to recall facts/specs/notes. Combines exact keyword/tag matching with semantic recall across every store, and returns [filename](#<kind>-<id>) links — ALWAYS cite the source so the user can open + verify the original. For 'what do my files/notes say about X', 'find my file/book about Y', 'look up Z in my docs'. Not for live web info (use web_search) and not the habit tracker (use manage_health).",
     'manage_files': "STORE and MANAGE the user's files: STORE a user-attached/uploaded file (add + upload_id — use when the user says 'save/store/remember this image/file/screenshot/document/book'). It ROUTES by type: images/videos → the Gallery (optionally into a named album, e.g. game screenshots into a '<game>' album), PDFs/EPUBs → Books, everything else → the Files store. For Files items you can also replace/correct text (edit), append, set tags (retag), AI-generate tags (autotag), rename, or delete. Identify a Files item by id (from a search_files #file-<id> link) or a unique filename. Every change re-indexes recall. Not for reading (use search_files) or authoring new documents (use the document tools).",
@@ -59,5 +56,4 @@ FORK_KEYWORD_HINTS = {
     frozenset({'add this', 'add this book', 'add to my', 'append to my', 'delete my file', 'edit my file', 'find my', 'fix the text', 'in my files', 'in my notes', 'knowledge', 'knowledge base', 'look up', 'my docs', 'my documents', 'my file', 'my files', 'retag', 'save this', 'search my', 'store this', 'tag my file', 'to my books', 'update my file', 'uploaded file', 'what do my notes say'}): {'manage_files', 'search_files'},
     frozenset({'album', 'create an album', 'hide this photo', 'move to album', 'my gallery', 'my photo', 'my photos', 'my picture', 'my pictures', 'my video', 'my videos', 'rename this photo', 'screenshot', 'screenshots', 'sort my photos', 'sort my pictures', 'tag this photo', 'tag this picture', 'tag this video', 'to my album', 'to my gallery'}): {'manage_files', 'manage_gallery'},
     frozenset({'bmr', 'build a habit', 'calorie', 'calories', 'daily habit', 'exercise', 'habit', 'habit tracker', 'habits', 'health', 'heatmap', 'kcal', 'macros', 'meal', 'nutrition', 'protein', 'streak', 'streaks', 'tdee', 'track a habit', 'training', 'weigh', 'weight', 'workout'}): {'manage_health'},
-    frozenset({'book', 'books', 'chapter', 'e-reader', 'ebook', 'ebooks', 'epub', 'ereader', 'page', 'pdf', 'reader', 'reading progress', 'what i read', 'where i stopped'}): {'manage_books'},
 }

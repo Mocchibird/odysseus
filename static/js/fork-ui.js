@@ -80,7 +80,6 @@ function _injectEndpointTypeSelect() {
 // (health, habits, pings), preserving the original DOM order.
 const _RAIL = {
   'rail-today':  ['Today',  '<path d="M12 2v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="M20 12h2"/><path d="m17.66 6.34 1.41-1.41"/><path d="M22 18H2"/><path d="M16 18a4 4 0 0 0-8 0"/><path d="M2 12h2"/>'],
-  'rail-books':  ['Books',  '<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>'],
   'rail-health': ['Health', '<path d="M22 12h-4l-3 9L9 3l-3 9H2"/>'],
   'rail-habits': ['Habits', '<path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>'],
   'rail-pings':  ['Pings & Reminders', '<path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/>'],
@@ -96,7 +95,6 @@ function _injectRailTools() {
   // After rail-documents → today, books (insert in reverse so DOM order is today, books).
   const docs = document.getElementById('rail-documents');
   if (docs && !document.getElementById('rail-today')) {
-    docs.insertAdjacentElement('afterend', _railBtn('rail-books'));
     docs.insertAdjacentElement('afterend', _railBtn('rail-today'));
   }
   // After rail-tasks → health, habits, pings (insert in reverse for that order).

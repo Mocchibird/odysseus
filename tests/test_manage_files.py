@@ -93,27 +93,6 @@ def test_add_routes_image_to_gallery_with_album():
     assert "album 'The Witness'" in r["output"]
 
 
-def test_add_routes_book_to_book_store():
-    tmp = tempfile.NamedTemporaryFile(suffix=".pdf", delete=False)
-    tmp.write(b"%PDF-1.4 x")
-    tmp.close()
-    info = {"id": "up3.pdf", "path": tmp.name, "name": "Dune.pdf", "mime": "application/pdf"}
-    captured = {}
-
-    def fake_add_book(owner, filename, content, *, mime=""):
-        captured.update(owner=owner, filename=filename, mime=mime)
-        return {"id": "bk1", "filename": filename}
-
-    try:
-        with patch("src.upload_handler.UploadHandler.resolve_upload", return_value=info), \
-             patch("src.book_store.add_book", side_effect=fake_add_book):
-            r = _run({"action": "add", "upload_id": "up3.pdf"})
-        assert r["exit_code"] == 0, r
-        assert captured["filename"] == "Dune.pdf"
-        assert "Books" in r["output"]
-    finally:
-        os.unlink(tmp.name)
-
 
 def test_rename_action():
     with patch("src.file_store.rename", return_value={"id": "f1", "filename": "new.txt"}) as rn:
@@ -141,9 +120,9 @@ def test_write_guard_refuses_files_store_with_teaching_error():
 
 
 def test_write_guard_covers_all_app_stores_but_not_plain_data():
-    from src.constants import BOOKS_DIR, CHROMA_DIR, DATA_DIR, UPLOAD_DIR, GENERATED_IMAGES_DIR
+    from src.constants import CHROMA_DIR, DATA_DIR, UPLOAD_DIR, GENERATED_IMAGES_DIR
     from src.tool_execution import app_store_write_guard
-    for store in (CHROMA_DIR, UPLOAD_DIR, BOOKS_DIR, GENERATED_IMAGES_DIR):
+    for store in (CHROMA_DIR, UPLOAD_DIR, GENERATED_IMAGES_DIR):
         p = os.path.realpath(os.path.join(str(store), "x.bin"))
         assert app_store_write_guard(p), store
     ok = os.path.realpath(os.path.join(str(DATA_DIR), "report.md"))

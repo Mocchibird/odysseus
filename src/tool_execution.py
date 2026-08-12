@@ -114,10 +114,9 @@ def app_store_write_guard(resolved_path: str) -> "str | None":
     except Exception:
         pass
     try:
-        from src.constants import BOOKS_DIR, CHROMA_DIR, UPLOAD_DIR, GENERATED_IMAGES_DIR
+        from src.constants import CHROMA_DIR, UPLOAD_DIR, GENERATED_IMAGES_DIR
         stores.append((str(CHROMA_DIR), "the vector-index store (app-managed; writing here corrupts recall)."))
         stores.append((str(UPLOAD_DIR), "the uploads store (files appear here when the user attaches them in chat)."))
-        stores.append((str(BOOKS_DIR), 'the books store. Add books via the Books window or manage_files {"action":"add","upload_id":...} (.pdf/.epub route here).'))
         stores.append((str(GENERATED_IMAGES_DIR), 'the gallery store. Add images/videos via the Gallery or manage_files {"action":"add","upload_id":...,"album":"..."}.'))
     except Exception:
         pass
@@ -645,7 +644,7 @@ async def _execute_tool_block_impl(
         do_search_chats, do_manage_tasks,
         do_manage_skills, do_api_call, do_send_ping, do_manage_notes,
         do_manage_health, do_search_files, do_manage_files, do_manage_gallery,
-        do_manage_calendar, do_manage_books,
+        do_manage_calendar,
         do_download_model, do_serve_model, do_list_served_models, do_stop_served_model,
         do_tail_serve_output,
         do_list_downloads, do_cancel_download, do_search_hf_models, do_list_cached_models,
@@ -855,9 +854,6 @@ async def _execute_tool_block_impl(
     elif tool == "manage_calendar":
         desc = "manage_calendar"
         result = await do_manage_calendar(content, owner=owner)
-    elif tool == "manage_books":
-        desc = "manage_books"
-        result = await do_manage_books(content, owner=owner)
     elif tool == "download_model":
         desc = "download_model"
         result = await do_download_model(content, owner=owner)

@@ -33,7 +33,7 @@ from typing import Any  # noqa: E402  (do_manage_health annotates Dict[str, Any]
 
 # Citation anchor map used by do_search_files to link each hit to an openable
 # source the user can verify.
-_CITE_ANCHOR = {"file": "file", "book": "book", "document": "document",
+_CITE_ANCHOR = {"file": "file", "document": "document",
                 "image": "gallery", "knowledge": "file"}
 
 
@@ -46,7 +46,7 @@ async def do_search_files(content: str, owner: Optional[str] = None) -> Dict:
     filename + id so the answer can CITE the source the user can open and verify.
     """
     import json as _json
-    from src import file_store as _fs, book_store as _bs, content_rag as _rag
+    from src import file_store as _fs, content_rag as _rag
 
     try:
         try:
@@ -73,11 +73,9 @@ async def do_search_files(content: str, owner: Optional[str] = None) -> Dict:
             results.append({"id": kid, "filename": name, "excerpt": excerpt or "",
                             "tags": tag_list or [], "kind": kind})
 
-        # Deterministic keyword + tag match over Files and Books.
+        # Deterministic keyword + tag match over Files.
         for f in _fs.search(owner, q=query, tags=tags or [], limit=limit):
             _add(f.get("id"), f.get("filename") or f.get("id"), f.get("excerpt"), f.get("tags"), "file")
-        for b in _bs.list_books(owner, query=query, limit=limit):
-            _add(b.get("id"), b.get("filename") or b.get("title"), b.get("excerpt"), b.get("tags"), "book")
 
         # Semantic recall (RAG) across every store — fold in extra hits.
         if query:
@@ -156,8 +154,8 @@ async def do_manage_files(content: str, owner: Optional[str] = None) -> Dict:
                 filename = f"{filename}.{original.rsplit('.', 1)[1]}"
             ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
 
-            # Route by type: media -> Gallery (optional album), books -> Books,
-            # everything else -> the Files store.
+            # Route by type: media -> Gallery (optional album), everything
+            # else (incl. PDF/EPUB) -> the Files store.
             if ext in {"png", "jpg", "jpeg", "webp", "gif", "mp4", "mov", "webm", "mkv", "m4v"}:
                 from src import gallery_ingest
                 album = str(args.get("album") or "").strip() or None
@@ -169,16 +167,6 @@ async def do_manage_files(content: str, owner: Optional[str] = None) -> Dict:
                 dup = " (already there)" if res.get("duplicate") else ""
                 return {"output": f"Added '{filename}'{where}{dup}.", "exit_code": 0,
                         "file": {"id": res.get("id"), "filename": filename, "album_id": res.get("album_id")}}
-
-            if ext in {"pdf", "epub"}:
-                from src import book_store
-                with open(info["path"], "rb") as fh:
-                    data = fh.read()
-                rec = await asyncio.to_thread(
-                    book_store.add_book, owner, filename, data, mime=info.get("mime") or "",
-                )
-                return {"output": f"Added '{rec.get('filename')}' to your Books.", "exit_code": 0,
-                        "file": {"id": rec.get("id"), "filename": rec.get("filename")}}
 
             # Files store — store the row FAST (no extraction); extract + index +
             # auto-tag in the background so a slow OCR never 504s the chat request.
@@ -716,70 +704,3 @@ async def do_manage_health(content: str, owner: Optional[str] = None) -> Dict:
         return {"error": str(e), "exit_code": 1}
     except Exception as e:
         return {"error": f"manage_health failed: {e}", "exit_code": 1}
-
-async def do_manage_books(content: str, owner: Optional[str] = None) -> Dict:
-    """Manage Iris's owner-scoped EPUB/PDF books and reading progress."""
-    try:
-        args = _parse_tool_args(content)
-    except ValueError:
-        return {"error": "Invalid JSON arguments", "exit_code": 1}
-
-    action = (args.get("action") or "list").replace("-", "_").strip().lower()
-    if action in {"search", "find"}:
-        action = "list"
-    if action in {"open", "view", "get"}:
-        action = "read"
-
-    from src import book_reader
-
-    try:
-        if action == "list":
-            query = str(args.get("query") or args.get("search") or "")
-            rows = book_reader.list_books(owner, query, int(args.get("limit") or 20))
-            if not rows:
-                return {"response": "No EPUB/PDF books found.", "books": [], "exit_code": 0}
-            lines = [f"Found {len(rows)} book(s):"]
-            for row in rows:
-                progress = row.get("progress") or {}
-                location = ""
-                if progress.get("updated_at"):
-                    label = "page" if row.get("kind") == "pdf" else "chapter"
-                    location = f" — last read {label} {int(progress.get('chapter_index') or 0) + 1}"
-                lines.append(f"- {row.get('title') or row.get('path')} ({row.get('path')}){location}")
-            return {"response": "\n".join(lines), "books": rows, "exit_code": 0}
-
-        if action == "read":
-            path = str(args.get("path") or "").strip()
-            if not path:
-                return {"error": "read requires path", "exit_code": 1}
-            chapter_index = int(args.get("chapter_index") or args.get("page_index") or 0)
-            result = book_reader.read_book_location(owner, path, chapter_index)
-            book = result.get("book") or {}
-            chapter = result.get("chapter") or {}
-            title = book.get("title") or path
-            response = f"{title}\n{chapter.get('title', '')}\n\n{chapter.get('text_excerpt') or ''}"
-            return {"response": response.strip(), "book": book, "chapter": chapter, "exit_code": 0}
-
-        if action == "progress":
-            path = str(args.get("path") or "").strip()
-            if not path:
-                return {"error": "progress requires path", "exit_code": 1}
-            progress = book_reader.save_progress(
-                owner,
-                path,
-                chapter_index=int(args.get("chapter_index") or args.get("page_index") or 0),
-                scroll_percent=float(args.get("scroll_percent") or 0),
-                chapter_title=str(args.get("chapter_title") or ""),
-                title=str(args.get("title") or ""),
-                author=str(args.get("author") or ""),
-                kind=str(args.get("kind") or ""),
-            )
-            return {
-                "response": f"Saved reading progress for {progress.get('title') or path}.",
-                "progress": progress,
-                "exit_code": 0,
-            }
-
-        return {"error": "Unknown action. Use list, read, or progress.", "exit_code": 1}
-    except Exception as e:
-        return {"error": str(getattr(e, "detail", None) or e), "exit_code": 1}

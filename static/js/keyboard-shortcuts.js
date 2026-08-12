@@ -10,7 +10,7 @@ const _defaultKeybinds = {
   cancel: 'escape', tts: 'alt+shift+t',
   incognito: 'ctrl+alt+i', settings: 'ctrl+,', focus_input: 'ctrl+/',
   // Open-tool shortcuts (Calendar bound by default; rest unbound).
-  open_books: '', open_calendar: 'ctrl+alt+c', open_compare: '', open_cookbook: '',
+  open_calendar: 'ctrl+alt+c', open_compare: '', open_cookbook: '',
   open_research: '', open_gallery: '', open_library: '', open_memory: '',
   open_notes: '', open_tasks: '', open_theme: '',
 };
@@ -266,7 +266,6 @@ export function initKeyboardShortcuts(modules) {
     // own open/toggle logic runs. Unbound (empty) combos never match.
     const _toolBtns = {
       open_calendar: 'tool-calendar-btn',
-      open_books:    'tool-books-btn',
       open_compare:  'tool-compare-btn',
       open_cookbook: 'tool-cookbook-btn',
       open_research: 'tool-research-btn',

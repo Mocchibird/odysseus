@@ -445,65 +445,6 @@ class FileItem(TimestampMixin, Base):
     )
 
 
-class Book(TimestampMixin, Base):
-    """A PDF/EPUB in the native Books store. Owns its bytes in BOOKS_DIR and its
-    extracted text (RAG-indexed under kind="book") — the Books reader, progress,
-    and annotations all key off this row's id. Replaces the old "a book is a
-    KnowledgeFile" coupling."""
-    __tablename__ = "books"
-
-    id         = Column(String, primary_key=True, index=True)
-    owner      = Column(String, nullable=True, index=True)
-    filename   = Column(String, nullable=False, default="")
-    mime       = Column(String, nullable=True)
-    file_size  = Column(Integer, nullable=True)
-    sha256     = Column(String(64), nullable=True, index=True)  # dedupe within an owner
-    path       = Column(String, nullable=True)                  # bytes, relative to BOOKS_DIR
-    text       = Column(Text, nullable=True, default="")        # extracted text (search + RAG)
-    tags       = Column(String, nullable=True, default="")      # user tags (comma-separated)
-    ai_tags    = Column(Text, nullable=True, default="")        # LLM-generated tags
-    indexed    = Column(Boolean, default=False)                 # RAG-indexed?
-    favorite   = Column(Boolean, default=False, index=True)     # starred
-
-    __table_args__ = (
-        Index('ix_books_owner_created', 'owner', 'created_at'),
-        Index('ix_books_owner_sha', 'owner', 'sha256'),
-    )
-
-
-class BookProgress(TimestampMixin, Base):
-    """Per-book reading position (one row per book). `id` = the Book id (Books is
-    a reading view over the Book store; this just adds the reading state)."""
-    __tablename__ = "book_progress"
-
-    id            = Column(String, primary_key=True, index=True)  # = Book id
-    owner         = Column(String, nullable=True, index=True)
-    rel_path      = Column(String, nullable=False, default="")
-    title         = Column(String, nullable=False, default="")
-    author        = Column(String, nullable=False, default="")
-    kind          = Column(String, nullable=True)
-    chapter_index = Column(Integer, default=0)
-    chapter_title = Column(String, nullable=False, default="")
-    scroll_percent = Column(Float, default=0)
-
-
-class BookAnnotation(TimestampMixin, Base):
-    """A bookmark or highlight in a book."""
-    __tablename__ = "book_annotations"
-
-    id            = Column(String, primary_key=True, index=True)  # uuid
-    owner         = Column(String, nullable=True, index=True)
-    book_id       = Column(String, nullable=False, index=True)
-    rel_path      = Column(String, nullable=False, default="")
-    type          = Column(String, nullable=False, default="bookmark")  # "bookmark" | "highlight"
-    chapter_index = Column(Integer, default=0)
-    chapter_title = Column(String, nullable=False, default="")
-    text          = Column(Text, nullable=True, default="")
-    note          = Column(String, nullable=True, default="")
-    color         = Column(String, nullable=True, default="")
-    scroll_percent = Column(Float, default=0)
-
-
 class EmailAccount(TimestampMixin, Base):
     """A configured IMAP/SMTP account. Supports multiple accounts per user —
     exactly one row per owner has is_default=True.

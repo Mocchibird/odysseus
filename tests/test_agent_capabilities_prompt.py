@@ -9,7 +9,7 @@ def test_prompt_advertises_odysseus_subsystems():
     # A representative spread of subsystem tools Iris should know it has.
     for tool in (
         "search_files", "manage_files", "manage_memory", "manage_calendar", "manage_notes",
-        "manage_tasks", "manage_health", "manage_books", "send_email",
+        "manage_tasks", "manage_health", "send_email",
         "web_search", "trigger_research", "send_ping",
     ):
         assert tool in p, f"{tool} missing from the capabilities prompt"

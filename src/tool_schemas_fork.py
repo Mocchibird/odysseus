@@ -1,14 +1,12 @@
 # src/tool_schemas_fork.py
 """Fork-only function-tool schemas (manage_health / search_files / manage_files /
-manage_gallery / send_ping / manage_books).
+manage_gallery / send_ping).
 
 Appended to FUNCTION_TOOL_SCHEMAS by src/tool_schemas.py so upstream's list
 literal stays byte-identical. See docs/fork-additive-policy.md.
 """
 
-FORK_FUNCTION_TOOL_SCHEMAS = [   {   'type': 'function',
-        'function': {   'name': 'manage_health',
-                        'description': "Create, log and query the user's health/habits/training "
+FORK_FUNCTION_TOOL_SCHEMAS = [   {   'function': {   'description': "Create, log and query the user's health/habits/training "
                                        '(same data shown in the Health panel). This IS the habit '
                                        'tracker — NOT a checklist note and NOT a vault file. Use '
                                        "for 'start a meditation habit' (create_habit), 'rename a "
@@ -23,8 +21,9 @@ FORK_FUNCTION_TOOL_SCHEMAS = [   {   'type': 'function',
                                        'Calories/weight feed the charts; habit check-ins fill the '
                                        "GitHub-style heatmap. To check off a habit that doesn't "
                                        'exist yet, create_habit first.',
-                        'parameters': {   'type': 'object',
-                                          'properties': {   'action': {   'type': 'string',
+                        'name': 'manage_health',
+                        'parameters': {   'properties': {   'action': {   'description': 'What to '
+                                                                                         'do.',
                                                                           'enum': [   'create_habit',
                                                                                       'update_habit',
                                                                                       'delete_habit',
@@ -40,56 +39,11 @@ FORK_FUNCTION_TOOL_SCHEMAS = [   {   'type': 'function',
                                                                                       'weight_trend',
                                                                                       'set_profile',
                                                                                       'summary'],
-                                                                          'description': 'What to '
-                                                                                         'do.'},
-                                                            'name': {   'type': 'string',
-                                                                        'description': 'New habit '
-                                                                                       'name '
-                                                                                       '(create_habit). '
-                                                                                       'For '
-                                                                                       'update_habit/delete_habit/check_habit '
-                                                                                       'you may '
-                                                                                       'instead '
-                                                                                       'identify '
-                                                                                       'the target '
-                                                                                       'via '
-                                                                                       "'habit'."},
-                                                            'new_name': {   'type': 'string',
-                                                                            'description': 'New '
-                                                                                           'name '
-                                                                                           'when '
-                                                                                           'renaming '
-                                                                                           'an '
-                                                                                           'existing '
-                                                                                           'habit '
-                                                                                           '(update_habit).'},
-                                                            'icon': {   'type': 'string',
-                                                                        'description': 'Emoji/icon '
-                                                                                       'for the '
-                                                                                       'habit '
-                                                                                       '(create_habit '
-                                                                                       'or '
-                                                                                       'update_habit), '
-                                                                                       "e.g. '🧘'."},
-                                                            'color': {   'type': 'string',
-                                                                         'description': 'Optional '
-                                                                                        'accent '
-                                                                                        'color for '
-                                                                                        'the habit '
-                                                                                        '(create_habit '
-                                                                                        'or '
-                                                                                        'update_habit), '
-                                                                                        'e.g. a '
-                                                                                        'hex like '
-                                                                                        "'#7ec9a3'."},
-                                                            'category': {   'type': 'string',
-                                                                            'description': 'Habit '
-                                                                                           'category '
-                                                                                           '(create_habit '
-                                                                                           'or '
-                                                                                           'update_habit).'},
-                                                            'cadence': {   'type': 'string',
-                                                                           'description': 'Habit '
+                                                                          'type': 'string'},
+                                                            'activity_level': {   'description': 'sedentary|lightly_active|moderately_active|very_active|extra_active '
+                                                                                                 '(set_profile).',
+                                                                                  'type': 'string'},
+                                                            'cadence': {   'description': 'Habit '
                                                                                           'cadence: '
                                                                                           'daily | '
                                                                                           'weekdays '
@@ -99,15 +53,131 @@ FORK_FUNCTION_TOOL_SCHEMAS = [   {   'type': 'function',
                                                                                           'or '
                                                                                           'update_habit). '
                                                                                           'Default '
-                                                                                          'daily.'},
-                                                            'description': {   'type': 'string',
-                                                                               'description': 'Meal '
+                                                                                          'daily.',
+                                                                           'type': 'string'},
+                                                            'carbs_g': {   'description': 'Optional '
+                                                                                          'carbohydrate '
+                                                                                          'grams '
+                                                                                          '(log_meal '
+                                                                                          '/ '
+                                                                                          'update_meal).',
+                                                                           'type': 'number'},
+                                                            'category': {   'description': 'Habit '
+                                                                                           'category '
+                                                                                           '(create_habit '
+                                                                                           'or '
+                                                                                           'update_habit).',
+                                                                            'type': 'string'},
+                                                            'color': {   'description': 'Optional '
+                                                                                        'accent '
+                                                                                        'color for '
+                                                                                        'the habit '
+                                                                                        '(create_habit '
+                                                                                        'or '
+                                                                                        'update_habit), '
+                                                                                        'e.g. a '
+                                                                                        'hex like '
+                                                                                        "'#7ec9a3'.",
+                                                                         'type': 'string'},
+                                                            'daily_kcal_target': {   'description': 'Manual '
+                                                                                                    'calorie '
+                                                                                                    'target '
+                                                                                                    'override '
+                                                                                                    '(set_profile).',
+                                                                                     'type': 'integer'},
+                                                            'date': {   'description': 'YYYY-MM-DD; '
+                                                                                       'defaults '
+                                                                                       'to today '
+                                                                                       '(calories/check_habit). '
+                                                                                       'Pass '
+                                                                                       "yesterday's "
+                                                                                       'date to '
+                                                                                       'check_habit '
+                                                                                       'to mark a '
+                                                                                       'habit done '
+                                                                                       'for '
+                                                                                       'yesterday.',
+                                                                        'type': 'string'},
+                                                            'date_of_birth': {   'description': 'YYYY-MM-DD '
+                                                                                                '(set_profile; '
+                                                                                                'for '
+                                                                                                'age '
+                                                                                                'in '
+                                                                                                'TDEE).',
+                                                                                 'type': 'string'},
+                                                            'days': {   'description': 'Lookback '
+                                                                                       'window '
+                                                                                       '(weight_trend/habit_heatmap).',
+                                                                        'type': 'integer'},
+                                                            'description': {   'description': 'Meal '
                                                                                               'description '
                                                                                               '(log_meal '
                                                                                               '/ '
-                                                                                              'update_meal).'},
-                                                            'meal_id': {   'type': 'integer',
-                                                                           'description': 'Id of a '
+                                                                                              'update_meal).',
+                                                                               'type': 'string'},
+                                                            'done': {   'description': 'For '
+                                                                                       'check_habit: '
+                                                                                       'set '
+                                                                                       'explicitly, '
+                                                                                       'or omit to '
+                                                                                       'toggle '
+                                                                                       'today.',
+                                                                        'type': 'boolean'},
+                                                            'duration_min': {   'description': 'Training '
+                                                                                               'duration '
+                                                                                               'in '
+                                                                                               'minutes '
+                                                                                               '(log_training).',
+                                                                                'type': 'integer'},
+                                                            'fat_g': {   'description': 'Optional '
+                                                                                        'fat grams '
+                                                                                        '(log_meal '
+                                                                                        '/ '
+                                                                                        'update_meal).',
+                                                                         'type': 'number'},
+                                                            'habit': {   'description': 'Existing '
+                                                                                        'habit '
+                                                                                        'name or '
+                                                                                        'id '
+                                                                                        '(check_habit/habit_heatmap/update_habit/delete_habit).',
+                                                                         'type': 'string'},
+                                                            'height_cm': {   'description': 'Height '
+                                                                                            'in cm '
+                                                                                            '(set_profile).',
+                                                                             'type': 'number'},
+                                                            'icon': {   'description': 'Emoji/icon '
+                                                                                       'for the '
+                                                                                       'habit '
+                                                                                       '(create_habit '
+                                                                                       'or '
+                                                                                       'update_habit), '
+                                                                                       "e.g. '🧘'.",
+                                                                        'type': 'string'},
+                                                            'kcal': {   'description': 'Calories '
+                                                                                       'for the '
+                                                                                       'meal '
+                                                                                       '(log_meal '
+                                                                                       '/ '
+                                                                                       'update_meal).',
+                                                                        'type': 'integer'},
+                                                            'kcal_burned': {   'description': 'Estimated '
+                                                                                              'calories '
+                                                                                              'burned '
+                                                                                              'in '
+                                                                                              'the '
+                                                                                              'session '
+                                                                                              '(log_training).',
+                                                                               'type': 'integer'},
+                                                            'kg': {   'description': 'Body weight '
+                                                                                     'in kilograms '
+                                                                                     '(log_weight).',
+                                                                      'type': 'number'},
+                                                            'kind': {   'description': 'Training '
+                                                                                       'type, e.g. '
+                                                                                       "'Strength' "
+                                                                                       '(log_training).',
+                                                                        'type': 'string'},
+                                                            'meal_id': {   'description': 'Id of a '
                                                                                           'logged '
                                                                                           'meal to '
                                                                                           'edit or '
@@ -124,151 +194,79 @@ FORK_FUNCTION_TOOL_SCHEMAS = [   {   'type': 'function',
                                                                                           'meal '
                                                                                           'with '
                                                                                           'its '
-                                                                                          '#id.'},
-                                                            'kcal': {   'type': 'integer',
-                                                                        'description': 'Calories '
-                                                                                       'for the '
-                                                                                       'meal '
-                                                                                       '(log_meal '
-                                                                                       '/ '
-                                                                                       'update_meal).'},
-                                                            'protein_g': {   'type': 'number',
-                                                                             'description': 'Optional '
+                                                                                          '#id.',
+                                                                           'type': 'integer'},
+                                                            'name': {   'description': 'New habit '
+                                                                                       'name '
+                                                                                       '(create_habit). '
+                                                                                       'For '
+                                                                                       'update_habit/delete_habit/check_habit '
+                                                                                       'you may '
+                                                                                       'instead '
+                                                                                       'identify '
+                                                                                       'the target '
+                                                                                       'via '
+                                                                                       "'habit'.",
+                                                                        'type': 'string'},
+                                                            'new_name': {   'description': 'New '
+                                                                                           'name '
+                                                                                           'when '
+                                                                                           'renaming '
+                                                                                           'an '
+                                                                                           'existing '
+                                                                                           'habit '
+                                                                                           '(update_habit).',
+                                                                            'type': 'string'},
+                                                            'notes': {   'description': 'Optional '
+                                                                                        'note '
+                                                                                        '(log_meal/log_weight).',
+                                                                         'type': 'string'},
+                                                            'protein_g': {   'description': 'Optional '
                                                                                             'protein '
                                                                                             'grams '
                                                                                             '(log_meal '
                                                                                             '/ '
-                                                                                            'update_meal).'},
-                                                            'carbs_g': {   'type': 'number',
-                                                                           'description': 'Optional '
-                                                                                          'carbohydrate '
-                                                                                          'grams '
-                                                                                          '(log_meal '
-                                                                                          '/ '
-                                                                                          'update_meal).'},
-                                                            'fat_g': {   'type': 'number',
-                                                                         'description': 'Optional '
-                                                                                        'fat grams '
-                                                                                        '(log_meal '
-                                                                                        '/ '
-                                                                                        'update_meal).'},
-                                                            'sugar_g': {   'type': 'number',
-                                                                           'description': 'Optional '
+                                                                                            'update_meal).',
+                                                                             'type': 'number'},
+                                                            'rpe': {   'description': 'Rate of '
+                                                                                      'perceived '
+                                                                                      'exertion '
+                                                                                      '1-10 '
+                                                                                      '(log_training).',
+                                                                       'type': 'integer'},
+                                                            'sex': {   'description': 'Biological '
+                                                                                      'sex for BMR '
+                                                                                      '(set_profile).',
+                                                                       'enum': ['M', 'F'],
+                                                                       'type': 'string'},
+                                                            'sugar_g': {   'description': 'Optional '
                                                                                           'sugar '
                                                                                           'grams '
                                                                                           '(log_meal '
                                                                                           '/ '
-                                                                                          'update_meal).'},
-                                                            'kg': {   'type': 'number',
-                                                                      'description': 'Body weight '
-                                                                                     'in kilograms '
-                                                                                     '(log_weight).'},
-                                                            'habit': {   'type': 'string',
-                                                                         'description': 'Existing '
-                                                                                        'habit '
-                                                                                        'name or '
-                                                                                        'id '
-                                                                                        '(check_habit/habit_heatmap/update_habit/delete_habit).'},
-                                                            'done': {   'type': 'boolean',
-                                                                        'description': 'For '
-                                                                                       'check_habit: '
-                                                                                       'set '
-                                                                                       'explicitly, '
-                                                                                       'or omit to '
-                                                                                       'toggle '
-                                                                                       'today.'},
-                                                            'kind': {   'type': 'string',
-                                                                        'description': 'Training '
-                                                                                       'type, e.g. '
-                                                                                       "'Strength' "
-                                                                                       '(log_training).'},
-                                                            'duration_min': {   'type': 'integer',
-                                                                                'description': 'Training '
-                                                                                               'duration '
-                                                                                               'in '
-                                                                                               'minutes '
-                                                                                               '(log_training).'},
-                                                            'rpe': {   'type': 'integer',
-                                                                       'description': 'Rate of '
-                                                                                      'perceived '
-                                                                                      'exertion '
-                                                                                      '1-10 '
-                                                                                      '(log_training).'},
-                                                            'kcal_burned': {   'type': 'integer',
-                                                                               'description': 'Estimated '
-                                                                                              'calories '
-                                                                                              'burned '
-                                                                                              'in '
-                                                                                              'the '
-                                                                                              'session '
-                                                                                              '(log_training).'},
-                                                            'summary': {   'type': 'string',
-                                                                           'description': 'Training '
+                                                                                          'update_meal).',
+                                                                           'type': 'number'},
+                                                            'summary': {   'description': 'Training '
                                                                                           'notes '
-                                                                                          '(log_training).'},
-                                                            'height_cm': {   'type': 'number',
-                                                                             'description': 'Height '
-                                                                                            'in cm '
-                                                                                            '(set_profile).'},
-                                                            'date_of_birth': {   'type': 'string',
-                                                                                 'description': 'YYYY-MM-DD '
-                                                                                                '(set_profile; '
-                                                                                                'for '
-                                                                                                'age '
-                                                                                                'in '
-                                                                                                'TDEE).'},
-                                                            'sex': {   'type': 'string',
-                                                                       'enum': ['M', 'F'],
-                                                                       'description': 'Biological '
-                                                                                      'sex for BMR '
-                                                                                      '(set_profile).'},
-                                                            'activity_level': {   'type': 'string',
-                                                                                  'description': 'sedentary|lightly_active|moderately_active|very_active|extra_active '
-                                                                                                 '(set_profile).'},
-                                                            'target_kg': {   'type': 'number',
-                                                                             'description': 'Goal '
+                                                                                          '(log_training).',
+                                                                           'type': 'string'},
+                                                            'target_kg': {   'description': 'Goal '
                                                                                             'weight '
-                                                                                            '(set_profile).'},
-                                                            'target_weekly_loss_kg': {   'type': 'number',
-                                                                                         'description': 'Desired '
+                                                                                            '(set_profile).',
+                                                                             'type': 'number'},
+                                                            'target_weekly_loss_kg': {   'description': 'Desired '
                                                                                                         'weekly '
                                                                                                         'loss '
                                                                                                         'for '
                                                                                                         'the '
                                                                                                         'calorie '
                                                                                                         'deficit '
-                                                                                                        '(set_profile).'},
-                                                            'daily_kcal_target': {   'type': 'integer',
-                                                                                     'description': 'Manual '
-                                                                                                    'calorie '
-                                                                                                    'target '
-                                                                                                    'override '
-                                                                                                    '(set_profile).'},
-                                                            'date': {   'type': 'string',
-                                                                        'description': 'YYYY-MM-DD; '
-                                                                                       'defaults '
-                                                                                       'to today '
-                                                                                       '(calories/check_habit). '
-                                                                                       'Pass '
-                                                                                       "yesterday's "
-                                                                                       'date to '
-                                                                                       'check_habit '
-                                                                                       'to mark a '
-                                                                                       'habit done '
-                                                                                       'for '
-                                                                                       'yesterday.'},
-                                                            'days': {   'type': 'integer',
-                                                                        'description': 'Lookback '
-                                                                                       'window '
-                                                                                       '(weight_trend/habit_heatmap).'},
-                                                            'notes': {   'type': 'string',
-                                                                         'description': 'Optional '
-                                                                                        'note '
-                                                                                        '(log_meal/log_weight).'}},
-                                          'required': ['action']}}},
-    {   'type': 'function',
-        'function': {   'name': 'search_files',
-                        'description': "Search the user's content — their Files (uploaded docs), "
+                                                                                                        '(set_profile).',
+                                                                                         'type': 'number'}},
+                                          'required': ['action'],
+                                          'type': 'object'}},
+        'type': 'function'},
+    {   'function': {   'description': "Search the user's content — their Files (uploaded docs), "
                                        'Books (PDF/EPUB), and authored Documents — to recall '
                                        'facts/specs/notes. Combines exact keyword/tag matching '
                                        'with semantic recall across every store. ALWAYS CITE the '
@@ -280,29 +278,29 @@ FORK_FUNCTION_TOOL_SCHEMAS = [   {   'type': 'function',
                                        "about Y', 'look up Z in my docs'. NOT for live web info "
                                        '(use web_search) and NOT for the habit tracker (use '
                                        'manage_health).',
-                        'parameters': {   'type': 'object',
-                                          'properties': {   'query': {   'type': 'string',
-                                                                         'description': 'What to '
+                        'name': 'search_files',
+                        'parameters': {   'properties': {   'limit': {   'description': 'Max files '
+                                                                                        'to return '
+                                                                                        '(default '
+                                                                                        '12).',
+                                                                         'type': 'integer'},
+                                                            'query': {   'description': 'What to '
                                                                                         'search '
                                                                                         'for '
                                                                                         '(keywords '
                                                                                         'or a '
                                                                                         'natural-language '
-                                                                                        'question).'},
-                                                            'tags': {   'type': 'array',
-                                                                        'items': {'type': 'string'},
-                                                                        'description': 'Optional '
+                                                                                        'question).',
+                                                                         'type': 'string'},
+                                                            'tags': {   'description': 'Optional '
                                                                                        'tag filter '
-                                                                                       '(AND-combined).'},
-                                                            'limit': {   'type': 'integer',
-                                                                         'description': 'Max files '
-                                                                                        'to return '
-                                                                                        '(default '
-                                                                                        '12).'}},
-                                          'required': ['query']}}},
-    {   'type': 'function',
-        'function': {   'name': 'manage_files',
-                        'description': "STORE and MANAGE the user's files. ADD a "
+                                                                                       '(AND-combined).',
+                                                                        'items': {'type': 'string'},
+                                                                        'type': 'array'}},
+                                          'required': ['query'],
+                                          'type': 'object'}},
+        'type': 'function'},
+    {   'function': {   'description': "STORE and MANAGE the user's files. ADD a "
                                        'user-attached/uploaded file by its upload_id (from the '
                                        "message's attachment context) — routed by type: "
                                        'images/videos go to the GALLERY (optionally into a named '
@@ -316,15 +314,8 @@ FORK_FUNCTION_TOOL_SCHEMAS = [   {   'type': 'function',
                                        'sync. NOT for reading/finding (use search_files), NOT for '
                                        'authoring long new documents (document tools / Library), '
                                        'and NEVER write_file for user files.',
-                        'parameters': {   'type': 'object',
-                                          'properties': {   'action': {   'type': 'string',
-                                                                          'enum': [   'add',
-                                                                                      'edit',
-                                                                                      'append',
-                                                                                      'retag',
-                                                                                      'autotag',
-                                                                                      'delete'],
-                                                                          'description': 'add = '
+                        'name': 'manage_files',
+                        'parameters': {   'properties': {   'action': {   'description': 'add = '
                                                                                          'store an '
                                                                                          'uploaded/attached '
                                                                                          'file '
@@ -354,25 +345,15 @@ FORK_FUNCTION_TOOL_SCHEMAS = [   {   'type': 'function',
                                                                                          'delete = '
                                                                                          'remove '
                                                                                          'the '
-                                                                                         'file.'},
-                                                            'upload_id': {   'type': 'string',
-                                                                             'description': 'For '
-                                                                                            'add: '
-                                                                                            'the '
-                                                                                            'attachment/upload '
-                                                                                            'id '
-                                                                                            '(listed '
-                                                                                            'in '
-                                                                                            'the '
-                                                                                            '[user '
-                                                                                            'attachments] '
-                                                                                            'context '
-                                                                                            'of '
-                                                                                            'the '
-                                                                                            "user's "
-                                                                                            'message).'},
-                                                            'album': {   'type': 'string',
-                                                                         'description': 'For add '
+                                                                                         'file.',
+                                                                          'enum': [   'add',
+                                                                                      'edit',
+                                                                                      'append',
+                                                                                      'retag',
+                                                                                      'autotag',
+                                                                                      'delete'],
+                                                                          'type': 'string'},
+                                                            'album': {   'description': 'For add '
                                                                                         'of an '
                                                                                         'image/video: '
                                                                                         'the '
@@ -388,48 +369,9 @@ FORK_FUNCTION_TOOL_SCHEMAS = [   {   'type': 'function',
                                                                                         'e.g. a '
                                                                                         'game name '
                                                                                         'for '
-                                                                                        'screenshots.'},
-                                                            'id': {   'type': 'string',
-                                                                      'description': 'The file id '
-                                                                                     '(from a '
-                                                                                     'search_files '
-                                                                                     '#file-<id> '
-                                                                                     'link). '
-                                                                                     'Preferred '
-                                                                                     'for '
-                                                                                     'edit/append/retag/autotag/delete '
-                                                                                     '(Files '
-                                                                                     'items).'},
-                                                            'query': {   'type': 'string',
-                                                                         'description': 'Alternative '
-                                                                                        'to id: a '
-                                                                                        'filename '
-                                                                                        'or '
-                                                                                        'keywords '
-                                                                                        'that '
-                                                                                        'identify '
-                                                                                        'exactly '
-                                                                                        'ONE '
-                                                                                        'file.'},
-                                                            'text': {   'type': 'string',
-                                                                        'description': 'For edit: '
-                                                                                       'the new '
-                                                                                       'FULL '
-                                                                                       'content. '
-                                                                                       'For '
-                                                                                       'append: '
-                                                                                       'the text '
-                                                                                       'to add.'},
-                                                            'tags': {   'type': 'array',
-                                                                        'items': {'type': 'string'},
-                                                                        'description': 'For retag: '
-                                                                                       'the tags '
-                                                                                       'to set; '
-                                                                                       'for add: '
-                                                                                       'initial '
-                                                                                       'tags.'},
-                                                            'filename': {   'type': 'string',
-                                                                            'description': 'For '
+                                                                                        'screenshots.',
+                                                                         'type': 'string'},
+                                                            'filename': {   'description': 'For '
                                                                                            'add: a '
                                                                                            'friendly '
                                                                                            'name/title '
@@ -439,11 +381,66 @@ FORK_FUNCTION_TOOL_SCHEMAS = [   {   'type': 'function',
                                                                                            'For '
                                                                                            'edit: '
                                                                                            'optional '
-                                                                                           'rename.'}},
-                                          'required': ['action']}}},
-    {   'type': 'function',
-        'function': {   'name': 'manage_gallery',
-                        'description': "MANAGE the user's Gallery (photos + videos): tag them, "
+                                                                                           'rename.',
+                                                                            'type': 'string'},
+                                                            'id': {   'description': 'The file id '
+                                                                                     '(from a '
+                                                                                     'search_files '
+                                                                                     '#file-<id> '
+                                                                                     'link). '
+                                                                                     'Preferred '
+                                                                                     'for '
+                                                                                     'edit/append/retag/autotag/delete '
+                                                                                     '(Files '
+                                                                                     'items).',
+                                                                      'type': 'string'},
+                                                            'query': {   'description': 'Alternative '
+                                                                                        'to id: a '
+                                                                                        'filename '
+                                                                                        'or '
+                                                                                        'keywords '
+                                                                                        'that '
+                                                                                        'identify '
+                                                                                        'exactly '
+                                                                                        'ONE file.',
+                                                                         'type': 'string'},
+                                                            'tags': {   'description': 'For retag: '
+                                                                                       'the tags '
+                                                                                       'to set; '
+                                                                                       'for add: '
+                                                                                       'initial '
+                                                                                       'tags.',
+                                                                        'items': {'type': 'string'},
+                                                                        'type': 'array'},
+                                                            'text': {   'description': 'For edit: '
+                                                                                       'the new '
+                                                                                       'FULL '
+                                                                                       'content. '
+                                                                                       'For '
+                                                                                       'append: '
+                                                                                       'the text '
+                                                                                       'to add.',
+                                                                        'type': 'string'},
+                                                            'upload_id': {   'description': 'For '
+                                                                                            'add: '
+                                                                                            'the '
+                                                                                            'attachment/upload '
+                                                                                            'id '
+                                                                                            '(listed '
+                                                                                            'in '
+                                                                                            'the '
+                                                                                            '[user '
+                                                                                            'attachments] '
+                                                                                            'context '
+                                                                                            'of '
+                                                                                            'the '
+                                                                                            "user's "
+                                                                                            'message).',
+                                                                             'type': 'string'}},
+                                          'required': ['action'],
+                                          'type': 'object'}},
+        'type': 'function'},
+    {   'function': {   'description': "MANAGE the user's Gallery (photos + videos): tag them, "
                                        'rename them, set/unset favorite, hide/unhide, delete, '
                                        "create albums, and FILE media into an album ('sort'). Use "
                                        'action=list (optionally by album/tag/media_type) to find '
@@ -452,19 +449,8 @@ FORK_FUNCTION_TOOL_SCHEMAS = [   {   'type': 'function',
                                        'name/keyword. To store a NEW chat-attached image/video '
                                        'into the gallery, use manage_files add (it routes media to '
                                        'the Gallery). NOT for documents/files (use manage_files).',
-                        'parameters': {   'type': 'object',
-                                          'properties': {   'action': {   'type': 'string',
-                                                                          'enum': [   'list',
-                                                                                      'tag',
-                                                                                      'rename',
-                                                                                      'create_album',
-                                                                                      'move',
-                                                                                      'favorite',
-                                                                                      'unfavorite',
-                                                                                      'hide',
-                                                                                      'unhide',
-                                                                                      'delete'],
-                                                                          'description': 'list = '
+                        'name': 'manage_gallery',
+                        'parameters': {   'properties': {   'action': {   'description': 'list = '
                                                                                          'find '
                                                                                          'photos/videos '
                                                                                          '(by '
@@ -489,40 +475,19 @@ FORK_FUNCTION_TOOL_SCHEMAS = [   {   'type': 'function',
                                                                                          'needed); '
                                                                                          'favorite/unfavorite; '
                                                                                          'hide/unhide; '
-                                                                                         'delete.'},
-                                                            'id': {   'type': 'string',
-                                                                      'description': 'The gallery '
-                                                                                     'item id '
-                                                                                     '(from a list '
-                                                                                     'result or a '
-                                                                                     'manage_files '
-                                                                                     'add). '
-                                                                                     'Preferred '
-                                                                                     'for item '
-                                                                                     'actions.'},
-                                                            'query': {   'type': 'string',
-                                                                         'description': 'For list: '
-                                                                                        'filter by '
-                                                                                        'keyword/tag. '
-                                                                                        'For item '
-                                                                                        'actions '
-                                                                                        'without '
-                                                                                        'an id: a '
-                                                                                        'unique '
-                                                                                        'name/keyword '
-                                                                                        'identifying '
-                                                                                        'ONE '
-                                                                                        'item.'},
-                                                            'name': {   'type': 'string',
-                                                                        'description': 'For '
-                                                                                       'rename: '
-                                                                                       'the new '
-                                                                                       'label. For '
-                                                                                       'create_album/move: '
-                                                                                       'the album '
-                                                                                       'name.'},
-                                                            'album': {   'type': 'string',
-                                                                         'description': 'For move: '
+                                                                                         'delete.',
+                                                                          'enum': [   'list',
+                                                                                      'tag',
+                                                                                      'rename',
+                                                                                      'create_album',
+                                                                                      'move',
+                                                                                      'favorite',
+                                                                                      'unfavorite',
+                                                                                      'hide',
+                                                                                      'unhide',
+                                                                                      'delete'],
+                                                                          'type': 'string'},
+                                                            'album': {   'description': 'For move: '
                                                                                         'the album '
                                                                                         'to file '
                                                                                         'the item '
@@ -534,54 +499,69 @@ FORK_FUNCTION_TOOL_SCHEMAS = [   {   'type': 'function',
                                                                                         'For list: '
                                                                                         'filter to '
                                                                                         'this '
-                                                                                        'album.'},
-                                                            'media_type': {   'type': 'string',
-                                                                              'enum': [   'image',
-                                                                                          'video'],
-                                                                              'description': 'For '
+                                                                                        'album.',
+                                                                         'type': 'string'},
+                                                            'id': {   'description': 'The gallery '
+                                                                                     'item id '
+                                                                                     '(from a list '
+                                                                                     'result or a '
+                                                                                     'manage_files '
+                                                                                     'add). '
+                                                                                     'Preferred '
+                                                                                     'for item '
+                                                                                     'actions.',
+                                                                      'type': 'string'},
+                                                            'media_type': {   'description': 'For '
                                                                                              'list: '
                                                                                              'restrict '
                                                                                              'to '
                                                                                              'photos '
                                                                                              'or '
-                                                                                             'videos.'},
-                                                            'tags': {   'type': 'array',
-                                                                        'items': {'type': 'string'},
-                                                                        'description': 'For tag: '
+                                                                                             'videos.',
+                                                                              'enum': [   'image',
+                                                                                          'video'],
+                                                                              'type': 'string'},
+                                                            'name': {   'description': 'For '
+                                                                                       'rename: '
+                                                                                       'the new '
+                                                                                       'label. For '
+                                                                                       'create_album/move: '
+                                                                                       'the album '
+                                                                                       'name.',
+                                                                        'type': 'string'},
+                                                            'query': {   'description': 'For list: '
+                                                                                        'filter by '
+                                                                                        'keyword/tag. '
+                                                                                        'For item '
+                                                                                        'actions '
+                                                                                        'without '
+                                                                                        'an id: a '
+                                                                                        'unique '
+                                                                                        'name/keyword '
+                                                                                        'identifying '
+                                                                                        'ONE item.',
+                                                                         'type': 'string'},
+                                                            'tags': {   'description': 'For tag: '
                                                                                        'the tags '
                                                                                        'to set '
                                                                                        '(replaces '
-                                                                                       'existing).'}},
-                                          'required': ['action']}}},
-    {   'type': 'function',
-        'function': {   'name': 'send_ping',
-                        'description': 'Send an immediate ntfy push notification/ping to the user '
+                                                                                       'existing).',
+                                                                        'items': {'type': 'string'},
+                                                                        'type': 'array'}},
+                                          'required': ['action'],
+                                          'type': 'object'}},
+        'type': 'function'},
+    {   'function': {   'description': 'Send an immediate ntfy push notification/ping to the user '
                                        'using the configured ntfy integration and reminder topic. '
                                        'Use when the user asks Iris to ping or notify them now. '
                                        'For scheduled reminders, use manage_notes with due_date '
                                        'instead.',
-                        'parameters': {   'type': 'object',
-                                          'properties': {   'message': {   'type': 'string',
-                                                                           'description': 'Notification '
+                        'name': 'send_ping',
+                        'parameters': {   'properties': {   'message': {   'description': 'Notification '
                                                                                           'body '
-                                                                                          'text'},
-                                                            'title': {   'type': 'string',
-                                                                         'description': 'Notification '
-                                                                                        'title; '
-                                                                                        'defaults '
-                                                                                        'to Iris'},
-                                                            'topic': {   'type': 'string',
-                                                                         'description': 'Optional '
-                                                                                        'ntfy '
-                                                                                        'topic; '
-                                                                                        'defaults '
-                                                                                        'to the '
-                                                                                        'reminder '
-                                                                                        'ntfy '
-                                                                                        'topic in '
-                                                                                        'Settings'},
-                                                            'priority': {   'type': 'string',
-                                                                            'description': 'Optional '
+                                                                                          'text',
+                                                                           'type': 'string'},
+                                                            'priority': {   'description': 'Optional '
                                                                                            'ntfy '
                                                                                            'priority '
                                                                                            'such '
@@ -590,78 +570,27 @@ FORK_FUNCTION_TOOL_SCHEMAS = [   {   'type': 'function',
                                                                                            'default, '
                                                                                            'high, '
                                                                                            'max, '
-                                                                                           'or '
-                                                                                           '1-5'},
-                                                            'tags': {   'type': 'string',
-                                                                        'description': 'Optional '
+                                                                                           'or 1-5',
+                                                                            'type': 'string'},
+                                                            'tags': {   'description': 'Optional '
                                                                                        'comma-separated '
-                                                                                       'ntfy '
-                                                                                       'tags'}},
-                                          'required': ['message']}}},
-    {   'type': 'function',
-        'function': {   'name': 'manage_books',
-                        'description': "List/read the user's EPUB and PDF books (PDF/EPUB files in "
-                                       'their Knowledge base) and save reading progress. Use this '
-                                       'when the user asks about books, EPUBs, PDFs, reading '
-                                       'status, or what they have read.',
-                        'parameters': {   'type': 'object',
-                                          'properties': {   'action': {   'type': 'string',
-                                                                          'enum': [   'list',
-                                                                                      'read',
-                                                                                      'progress'],
-                                                                          'description': 'Action '
-                                                                                         'to '
-                                                                                         'perform'},
-                                                            'query': {   'type': 'string',
-                                                                         'description': 'Search/list '
-                                                                                        'query'},
-                                                            'limit': {   'type': 'integer',
-                                                                         'description': 'Maximum '
-                                                                                        'list '
-                                                                                        'results'},
-                                                            'path': {   'type': 'string',
-                                                                        'description': 'Vault-relative '
-                                                                                       'EPUB/PDF '
-                                                                                       'path'},
-                                                            'chapter_index': {   'type': 'integer',
-                                                                                 'description': 'EPUB '
-                                                                                                'chapter '
-                                                                                                'index '
-                                                                                                'or '
-                                                                                                'PDF '
-                                                                                                'page '
-                                                                                                'index, '
-                                                                                                'zero-based'},
-                                                            'page_index': {   'type': 'integer',
-                                                                              'description': 'Alias '
-                                                                                             'for '
-                                                                                             'chapter_index '
-                                                                                             'when '
-                                                                                             'reading '
-                                                                                             'PDFs'},
-                                                            'scroll_percent': {   'type': 'number',
-                                                                                  'description': 'Progress '
-                                                                                                 'within '
-                                                                                                 'the '
-                                                                                                 'current '
-                                                                                                 'chapter/page'},
-                                                            'chapter_title': {   'type': 'string',
-                                                                                 'description': 'Current '
-                                                                                                'chapter/page '
-                                                                                                'title'},
-                                                            'title': {   'type': 'string',
-                                                                         'description': 'Book '
-                                                                                        'title for '
-                                                                                        'progress '
-                                                                                        'notes'},
-                                                            'author': {   'type': 'string',
-                                                                          'description': 'Book '
-                                                                                         'author '
-                                                                                         'for '
-                                                                                         'progress '
-                                                                                         'notes'},
-                                                            'kind': {   'type': 'string',
-                                                                        'description': 'Book type, '
-                                                                                       'epub or '
-                                                                                       'pdf'}},
-                                          'required': ['action']}}}]
+                                                                                       'ntfy tags',
+                                                                        'type': 'string'},
+                                                            'title': {   'description': 'Notification '
+                                                                                        'title; '
+                                                                                        'defaults '
+                                                                                        'to Iris',
+                                                                         'type': 'string'},
+                                                            'topic': {   'description': 'Optional '
+                                                                                        'ntfy '
+                                                                                        'topic; '
+                                                                                        'defaults '
+                                                                                        'to the '
+                                                                                        'reminder '
+                                                                                        'ntfy '
+                                                                                        'topic in '
+                                                                                        'Settings',
+                                                                         'type': 'string'}},
+                                          'required': ['message'],
+                                          'type': 'object'}},
+        'type': 'function'}]

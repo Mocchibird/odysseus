@@ -69,9 +69,6 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 
         # Tool render endpoints
         is_tool_render = path.startswith("/api/tools/") and path.endswith("/render")
-        # Native PDF book viewer embeds the authenticated PDF file in the
-        # same-origin Books iframe. Keep all other responses frame-denied.
-        is_book_pdf_file = path == "/api/books/file"
         # PDF previews are embedded by the in-app document library. Keep the
         # exception route-scoped so normal app pages remain unframeable.
         is_document_pdf_preview = path.startswith("/api/document/") and path.endswith("/render-pdf")
@@ -126,16 +123,6 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         elif is_tool_render:
             # Skip framing headers for tools.
             pass
-        elif is_book_pdf_file:
-            response.headers["X-Frame-Options"] = "SAMEORIGIN"
-            response.headers["Content-Security-Policy"] = (
-                "default-src 'self'; "
-                "style-src 'self' 'unsafe-inline'; "
-                "img-src 'self' data: blob:; "
-                "media-src 'self' blob:; "
-                "object-src 'self'; "
-                "frame-ancestors 'self'"
-            )
         elif is_document_pdf_preview:
             response.headers["X-Frame-Options"] = "SAMEORIGIN"
             response.headers["Content-Security-Policy"] = (

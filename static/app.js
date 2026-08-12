@@ -25,7 +25,6 @@ import memoryModule from './js/memory.js';
 import voiceRecorderModule from './js/voiceRecorder.js';
 import censorModule from './js/censor.js';
 import notesModule from './js/notes.js?v=526';
-import booksModule from './js/books.js?v=524';
 import pingsModule from './js/pings.js?v=396';
 // tasks.js + calendar.js + gallery.js are imported EAGERLY (not lazy): they
 // run boot-time side effects at module load — tasks.js starts background-task
@@ -227,7 +226,6 @@ window.fetch = async function(...args) {
 
 const el = uiModule.el;
 
-window.booksModule = booksModule;
 
 // Default chat config — refreshed on every new-chat action so settings
 // changes take effect immediately (previously cached once at page load and
@@ -410,15 +408,14 @@ function initializeEventListeners() {
   }, { passive: true });
 
   // Internal links from AI search results: #session-id, plus content citations
-  // from search_files — #file-/#book-/#gallery- (and legacy #knowledge-). Matched
+  // from search_files — #file-/#gallery- (and legacy #knowledge-). Matched
   // by href so it works regardless of how the link is rendered.
   el('chat-history').addEventListener('click', (e) => {
-    const cite = e.target.closest('a[href^="#file-"], a[href^="#knowledge-"], a[href^="#book-"], a[href^="#gallery-"]');
+    const cite = e.target.closest('a[href^="#file-"], a[href^="#knowledge-"], a[href^="#gallery-"]');
     if (cite) {
       e.preventDefault();
       const href = cite.getAttribute('href');
-      if (href.startsWith('#book-')) booksModule?.openBooksPanel?.();
-      else if (href.startsWith('#gallery-')) _gallery().then(m => m.openGallery());
+      if (href.startsWith('#gallery-')) _gallery().then(m => m.openGallery());
       else documentModule?.openLibrary?.({ tab: 'files' });  // #file- / legacy #knowledge-
       return;
     }
@@ -1109,16 +1106,6 @@ function initializeEventListeners() {
     });
   }
 
-  // Books / E-Reader tool button — its own standalone window now (booksModule),
-  // no longer a mode inside the Notes pane. Toggle like the other tool windows.
-  const toolBooksBtn = el('tool-books-btn');
-  if (toolBooksBtn) {
-    toolBooksBtn.addEventListener('click', () => {
-      if (!booksModule) return;
-      booksModule.isBooksOpen() ? booksModule.closeBooks() : booksModule.openBooksPanel();
-    });
-  }
-
   // Tasks tool button
   const toolTasksBtn = el('tool-tasks-btn');
   if (toolTasksBtn) {
@@ -1287,7 +1274,6 @@ function initializeEventListeners() {
       }
     },
     '/workspace': () => { _collapseSidebarToRail(); documentWorkspaceModule?.openWorkspace(); },
-    '/books':    () => booksModule?.openBooksPanel && booksModule.openBooksPanel(),
     '/calendar': () => calendarModule && calendarModule.openCalendar(),
     '/cookbook': () => document.getElementById('tool-cookbook-btn')?.click(),
     '/email':    () => {
@@ -2729,7 +2715,6 @@ function initializeEventListeners() {
     // inside the Tools section in the sidebar.
     'tool-calendar':       '#tool-calendar-btn',
     'tool-compare':        '#tool-compare-btn',
-    'tool-books':          '#tool-books-btn',
     'tool-cookbook':       '#tool-cookbook-btn',
     'tool-research':       '#tool-research-btn',
     'tool-gallery':        '#tool-gallery-btn',
@@ -3773,7 +3758,6 @@ function startOdysseusApp() {
   // Rail tool buttons — delegate to sidebar tool buttons
   const _railToolMap = {
     'rail-today':     'tool-today-btn',
-    'rail-books':     'tool-books-btn',
     'rail-compare':   'tool-compare-btn',
     'rail-research':  'tool-research-btn',
     'rail-cookbook':   'tool-cookbook-btn',

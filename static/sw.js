@@ -8,11 +8,7 @@
 //   - Other static assets (images/fonts/libs): cache-first with bg refresh.
 //   - API / non-GET: never cached.
 // Bump CACHE_NAME whenever the precache list or SW logic changes.
-const CACHE_NAME = 'odysseus-v537';
-// Separate, long-lived cache for book content (PDF bytes / EPUB chapters) so
-// books you've opened stay readable offline AND survive app-shell version bumps
-// (the activate cleanup below deliberately keeps this one).
-const BOOKS_CACHE = 'odysseus-books-v1';
+const CACHE_NAME = 'odysseus-v538';
 
 // Core shell precached on install so repeat opens are instant without any
 // network wait. Keep this list in sync with the <script type="module"> tags
@@ -21,8 +17,8 @@ const PRECACHE = [
   '/',
   '/static/manifest.json',
   '/static/style.css?v=537',
-  '/static/fork.css?v=531',
-  '/static/app.js?v=537',
+  '/static/fork.css?v=538',
+  '/static/app.js?v=538',
   '/static/js/storage.js',
   '/static/js/i18n.js?v=523',
   '/static/js/i18n/ko.js',
@@ -66,12 +62,10 @@ const PRECACHE = [
   '/static/js/emailLibrary/signatureFold.js',
   '/static/js/emailLibrary/state.js',
   '/static/js/notes.js?v=526',
-  '/static/js/bookTools.js?v=395',
   '/static/js/health.js?v=529',
   '/static/js/pings.js?v=396',
   '/static/js/today.js?v=422',
   '/static/js/modalFullscreen.js?v=370',
-  '/static/js/pdfReader.js?v=383',
   '/static/js/tasks.js?v=20260713taskescape',
   '/static/js/calendar.js',
   '/static/js/calendar/utils.js',
@@ -102,35 +96,16 @@ self.addEventListener('install', (e) => {
 self.addEventListener('activate', (e) => {
   e.waitUntil(
     caches.keys().then(keys =>
-      // Keep the current shell cache AND the long-lived books cache; drop the rest.
-      Promise.all(keys.filter(k => k !== CACHE_NAME && k !== BOOKS_CACHE).map(k => caches.delete(k)))
+      // Keep the current shell cache; drop the rest.
+      Promise.all(keys.filter(k => k !== CACHE_NAME).map(k => caches.delete(k)))
     ).then(() => self.clients.claim())
   );
 });
 
-// Book content is immutable (a book's bytes/chapters don't change), so cache it
-// for offline reading. Opening a book online populates this; later it's served
-// from cache even with no connection. Kept in BOOKS_CACHE (survives shell bumps).
-const BOOK_CONTENT = /^\/api\/(books\/(file|chapter|open)|iris-vault\/epub)$/;
 
 self.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url);
 
-  // Offline reading: stale-while-revalidate book content (returns instantly from
-  // cache when present, refreshes in the background; works fully offline).
-  if (e.request.method === 'GET' && BOOK_CONTENT.test(url.pathname)) {
-    e.respondWith(
-      caches.open(BOOKS_CACHE).then(async cache => {
-        const cached = await cache.match(e.request);
-        const network = fetch(e.request).then(res => {
-          if (res && res.ok) cache.put(e.request, res.clone());
-          return res;
-        }).catch(() => cached);
-        return cached || network;
-      })
-    );
-    return;
-  }
 
   // Never touch other API calls or non-GET.
   if (url.pathname.startsWith('/api/') || e.request.method !== 'GET') return;

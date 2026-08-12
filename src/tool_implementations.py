@@ -121,4 +121,4 @@ def clear_active_email() -> None:
 # them as `from src.tool_implementations import do_manage_gallery`. Kept in a
 # sibling module so this file's upstream body stays byte-identical to upstream
 # for clean merges. See docs/fork-additive-policy.md.
-from src.tool_implementations_fork import (do_search_files, do_manage_files, do_manage_gallery, do_send_ping, do_manage_health, do_manage_books)  # noqa: F401,E402
+from src.tool_implementations_fork import (do_search_files, do_manage_files, do_manage_gallery, do_send_ping, do_manage_health)  # noqa: F401,E402

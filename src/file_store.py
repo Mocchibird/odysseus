@@ -1,7 +1,7 @@
 """
 file_store.py — the native Files store.
 
-Any uploaded file that isn't media (Gallery), a book (Books), or authored text
+Any uploaded file that isn't media (Gallery), or authored text
 (Documents) lives here: docx/xlsx/csv/json/txt/md/audio/zip/… The bytes are
 copied into DATA_DIR/files (so they stay openable), the text is extracted and
 RAG-indexed under kind="file", and a `files` row records the metadata + tags so

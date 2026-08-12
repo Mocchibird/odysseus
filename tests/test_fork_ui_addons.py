@@ -40,7 +40,7 @@ FORK_CRITICAL_IDS = {
     # Endpoint LLM/Image Type selector in the Add-Models form.
     "adm-epType",
     # Rail tool launchers (wiring in app.js _railToolMap).
-    "rail-today", "rail-books", "rail-health", "rail-habits", "rail-pings",
+    "rail-today", "rail-health", "rail-habits", "rail-pings",
     # Settings rows/cards (wiring stays lazy in settings.js).
     "set-defaultPersonaSelect", "set-chatAllowedModels", "set-language",
     "set-quiet-hours-enabled", "set-quiet-hours-row",

@@ -1358,10 +1358,6 @@ async function _cmdOpen(args, ctx) {
     }
     const targets = {
       gallery: ['tool-gallery-btn', 'rail-gallery'],
-      books: ['tool-books-btn', 'rail-books'],
-      book: ['tool-books-btn', 'rail-books'],
-      reader: ['tool-books-btn', 'rail-books'],
-      ereader: ['tool-books-btn', 'rail-books'],
       notes: ['tool-notes-btn', 'rail-notes'],
       tasks: ['tool-tasks-btn', 'rail-tasks'],
       library: ['tool-library-btn', 'rail-archive'],
