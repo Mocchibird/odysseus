@@ -15,7 +15,6 @@ import searchModule from './js/search.js';
 import chatModule from './js/chat.js?v=537';
 import compareModule from './js/compare/index.js';
 import documentModule from './js/document.js?v=537';
-import documentWorkspaceModule from './js/documentWorkspace.js?v=537';
 import searchChatModule from './js/search-chat.js';
 import { makeWindowDraggable } from './js/windowDrag.js';
 import markdownModule from './js/markdown.js';
@@ -1070,14 +1069,6 @@ function initializeEventListeners() {
     });
   }
 
-  // Documents workspace sidebar entry (peer of the rail's Documents button)
-  const toolWorkspaceBtn = el('tool-workspace-btn');
-  if (toolWorkspaceBtn) {
-    toolWorkspaceBtn.addEventListener('click', () => {
-      if (documentWorkspaceModule) documentWorkspaceModule.openWorkspace();
-    });
-  }
-
   // Document library tool button
   const toolDoclibBtn = el('tool-doclib-btn');
   if (toolDoclibBtn) {
@@ -1273,7 +1264,6 @@ function initializeEventListeners() {
         setTimeout(_go, 200);
       }
     },
-    '/workspace': () => { _collapseSidebarToRail(); documentWorkspaceModule?.openWorkspace(); },
     '/calendar': () => calendarModule && calendarModule.openCalendar(),
     '/cookbook': () => document.getElementById('tool-cookbook-btn')?.click(),
     '/email':    () => {
@@ -3732,7 +3722,6 @@ function startOdysseusApp() {
     compareModule.init(API_BASE);
   }
   researchPanelModule.init(API_BASE, markdownModule, sessionModule);
-  if (documentWorkspaceModule) documentWorkspaceModule.init(API_BASE);
   // Initialize document editor module
   if (documentModule) {
     documentModule.init(API_BASE);
@@ -3757,6 +3746,7 @@ function startOdysseusApp() {
 
   // Rail tool buttons — delegate to sidebar tool buttons
   const _railToolMap = {
+    'rail-documents': 'overflow-doc-btn',
     'rail-today':     'tool-today-btn',
     'rail-compare':   'tool-compare-btn',
     'rail-research':  'tool-research-btn',
@@ -3795,14 +3785,6 @@ function startOdysseusApp() {
       _railChatsBtn.classList.remove('rail-notify', 'rail-notify-success');
       delete _railChatsBtn.dataset.targetSession;
       _syncRailDynamic();
-    });
-  }
-
-  // Rail documents — open the full-window Documents workspace.
-  const _railDocsBtn = el('rail-documents');
-  if (_railDocsBtn) {
-    _railDocsBtn.addEventListener('click', () => {
-      if (documentWorkspaceModule) documentWorkspaceModule.openWorkspace();
     });
   }
 

@@ -1079,12 +1079,7 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
 
   async function libraryOpenDocument(doc) {
     closeLibrary();
-    // Library opens now land in the full-window Documents workspace.
-    if (window.documentWorkspaceModule) {
-      window.documentWorkspaceModule.openWorkspace(doc.id);
-      return;
-    }
-    // Fallback (workspace module unavailable): the legacy chat-docked editor.
+    // Opens land in the chat-docked document editor.
     if (!doc.session_id) {
       _loadDocument(doc.id);
       return;
@@ -1099,11 +1094,6 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
   /** Open a document in the workspace (was: its linked chat-docked session) */
   async function libraryOpenInSession(doc) {
     closeLibrary();
-    if (window.documentWorkspaceModule) {
-      window.documentWorkspaceModule.openWorkspace(doc.id);
-      return;
-    }
-    // Fallback (workspace module unavailable): the legacy chat-docked editor.
     if (!doc.session_id) return;
     const currentSessionId = sessionModule && sessionModule.getCurrentSessionId();
     if (doc.session_id !== currentSessionId) {
