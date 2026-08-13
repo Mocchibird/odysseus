@@ -15,12 +15,35 @@
 //     surface is first opened.
 //
 // ./blocks.js owns the block vocabulary and the markdown round-trip; ./store.js
-// owns loading and autosaving. The slash menu and tag tree land in later phases.
+// owns loading and autosaving; ./outline.js owns the document list and tag
+// folders. The slash menu lands in a later phase.
 
 import blocks from './blocks.js';
 import store from './store.js';
+import outline from './outline.js';
 
 const V = '../../vendor/lexical';
+const PANE_KEY = 'odysseus.writer.listHidden';
+
+function _paneHidden() {
+  try { return localStorage.getItem(PANE_KEY) === '1'; } catch (_) { return false; }
+}
+
+/**
+ * Show/hide the document pane. `persist:false` is for applying stored state on
+ * mount, and for the mobile auto-close — a narrow-screen convenience must not
+ * rewrite the preference you set on a desktop.
+ */
+function _setListHidden(hidden, { persist = true } = {}) {
+  const el = document.getElementById('writer-surface');
+  if (!el) return;
+  el.classList.toggle('writer-list-hidden', hidden);
+  const toggle = document.getElementById('writer-toggle-list');
+  if (toggle) toggle.setAttribute('aria-pressed', String(!hidden));
+  if (persist) {
+    try { localStorage.setItem(PANE_KEY, hidden ? '1' : '0'); } catch (_) { /* private mode */ }
+  }
+}
 
 let _editor = null;      // Lexical editor instance, created on first open
 let _lexical = null;     // resolved module namespace bundle
@@ -54,27 +77,71 @@ function _buildShell() {
   el.setAttribute('hidden', '');
   el.innerHTML = `
     <div class="writer-head">
+      <button type="button" class="memory-toolbar-btn writer-pane-toggle" id="writer-toggle-list"
+              title="Show/hide documents" aria-label="Show or hide the document list">&#9776;</button>
       <input type="text" id="writer-title" class="writer-title-input"
              placeholder="Untitled" spellcheck="false" autocomplete="off">
       <span class="writer-status" id="writer-status"></span>
       <button type="button" class="memory-toolbar-btn" id="writer-new" title="New document">New</button>
       <button type="button" class="memory-toolbar-btn" id="writer-close" title="Close">Close</button>
     </div>
-    <div class="writer-body">
-      <div class="writer-editor" id="writer-editor" contenteditable="true"
-           role="textbox" aria-multiline="true" spellcheck="true"></div>
+    <div class="writer-panes">
+      <aside class="writer-side" id="writer-side">
+        <div class="writer-side-head">
+          <input type="search" id="writer-search" class="memory-search-input writer-search"
+                 placeholder="Search documents" autocomplete="off">
+          <button type="button" class="memory-item-btn" id="writer-new-folder"
+                  title="New folder">+</button>
+        </div>
+        <div class="writer-list" id="writer-list"></div>
+      </aside>
+      <div class="writer-body">
+        <div class="writer-editor" id="writer-editor" contenteditable="true"
+             role="textbox" aria-multiline="true" spellcheck="true"></div>
+      </div>
     </div>`;
   document.body.appendChild(el);
 
   el.querySelector('#writer-close').addEventListener('click', () => close());
   el.querySelector('#writer-new').addEventListener('click', () => newDocument());
 
+  // The list is a pane, not a modal: hidden state persists so the surface opens
+  // the way you left it.
+  const toggle = el.querySelector('#writer-toggle-list');
+  _setListHidden(_paneHidden(), { persist: false });
+  toggle.addEventListener('click', () => {
+    _setListHidden(!el.classList.contains('writer-list-hidden'));
+  });
+
+  const search = el.querySelector('#writer-search');
+  search.addEventListener('input', () => outline.setSearch(search.value));
+
+  el.querySelector('#writer-new-folder').addEventListener('click', async () => {
+    // styledPrompt is the app's own dialog; fall back to window.prompt if the ui
+    // module is unavailable for any reason.
+    let name = null;
+    try {
+      const ui = await import('../ui.js');
+      name = ui.styledPrompt
+        ? await ui.styledPrompt('New folder', '', 'Name, or parent/child to nest')
+        : window.prompt('New folder (parent/child to nest)');
+    } catch (_) {
+      name = window.prompt('New folder (parent/child to nest)');
+    }
+    if (name) outline.createTag(name);
+  });
+
   const title = el.querySelector('#writer-title');
   // Rename on blur/Enter rather than per keystroke: the title is metadata, and a
   // PATCH per character would be noise.
   const commitTitle = () => {
     const v = title.value.trim();
-    if (v) store.rename(v).catch((e) => console.warn('[writer] rename failed:', e && e.message));
+    if (v) {
+      store.rename(v)
+        .then(() => outline.load())
+        .then(() => outline.setActive(store.currentDocId()))
+        .catch((e) => console.warn('[writer] rename failed:', e && e.message));
+    }
   };
   title.addEventListener('blur', commitTitle);
   title.addEventListener('keydown', (ev) => {
@@ -140,6 +207,28 @@ function _applyDoc(doc) {
   if (title) title.value = doc.title === 'Untitled' ? '' : (doc.title || '');
   _setContentQuietly(doc.current_content ?? '');
   _status(store.State.SAVED);
+  outline.setActive(doc.id);
+}
+
+/** Switch documents from the list, flushing whatever is pending first. */
+const _isNarrow = () => window.matchMedia('(max-width: 768px)').matches;
+
+async function openDoc(id) {
+  if (!id || id === store.currentDocId()) {
+    // Re-picking the open document on mobile should still get you to it.
+    if (_isNarrow()) _setListHidden(true, { persist: false });
+    return;
+  }
+  await store.flush();
+  try {
+    _applyDoc(await store.load(id));
+    // Keep the URL shareable/reloadable without adding a history entry per click.
+    history.replaceState(null, '', `${location.pathname}${location.search}#writer=${encodeURIComponent(id)}`);
+    if (_isNarrow()) _setListHidden(true, { persist: false });
+    _editor.focus();
+  } catch (err) {
+    _status(store.State.ERROR, err);
+  }
 }
 
 /** Open (or reopen) the surface. `docId` wins; otherwise resume, else create. */
@@ -152,6 +241,7 @@ export async function open(docId = null) {
     try {
       _editor = await _mountEditor(el.querySelector('#writer-editor'));
       store.configure({ getContent: getMarkdown, onState: _status });
+      outline.configure({ onOpen: openDoc });
     } catch (err) {
       _status(store.State.ERROR, err);
       console.error('[writer] mount failed', err);
@@ -183,6 +273,8 @@ export async function open(docId = null) {
       }
     }
   }
+  // Refresh in the background: a stale list is better than a blocked open.
+  outline.load().then(() => outline.setActive(store.currentDocId()));
   _editor.focus();
 }
 
@@ -192,6 +284,8 @@ export async function newDocument() {
   try {
     const doc = await store.create();
     _applyDoc(doc);
+    await outline.load();
+    outline.setActive(doc.id);
     _editor.focus();
     return doc;
   } catch (err) {
@@ -257,7 +351,7 @@ export function init() {
 }
 
 const writerModule = {
-  init, open, close, isOpen, newDocument,
+  init, open, close, isOpen, newDocument, openDoc, outline,
   getEditor, getLexical, setMarkdown, getMarkdown,
   store,
 };

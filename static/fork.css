@@ -1501,8 +1501,82 @@ body.writer-open #model-picker-wrap { display: none; }
 .writer-status-error { color: var(--accent-primary, var(--red)); }
 /* Push the button cluster right; the status sits next to the title. */
 .writer-head #writer-new { margin-left: auto; }
+/* Two panes: document list | editor. A CSS grid whose first track collapses to
+   zero when the list is hidden, so no JS layout maths. */
+.writer-panes {
+  flex: 1; min-height: 0;
+  display: grid; grid-template-columns: var(--writer-list-w, 260px) 1fr;
+  /* Containing block for the mobile list overlay below. Without this, the
+     overlay's inset:0 resolves against the fixed surface and covers the header
+     too — leaving no way to dismiss the list or reach the editor. */
+  position: relative;
+}
+#writer-surface.writer-list-hidden .writer-panes { grid-template-columns: 0 1fr; }
+#writer-surface.writer-list-hidden .writer-side { display: none; }
+.writer-side {
+  min-width: 0; min-height: 0;
+  display: flex; flex-direction: column;
+  border-right: 1px solid var(--border);
+}
+.writer-side-head {
+  display: flex; align-items: center; gap: 6px;
+  padding: 8px; border-bottom: 1px solid var(--border); flex-shrink: 0;
+}
+/* memory-search-input ships a baked-in margin-top; zero it so the row centres. */
+.writer-side-head .writer-search { margin-top: 0; min-width: 0; flex: 1; }
+.writer-side-head .memory-item-btn { margin-top: 0; flex-shrink: 0; }
+.writer-list {
+  flex: 1; min-height: 0; overflow-y: auto;
+  /* Reserve the scrollbar lane so expanding a folder doesn't reflow rows. */
+  scrollbar-gutter: stable;
+  padding: 4px 0 12px;
+}
+.writer-list-error { color: var(--accent-primary, var(--red)); }
+.writer-list-empty {
+  padding: 14px 10px; font-size: 12px;
+  color: color-mix(in srgb, var(--fg) 45%, transparent);
+}
+.writer-folder, .writer-file {
+  display: flex; align-items: center; gap: 6px;
+  padding: 4px 8px; font-size: 12px; cursor: pointer;
+  border-radius: 4px; margin: 1px 4px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.writer-folder { font-weight: 600; color: color-mix(in srgb, var(--fg) 85%, transparent); }
+.writer-folder:hover, .writer-file:hover { background: color-mix(in srgb, var(--fg) 8%, transparent); }
+.writer-folder.drag-over {
+  background: color-mix(in srgb, var(--accent-primary, var(--red)) 20%, transparent);
+  outline: 1px solid var(--accent-primary, var(--red));
+}
+.writer-folder-name { overflow: hidden; text-overflow: ellipsis; }
+.writer-folder-count {
+  margin-left: auto; font-weight: normal; font-size: 11px;
+  color: color-mix(in srgb, var(--fg) 40%, transparent);
+}
+.writer-folder-untagged { color: color-mix(in srgb, var(--fg) 55%, transparent); }
+.writer-chev { flex-shrink: 0; transition: transform 0.12s ease; opacity: 0.6; }
+.writer-chev.open { transform: rotate(90deg); }
+.writer-file { color: color-mix(in srgb, var(--fg) 78%, transparent); }
+.writer-file.active {
+  background: color-mix(in srgb, var(--accent-primary, var(--red)) 16%, transparent);
+  color: var(--fg);
+}
+.writer-file:focus-visible { outline: 1px solid var(--accent-primary, var(--red)); outline-offset: -1px; }
+.writer-pane-toggle { flex-shrink: 0; }
+@media (max-width: 768px) {
+  /* One column at a time on a phone: the list overlays the editor rather than
+     squeezing it into an unusable strip. */
+  .writer-panes { grid-template-columns: 1fr; }
+  .writer-side {
+    position: absolute; inset: 0; z-index: 1;
+    background: var(--bg); border-right: none;
+  }
+  #writer-surface.writer-list-hidden .writer-panes { grid-template-columns: 1fr; }
+}
+
 .writer-body {
-  flex: 1; overflow-y: auto; scrollbar-gutter: stable;
+  min-width: 0; min-height: 0;
+  overflow-y: auto; scrollbar-gutter: stable;
   display: flex; flex-direction: column;
 }
 /* One comfortable reading measure, matching the document editor's 820px wrap. */

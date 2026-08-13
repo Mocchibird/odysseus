@@ -189,3 +189,65 @@ def test_pending_edits_are_flushed_when_the_tab_goes_away():
 def test_writer_documents_declare_markdown_language():
     """language:'markdown' keeps the plain editor and export treating the body right."""
     assert "language: 'markdown'" in _read("static/js/writer/store.js")
+
+
+def test_outline_pages_within_the_library_limit():
+    """/api/documents/library caps `limit` at 50 and 422s above it.
+
+    Requesting 200 returned a validation error that the catch turned into an empty
+    list — indistinguishable from "you have no documents". Page instead, and bound
+    the loop.
+    """
+    src = _read("static/js/writer/outline.js")
+    assert "const PAGE = 50;" in src, "page size must respect the endpoint's cap"
+    assert "PAGE_CAP" in src, "the paging loop needs a bound"
+    assert "limit: String(PAGE)" in src
+
+
+def test_outline_surfaces_load_failures():
+    """An empty list that is really a failed request must not read as 'no documents'."""
+    src = _read("static/js/writer/outline.js")
+    assert "_error" in src and "writer-list-error" in src
+    assert "writer-list-error" in _read("static/fork.css")
+
+
+def test_outline_search_reveals_matches_in_collapsed_folders():
+    """Filtering while folders are collapsed showed a folder and hid every hit."""
+    src = _read("static/js/writer/outline.js")
+    assert "_searching()" in src
+    assert "if (!_searching() && !_expanded.has(child.fullPath)) continue;" in src
+
+
+def test_tags_are_posted_as_a_query_param():
+    """This endpoint takes tags in the query string, not a JSON body."""
+    src = _read("static/js/writer/outline.js")
+    assert "/tags?tags=" in src
+
+
+def test_mobile_list_overlay_cannot_cover_the_header():
+    """The overlay is positioned against .writer-panes, not the fixed surface.
+
+    With inset:0 resolving against #writer-surface the list covered the header,
+    leaving no way to dismiss it or reach the editor — a dead end on a phone.
+    """
+    css = _read("static/fork.css")
+    panes = css.split(".writer-panes {", 1)[1].split("}", 1)[0]
+    assert "position: relative" in panes, ".writer-panes must be the containing block"
+
+
+def test_mobile_autoclose_does_not_clobber_the_desktop_preference():
+    """Hiding the list after a pick on a phone is a convenience, not a setting."""
+    src = _read("static/js/writer/writer.js")
+    assert "persist: false" in src
+    assert "_isNarrow()" in src
+
+
+def test_outline_reuses_the_previous_workspace_prefs_keys():
+    """Folders created before the rewrite should still appear.
+
+    The deleted Documents Workspace stored the same state under these keys; reusing
+    them makes the new pane inherit it instead of starting empty.
+    """
+    src = _read("static/js/writer/outline.js")
+    assert "dw_known_tags" in src, "reuse the old workspace's folder memory"
+    assert "odysseus-dw-expanded" in src, "reuse the old workspace's expansion state"
