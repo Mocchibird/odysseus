@@ -137,3 +137,55 @@ def test_undo_history_is_registered():
     src = _read("static/js/writer/blocks.js")
     assert "registerHistory" in src
     assert "LexicalHistory.prod.mjs" in _read("static/js/writer/writer.js")
+
+
+def test_store_uses_only_existing_document_endpoints():
+    """No new backend routes: persistence rides the document API as it is."""
+    src = _read("static/js/writer/store.js")
+    for path in ("/api/document", "/api/documents/titles"):
+        assert path in src, f"expected the writer store to use {path}"
+    # A bespoke endpoint would mean touching routes/ — i.e. upstream files.
+    assert "/api/writer" not in src, "the writer must not add its own backend routes"
+
+
+def test_store_serialises_overlapping_saves():
+    """Two PUTs racing for one document can land out of order.
+
+    The store must queue a save requested while one is in flight and re-run it
+    afterwards, so the last keystroke wins.
+    """
+    src = _read("static/js/writer/store.js")
+    assert "_inFlight" in src and "_pendingWhileInFlight" in src
+
+
+def test_store_trusts_the_server_echo_not_the_local_copy():
+    """The server may coerce the body (e.g. the email-document path).
+
+    Recording our local text as "last saved" would then leave the document
+    permanently dirty, autosaving in a loop.
+    """
+    src = _read("static/js/writer/store.js")
+    assert "doc.current_content ?? content" in src
+
+
+def test_loading_a_document_does_not_mark_it_dirty():
+    """Populating the editor fires Lexical's update listener.
+
+    Without a guard, merely opening a document would schedule a save — and every
+    open would burn a version.
+    """
+    src = _read("static/js/writer/writer.js")
+    assert "_loading" in src, "the load path must suppress autosave"
+    assert "if (_loading) return;" in src
+
+
+def test_pending_edits_are_flushed_when_the_tab_goes_away():
+    """A debounced save must not be lost to a close or a backgrounded tab."""
+    src = _read("static/js/writer/writer.js")
+    assert "pagehide" in src and "visibilitychange" in src
+    assert "store.flush()" in src
+
+
+def test_writer_documents_declare_markdown_language():
+    """language:'markdown' keeps the plain editor and export treating the body right."""
+    assert "language: 'markdown'" in _read("static/js/writer/store.js")

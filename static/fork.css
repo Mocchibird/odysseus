@@ -1476,9 +1476,31 @@ body.writer-open #model-picker-wrap { display: none; }
   display: flex; align-items: center; gap: 8px;
   padding: 8px 12px; border-bottom: 1px solid var(--border); flex-shrink: 0;
 }
-.writer-title { font-weight: 600; font-size: 13px; color: var(--accent-primary, var(--red)); }
+/* Editable title. Borderless so it reads as a heading, not a form field, until
+   focused — the same trick the session-rename input uses. */
+/* Selector is .writer-head input.writer-title-input (0,2,1) on purpose: style.css
+   has a global `input[type="text"] { width:100% }` at 0,1,1 which outranks a bare
+   class and stretches the title until it strands the save status mid-header. Do
+   not "simplify" this back to a single class. */
+.writer-head input.writer-title-input {
+  /* Fixed basis, no shrink: ch units resolved unpredictably against the
+     inherited font and collapsed the box to its min-width. */
+  flex: 0 0 auto; width: 200px; max-width: 40vw;
+  background: none; border: 1px solid transparent; border-radius: 6px;
+  padding: 2px 6px; margin: 0;
+  font: inherit; font-weight: 600; font-size: 13px;
+  color: var(--accent-primary, var(--red));
+}
+.writer-head input.writer-title-input::placeholder { color: color-mix(in srgb, var(--fg) 38%, transparent); }
+.writer-head input.writer-title-input:hover { border-color: var(--border); }
+.writer-head input.writer-title-input:focus {
+  outline: none; border-color: var(--accent-primary, var(--red));
+  background: color-mix(in srgb, var(--fg) 5%, transparent);
+}
 .writer-status { font-size: 11px; color: color-mix(in srgb, var(--fg) 45%, transparent); }
-.writer-head .memory-toolbar-btn { margin-left: auto; }
+.writer-status-error { color: var(--accent-primary, var(--red)); }
+/* Push the button cluster right; the status sits next to the title. */
+.writer-head #writer-new { margin-left: auto; }
 .writer-body {
   flex: 1; overflow-y: auto; scrollbar-gutter: stable;
   display: flex; flex-direction: column;
