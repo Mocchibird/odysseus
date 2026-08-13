@@ -1449,3 +1449,69 @@ label.ask-user-option .ask-user-option-desc { flex-basis: 100%; }
   .conv-orb { width: 132px; height: 132px; }
 }
 
+
+/* ── Writer: block writing surface (static/js/writer/) ───────────────────────
+   Fork-only. Existing vars and widget classes only — no new palette, no new
+   spacing scale. Full-window like the old workspace, but the editor inside is
+   real Lexical rather than a textarea. */
+#writer-surface {
+  position: fixed; inset: 0;
+  /* Above the sidebar-expand hamburger, which floats at z:210 and would
+     otherwise overlap the writer's own header. */
+  z-index: 220;
+  display: flex; flex-direction: column;
+  background: var(--bg); color: var(--fg);
+}
+/* Full-window: the writer owns the viewport while it is open. Same reasoning as
+   the editor itself being the only focusable thing — nothing behind it should be
+   reachable or visible. */
+body.writer-open #hamburger-btn,
+body.writer-open #icon-rail,
+/* The composer's model picker is absolutely positioned in its own z-context and
+   paints over a fixed full-window overlay. Same class of bleed the hamburger
+   caused; hide it while the writer owns the viewport. */
+body.writer-open #model-picker-wrap { display: none; }
+#writer-surface[hidden] { display: none; }
+.writer-head {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 12px; border-bottom: 1px solid var(--border); flex-shrink: 0;
+}
+.writer-title { font-weight: 600; font-size: 13px; color: var(--accent-primary, var(--red)); }
+.writer-status { font-size: 11px; color: color-mix(in srgb, var(--fg) 45%, transparent); }
+.writer-head .memory-toolbar-btn { margin-left: auto; }
+.writer-body {
+  flex: 1; overflow-y: auto; scrollbar-gutter: stable;
+  display: flex; flex-direction: column;
+}
+/* One comfortable reading measure, matching the document editor's 820px wrap. */
+.writer-editor {
+  width: 100%; max-width: 820px; margin: 0 auto;
+  padding: 28px 20px 40vh;
+  /* Grow to fill the scroller: clicking anywhere in the column must place the
+     caret, not land on dead space below a short document. */
+  flex: 1 0 auto;
+  outline: none; font-size: 14px; line-height: 1.65;
+}
+.writer-editor:focus { outline: none; }
+.writer-p { margin: 0 0 0.75em; }
+.writer-h1 { font-size: 1.6em; font-weight: 600; margin: 1.2em 0 0.5em; }
+.writer-h2 { font-size: 1.3em; font-weight: 600; margin: 1.1em 0 0.45em; }
+.writer-h3 { font-size: 1.1em; font-weight: 600; margin: 1em 0 0.4em; }
+.writer-quote {
+  margin: 0 0 0.75em; padding-left: 12px;
+  border-left: 2px solid var(--border);
+  color: color-mix(in srgb, var(--fg) 70%, transparent);
+}
+.writer-ul, .writer-ol { margin: 0 0 0.75em; padding-left: 1.4em; }
+.writer-li { margin: 0.15em 0; }
+.writer-bold { font-weight: 600; }
+.writer-italic { font-style: italic; }
+.writer-code {
+  font-family: inherit;
+  background: color-mix(in srgb, var(--fg) 8%, transparent);
+  padding: 1px 4px; border-radius: 4px;
+}
+@media (hover: none) and (pointer: coarse) {
+  /* 16px keeps iOS from zooming the surface on focus. */
+  .writer-editor { font-size: 16px; padding: 20px 14px 40vh; }
+}

@@ -83,6 +83,7 @@ const _RAIL = {
   'rail-health': ['Health', '<path d="M22 12h-4l-3 9L9 3l-3 9H2"/>'],
   'rail-habits': ['Habits', '<path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>'],
   'rail-pings':  ['Pings & Reminders', '<path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/>'],
+  'rail-writer': ['Writer', '<path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/>'],
 };
 function _railBtn(id) {
   const [title, paths] = _RAIL[id];
@@ -96,6 +97,12 @@ function _injectRailTools() {
   const docs = document.getElementById('rail-documents');
   if (docs && !document.getElementById('rail-today')) {
     docs.insertAdjacentElement('afterend', _railBtn('rail-today'));
+  }
+  if (docs && !document.getElementById('rail-writer')) {
+    const b = _railBtn('rail-writer');
+    // The writer is lazy: 488 KB of vendored Lexical only loads on first open.
+    b.addEventListener('click', () => { location.hash = '#writer'; });
+    docs.insertAdjacentElement('afterend', b);
   }
   // After rail-tasks → health, habits, pings (insert in reverse for that order).
   const tasks = document.getElementById('rail-tasks');
@@ -186,7 +193,16 @@ function _markAdminOnlySettings() {
 }
 
 // Registry of injectors — add fork panels here as they're moved out of index.html.
-const _INJECTORS = [_injectApiTokensPanel, _injectEndpointTypeSelect, _injectRailTools, _injectSettingsRows, _markAdminOnlySettings];
+// FORK: the block writing surface. Loaded dynamically and imported with a bare
+// specifier so every future change lives entirely under static/js/writer/ —
+// no upstream file (index.html, app.js, sw.js) is touched again by this feature.
+function _initWriter() {
+  import('./writer/writer.js')
+    .then((m) => m.init())
+    .catch((e) => console.warn('[fork-ui] writer unavailable:', e));
+}
+
+const _INJECTORS = [_injectApiTokensPanel, _injectEndpointTypeSelect, _injectRailTools, _injectSettingsRows, _markAdminOnlySettings, _initWriter];
 
 export function injectForkUI() {
   for (const inject of _INJECTORS) {
