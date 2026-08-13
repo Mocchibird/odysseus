@@ -84,3 +84,56 @@ def test_writer_module_owns_its_routing_and_styles():
     assert "../../vendor/lexical" in src, "Lexical must load from the vendored copy by relative path"
     # Styles live in fork.css, which index.html already links — no new stylesheet.
     assert "#writer-surface" in _read("static/fork.css")
+
+
+def test_checklist_transformer_is_opted_in_and_ordered_first():
+    """CHECK_LIST is not in Lexical's default TRANSFORMERS.
+
+    Without it, `- [x] task` parses as an ordinary bullet whose text begins with
+    "[x]". That round-trips byte-identically — so a naive round-trip test passes —
+    while rendering as a plain bullet with literal brackets. It must also precede
+    UNORDERED_LIST, because `- [ ] ` matches that transformer's regex too and the
+    first match wins. This shipped broken once; keep it guarded.
+    """
+    src = _read("static/js/writer/blocks.js")
+    assert "md.CHECK_LIST" in src, "CHECK_LIST must be added explicitly"
+    body = src.split("export function transformersFor", 1)[1].split("}", 1)[0]
+    assert body.index("CHECK_LIST") < body.index("md.TRANSFORMERS"), (
+        "CHECK_LIST must come before the default transformers, or `- [ ] ` is "
+        "claimed by UNORDERED_LIST first"
+    )
+
+
+def test_no_prism_highlighter_is_vendored():
+    """@lexical/code pulls prismjs via bare side-effect imports.
+
+    We use @lexical/code-core instead, so code blocks work unhighlighted. If
+    highlighting is added later it should reuse the highlight.js the app already
+    loads, not vendor a second highlighter.
+    """
+    names = [f.name for f in VENDOR.glob("*.mjs")]
+    assert "LexicalCodeCore.prod.mjs" in names, "code-core must be vendored for CodeNode"
+    assert "LexicalCodePrism.prod.mjs" not in names, "prism highlighter must not be vendored"
+    for f in VENDOR.glob("*.mjs"):
+        assert "prismjs" not in f.read_text(encoding="utf-8"), f"{f.name} references prismjs"
+
+
+def test_markdown_is_the_canonical_persisted_form():
+    """The storage decision is load-bearing: no new column, no migration.
+
+    Documents stay readable by the plain editor, the RAG index, agent document
+    reads, versioning and export, which all consume Document.current_content.
+    """
+    src = _read("static/js/writer/blocks.js")
+    assert "$convertToMarkdownString" in src and "$convertFromMarkdownString" in src
+    # A Lexical-JSON store would mean editing core/database.py — which is exactly
+    # the upstream coupling this feature is designed to avoid.
+    assert "toJSON" not in src, "do not persist Lexical editor-state JSON"
+    assert "current_content" in src, "the markdown target field should be documented here"
+
+
+def test_undo_history_is_registered():
+    """A writing surface without undo is not a writing surface."""
+    src = _read("static/js/writer/blocks.js")
+    assert "registerHistory" in src
+    assert "LexicalHistory.prod.mjs" in _read("static/js/writer/writer.js")

@@ -39,10 +39,11 @@ const DIRECT = [
   'lexical',
   '@lexical/rich-text',
   '@lexical/list',
-  '@lexical/code',
+  '@lexical/code-core',   // NOT @lexical/code: that pulls prismjs (see below)
   '@lexical/link',
   '@lexical/table',
   '@lexical/markdown',
+  '@lexical/history',   // undo/redo — not optional in a writing surface
   '@lexical/utils',
   '@lexical/selection',
   '@lexical/html',
@@ -105,7 +106,10 @@ for (const [name, { file, flat }] of entries) {
 log(`wrote ${entries.size} modules, rewrote ${rewritten} specifiers -> static/vendor/lexical/`);
 
 // ── 4. refuse to ship anything a browser cannot resolve ─────────────────────
-const BARE = /(?:from\s*|import\s*\(\s*)["'](?!\.{1,2}\/)([^"']+)["']/g;
+// Matches `from"x"`, `import("x")` AND bare side-effect `import"x"` — the last
+// form is how @lexical/code pulls prismjs, and missing it once already shipped a
+// broken vendor dir, so all three shapes are checked.
+const BARE = /(?:from\s*|import\s*\(\s*|import\s*)["'](?!\.{1,2}\/)([^"']+)["']/g;
 const bad = [];
 for (const f of readdirSync(OUT)) {
   const src = readFileSync(join(OUT, f), 'utf8');

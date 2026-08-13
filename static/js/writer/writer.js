@@ -12,8 +12,10 @@
 //   * Not precached by sw.js on purpose: 488 KB of editor only loads when the
 //     surface is first opened.
 //
-// Phase 0 scope: prove the vendored modules load and edit natively. The block
-// set, slash menu, tag tree and persistence land in later phases.
+// The block vocabulary and markdown round-trip live in ./blocks.js; the slash
+// menu, tag tree and document store land in later phases.
+
+import blocks from './blocks.js';
 
 const V = '../../vendor/lexical';
 
@@ -23,13 +25,18 @@ let _lexical = null;     // resolved module namespace bundle
 /** Load the vendored Lexical modules. Dynamic so nothing costs anything until open. */
 async function _loadLexical() {
   if (_lexical) return _lexical;
-  const [core, richText, list, utils] = await Promise.all([
+  const [core, richText, list, code, link, table, markdown, history, utils] = await Promise.all([
     import(`${V}/Lexical.prod.mjs`),
     import(`${V}/LexicalRichText.prod.mjs`),
     import(`${V}/LexicalList.prod.mjs`),
+    import(`${V}/LexicalCodeCore.prod.mjs`),
+    import(`${V}/LexicalLink.prod.mjs`),
+    import(`${V}/LexicalTable.prod.mjs`),
+    import(`${V}/LexicalMarkdown.prod.mjs`),
+    import(`${V}/LexicalHistory.prod.mjs`),
     import(`${V}/LexicalUtils.prod.mjs`),
   ]);
-  _lexical = { core, richText, list, utils };
+  _lexical = { core, richText, list, code, link, table, markdown, history, utils };
   return _lexical;
 }
 
@@ -56,32 +63,19 @@ function _buildShell() {
 }
 
 async function _mountEditor(host) {
-  const { core, richText, list, utils } = await _loadLexical();
+  const lex = await _loadLexical();
 
-  // registerRichText / registerList need their nodes declared up front.
-  const editor = core.createEditor({
+  // Every node a plugin or transformer may create must be declared up front, or
+  // Lexical throws when one first appears.
+  const editor = lex.core.createEditor({
     namespace: 'odysseus-writer',
-    nodes: [
-      richText.HeadingNode, richText.QuoteNode,
-      list.ListNode, list.ListItemNode,
-    ],
+    nodes: blocks.nodesFor(lex),
     onError: (err) => console.error('[writer] lexical:', err),
-    theme: {
-      paragraph: 'writer-p',
-      heading: { h1: 'writer-h1', h2: 'writer-h2', h3: 'writer-h3' },
-      quote: 'writer-quote',
-      list: { ul: 'writer-ul', ol: 'writer-ol', listitem: 'writer-li' },
-      text: { bold: 'writer-bold', italic: 'writer-italic', code: 'writer-code' },
-    },
+    theme: blocks.THEME,
   });
 
   editor.setRootElement(host);
-  // mergeRegister keeps the teardown of every plugin in one disposer.
-  const dispose = utils.mergeRegister(
-    richText.registerRichText(editor),
-    list.registerList(editor),
-  );
-  editor._odysseusDispose = dispose;
+  editor._odysseusDispose = blocks.registerAll(editor, lex);
   return editor;
 }
 
@@ -128,6 +122,19 @@ export function getEditor() { return _editor; }
 /** The vendored module namespaces, for callers that need node classes. */
 export function getLexical() { return _lexical; }
 
+/** Replace the document from markdown (the canonical stored form). */
+export function setMarkdown(text) {
+  if (!_editor) return false;
+  blocks.loadMarkdown(_editor, _lexical, text);
+  return true;
+}
+
+/** Serialise the document back to markdown for saving. */
+export function getMarkdown() {
+  if (!_editor) return '';
+  return blocks.toMarkdown(_editor, _lexical);
+}
+
 export function isOpen() {
   const el = document.getElementById('writer-surface');
   return !!el && !el.hasAttribute('hidden');
@@ -144,7 +151,7 @@ export function init() {
   _syncFromHash();
 }
 
-const writerModule = { init, open, close, isOpen, getEditor, getLexical };
+const writerModule = { init, open, close, isOpen, getEditor, getLexical, setMarkdown, getMarkdown };
 
 // Mirrors the codebase convention (window.chatModule, window.sessionModule, ...)
 // so other fork modules can reach the writer without an import cycle.

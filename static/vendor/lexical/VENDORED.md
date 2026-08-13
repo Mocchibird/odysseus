@@ -9,11 +9,10 @@ they load natively in the browser with no import map and no bundler.
 |---|---|
 | `lexical` | `Lexical.prod.mjs` |
 | `@lexical/clipboard` | `LexicalClipboard.prod.mjs` |
-| `@lexical/code` | `LexicalCode.prod.mjs` |
 | `@lexical/code-core` | `LexicalCodeCore.prod.mjs` |
-| `@lexical/code-prism` | `LexicalCodePrism.prod.mjs` |
 | `@lexical/dragon` | `LexicalDragon.prod.mjs` |
 | `@lexical/extension` | `LexicalExtension.prod.mjs` |
+| `@lexical/history` | `LexicalHistory.prod.mjs` |
 | `@lexical/html` | `LexicalHtml.prod.mjs` |
 | `@lexical/link` | `LexicalLink.prod.mjs` |
 | `@lexical/list` | `LexicalList.prod.mjs` |
