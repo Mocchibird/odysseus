@@ -12,6 +12,7 @@ from core.models import ChatMessage
 from src.request_models import SessionResponse
 from core.database import Session as DbSession, SessionLocal, Document, GalleryImage, utcnow_naive
 from src.auth_helpers import effective_user, _auth_disabled, owner_filter
+from src.session_image_cleanup import _generated_image_path_for_cleanup, session_image_refs
 from src.session_actions import is_session_recently_active
 from src.upload_handler import reserve_message_upload_references
 
@@ -640,13 +641,43 @@ def setup_session_routes(
         db = SessionLocal()
         try:
             from core.database import ChatMessage as DbChatMessage
+            session_ids = [row[0] for row in db.query(DbSession.id).all()]
             count = db.query(DbSession).count()
+            image_ids: set[str] = set()
+            filenames: set[str] = set()
+            for sid in session_ids:
+                ids, names = session_image_refs(db, sid)
+                image_ids.update(ids)
+                filenames.update(names)
+            image_query = db.query(GalleryImage).filter(GalleryImage.session_id.in_(session_ids)) if session_ids else db.query(GalleryImage).filter(False)
+            if image_ids or filenames:
+                from sqlalchemy import or_
+                clauses = []
+                if session_ids:
+                    clauses.append(GalleryImage.session_id.in_(session_ids))
+                if image_ids:
+                    clauses.append(GalleryImage.id.in_(list(image_ids)))
+                if filenames:
+                    clauses.append(GalleryImage.filename.in_(list(filenames)))
+                image_query = db.query(GalleryImage).filter(or_(*clauses))
+            images = image_query.all()
+            removed_images = 0
+            for img in images:
+                img.is_active = False
+                if img.filename:
+                    path = _generated_image_path_for_cleanup(img.filename)
+                    if path and path.exists():
+                        try:
+                            path.unlink()
+                        except Exception as exc:
+                            logger.warning("Could not remove generated image %s during all-session delete: %s", img.filename, exc)
+                removed_images += 1
             db.query(DbChatMessage).delete()
             db.query(DbSession).delete()
             db.commit()
             session_manager.sessions.clear()
-            logger.info(f"Admin deleted all {count} sessions")
-            return {"status": "deleted", "count": count}
+            logger.info(f"Admin deleted all {count} sessions and {removed_images} linked images")
+            return {"status": "deleted", "count": count, "images_deleted": removed_images}
         except Exception as e:
             db.rollback()
             logger.error(f"Error deleting all sessions: {e}")
