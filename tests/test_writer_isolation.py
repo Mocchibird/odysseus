@@ -251,3 +251,18 @@ def test_outline_reuses_the_previous_workspace_prefs_keys():
     src = _read("static/js/writer/outline.js")
     assert "dw_known_tags" in src, "reuse the old workspace's folder memory"
     assert "odysseus-dw-expanded" in src, "reuse the old workspace's expansion state"
+
+
+def test_writer_is_reachable_from_the_expanded_sidebar():
+    """The icon rail only exists while the sidebar is COLLAPSED.
+
+    A rail-only entry meant that with the sidebar expanded — how the app runs by
+    default — the writer had no visible entry point at all, and could only be
+    reached by typing #writer into the URL.
+    """
+    src = _read("static/js/fork-ui.js")
+    assert "tool-writer-btn" in src, "the expanded sidebar needs its own Writer entry"
+    assert "_injectWriterSidebarItem" in src
+    assert "tool-library-btn" in src, "anchor the entry to a stable upstream row"
+    # And the rail entry stays, for when the sidebar IS collapsed.
+    assert "rail-writer" in src

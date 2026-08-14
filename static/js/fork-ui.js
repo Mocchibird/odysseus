@@ -202,7 +202,47 @@ function _initWriter() {
     .catch((e) => console.warn('[fork-ui] writer unavailable:', e));
 }
 
-const _INJECTORS = [_injectApiTokensPanel, _injectEndpointTypeSelect, _injectRailTools, _injectSettingsRows, _markAdminOnlySettings, _initWriter];
+// Sidebar entry. The rail button alone is not enough: the icon rail only exists
+// while the sidebar is COLLAPSED, so with the sidebar expanded — how the app runs
+// by default — the writer had no visible entry point at all.
+function _injectWriterSidebarItem() {
+  const anchor = document.getElementById('tool-library-btn');
+  if (!anchor || document.getElementById('tool-writer-btn')) return;
+  const item = document.createElement('div');
+  item.className = 'list-item';
+  item.id = 'tool-writer-btn';
+  item.innerHTML =
+    '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"'
+    + ' stroke-width="2" stroke-linecap="round" stroke-linejoin="round"'
+    + ' style="flex-shrink:0;opacity:0.5;">'
+    + '<path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>'
+    + '<span class="grow">Writer</span>'
+    + '<button type="button" class="list-item-plus-btn" id="writer-new-doc-btn" title="New document">'
+    + '<svg class="list-item-plus-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"'
+    + ' stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/>'
+    + '<line x1="5" y1="12" x2="19" y2="12"/></svg>'
+    + '<span class="list-item-plus-label">document</span></button>';
+
+  item.addEventListener('click', (ev) => {
+    if (ev.target.closest('#writer-new-doc-btn')) return;   // handled below
+    location.hash = '#writer';
+  });
+  item.querySelector('#writer-new-doc-btn').addEventListener('click', (ev) => {
+    ev.stopPropagation();
+    location.hash = '#writer';
+    // The surface mounts asynchronously on first open; wait for it before asking
+    // for a new document.
+    const start = Date.now();
+    const tryNew = () => {
+      if (window.writerModule && window.writerModule.getEditor()) window.writerModule.newDocument();
+      else if (Date.now() - start < 8000) setTimeout(tryNew, 120);
+    };
+    tryNew();
+  });
+  anchor.insertAdjacentElement('afterend', item);
+}
+
+const _INJECTORS = [_injectApiTokensPanel, _injectEndpointTypeSelect, _injectRailTools, _injectSettingsRows, _markAdminOnlySettings, _injectWriterSidebarItem, _initWriter];
 
 export function injectForkUI() {
   for (const inject of _INJECTORS) {

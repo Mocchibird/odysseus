@@ -1548,7 +1548,10 @@ body.writer-open #model-picker-wrap { display: none; }
   background: color-mix(in srgb, var(--accent-primary, var(--red)) 20%, transparent);
   outline: 1px solid var(--accent-primary, var(--red));
 }
-.writer-folder-name { overflow: hidden; text-overflow: ellipsis; }
+/* Both labels must be their own flex item to be elidable; see outline.js. */
+.writer-folder-name, .writer-file-name {
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
 .writer-folder-count {
   margin-left: auto; font-weight: normal; font-size: 11px;
   color: color-mix(in srgb, var(--fg) 40%, transparent);

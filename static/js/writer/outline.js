@@ -222,7 +222,13 @@ function _fileRow(doc) {
   row.draggable = true;
   row.tabIndex = 0;
   row.title = doc.title || 'Untitled';
-  row.textContent = doc.title || 'Untitled';
+  // Wrap the label: the row is display:flex, so a bare text node becomes an
+  // anonymous flex item and text-overflow:ellipsis never applies to it — long
+  // titles get chopped mid-character at the pane edge instead of elided.
+  const label = document.createElement('span');
+  label.className = 'writer-file-name';
+  label.textContent = doc.title || 'Untitled';
+  row.appendChild(label);
   row.addEventListener('dragstart', (e) => {
     try { e.dataTransfer.setData('text/plain', doc.id); } catch (_) { /* denied */ }
     e.dataTransfer.effectAllowed = 'copy';
