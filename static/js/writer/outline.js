@@ -15,6 +15,8 @@
 //   POST /api/document/{id}/tags?tags=a,b                 -> retag (query param)
 //   GET/PUT /api/prefs/dw_known_tags                      -> folders with no docs
 
+import menus from './menus.js';
+
 const API = '';
 const EXPANDED_KEY = 'odysseus-dw-expanded';   // shared with the old workspace
 
@@ -24,6 +26,9 @@ let _expanded = _loadExpanded();
 let _listSeq = 0;
 let _search = '';
 let _onOpen = () => {};
+let _onDeleted = () => {};
+let _onRenamed = () => {};
+let _onNewInFolder = () => {};
 let _activeId = null;
 let _error = null;
 
@@ -207,6 +212,122 @@ export async function deleteTag(path) {
   render();
 }
 
+/* ── row actions ─────────────────────────────────────────────────────────── */
+
+async function _ui() {
+  try { return await import('../ui.js'); } catch (_) { return null; }
+}
+
+async function _prompt(title, defaultValue, placeholder) {
+  const ui = await _ui();
+  if (ui && ui.styledPrompt) return ui.styledPrompt(title, { defaultValue, placeholder });
+  return window.prompt(title, defaultValue);
+}
+
+async function _confirm(message, { danger = false } = {}) {
+  const ui = await _ui();
+  if (ui && ui.styledConfirm) return ui.styledConfirm(message, { confirmText: 'Delete', danger });
+  return window.confirm(message);
+}
+
+async function _toast(msg) {
+  const ui = await _ui();
+  if (ui && ui.showToast) ui.showToast(msg);
+}
+
+async function renameDoc(doc) {
+  const next = await _prompt('Rename document', doc.title || '', 'Title');
+  const title = (next || '').trim();
+  if (!title || title === doc.title) return;
+  const res = await fetch(`${API}/api/document/${encodeURIComponent(doc.id)}`, {
+    method: 'PATCH',
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ title }),
+  });
+  if (!res.ok) { _toast('Rename failed'); return; }
+  doc.title = title;
+  render();
+  _onRenamed(doc.id, title);
+}
+
+async function duplicateDoc(doc) {
+  // Read the body first: the library row carries metadata, not content.
+  const src = await (await fetch(`${API}/api/document/${encodeURIComponent(doc.id)}`, { credentials: 'same-origin' })).json();
+  const made = await (await fetch(`${API}/api/document`, {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      title: `${src.title || doc.title || 'Untitled'} (copy)`,
+      language: src.language || 'markdown',
+      content: src.current_content != null ? src.current_content : '',
+    }),
+  })).json();
+  // Carry the tags over so the copy lands in the same folder.
+  const tags = Array.isArray(doc.tags) ? doc.tags : [];
+  if (made.id && tags.length) {
+    await fetch(`${API}/api/document/${made.id}/tags?tags=${encodeURIComponent(tags.join(','))}`,
+      { method: 'POST', credentials: 'same-origin' });
+  }
+  await load();
+  _toast('Duplicated');
+}
+
+async function deleteDoc(doc) {
+  const ok = await _confirm(
+    `Delete “${doc.title || 'Untitled'}”? It moves to Trash and can be restored from the Library.`,
+    { danger: true },
+  );
+  if (!ok) return;
+  const res = await fetch(`${API}/api/document/${encodeURIComponent(doc.id)}`, {
+    method: 'DELETE', credentials: 'same-origin',
+  });
+  if (!res.ok) { _toast('Delete failed'); return; }
+  // If the deleted document is the one open in the editor, get off it. The server
+  // refuses edits to a trashed document, so leaving it open would turn every
+  // keystroke into a failed save.
+  _onDeleted(doc.id);
+  await load();
+  _toast('Moved to Trash');
+}
+
+function _fileMenuItems(doc) {
+  const items = [
+    { label: 'Rename', run: () => renameDoc(doc) },
+    { label: 'Duplicate', run: () => duplicateDoc(doc) },
+  ];
+  if ((doc.tags || []).length) {
+    items.push({ label: 'Remove from folders', run: () => assignTag(doc.id, null) });
+  }
+  items.push('sep', { label: 'Delete', danger: true, run: () => deleteDoc(doc) });
+  return items;
+}
+
+function _folderMenuItems(node) {
+  return [
+    { label: 'New document here', run: () => _onNewInFolder(node.fullPath) },
+    { label: 'New subfolder', run: async () => {
+      const name = await _prompt('New subfolder', '', 'Name');
+      if (name) createTag(`${node.fullPath}/${name}`);
+    } },
+    { label: 'Rename folder', run: async () => {
+      const next = await _prompt('Rename folder', node.name, 'Name');
+      if (!next) return;
+      const parent = node.fullPath.split('/').slice(0, -1).join('/');
+      await renameTag(node.fullPath, parent ? `${parent}/${next}` : next);
+    } },
+    'sep',
+    { label: 'Delete folder', danger: true, run: async () => {
+      const ok = await _confirm(
+        `Delete the folder “${node.name}”? The documents stay — only the tag is removed.`,
+        { danger: true },
+      );
+      if (ok) await deleteTag(node.fullPath);
+    } },
+  ];
+}
+
 /* ── rendering ───────────────────────────────────────────────────────────── */
 
 function _chevron(open) {
@@ -237,6 +358,8 @@ function _fileRow(doc) {
   row.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); _onOpen(doc.id); }
   });
+  row.appendChild(menus.actionButton('Document actions',
+    (btn) => menus.openMenu(btn, _fileMenuItems(doc))));
   return row;
 }
 
@@ -254,6 +377,8 @@ function _folderRow(node, depth) {
     _persistExpanded();
     render();
   });
+  row.appendChild(menus.actionButton('Folder actions',
+    (btn) => menus.openMenu(btn, _folderMenuItems(node))));
   _makeDropTarget(row, node.fullPath);
   return row;
 }
@@ -377,7 +502,12 @@ export function setActive(docId) {
   }
 }
 
-export function configure({ onOpen }) { if (onOpen) _onOpen = onOpen; }
+export function configure({ onOpen, onDeleted, onRenamed, onNewInFolder }) {
+  if (onOpen) _onOpen = onOpen;
+  if (onDeleted) _onDeleted = onDeleted;
+  if (onRenamed) _onRenamed = onRenamed;
+  if (onNewInFolder) _onNewInFolder = onNewInFolder;
+}
 
 /** Tags of the open document — the writer header shows them. */
 export function tagsOf(docId) {
@@ -388,4 +518,5 @@ export function tagsOf(docId) {
 export default {
   load, render, setSearch, setActive, configure, assignTag,
   createTag, renameTag, deleteTag, tagsOf,
+  renameDoc, duplicateDoc, deleteDoc,
 };

@@ -1566,6 +1566,41 @@ body.writer-open #model-picker-wrap { display: none; }
 }
 .writer-file:focus-visible { outline: 1px solid var(--accent-primary, var(--red)); outline-offset: -1px; }
 .writer-pane-toggle { flex-shrink: 0; }
+/* Row "…" button: only on hover/focus so the list stays quiet, but always
+   present for touch, where there is no hover to reveal it. */
+.writer-row-actions {
+  margin-left: auto; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  width: 20px; height: 20px; padding: 0;
+  border: none; border-radius: 4px; background: none; cursor: pointer;
+  color: color-mix(in srgb, var(--fg) 55%, transparent);
+  opacity: 0; transition: opacity 0.1s ease;
+}
+.writer-folder:hover .writer-row-actions,
+.writer-file:hover .writer-row-actions,
+.writer-row-actions:focus-visible { opacity: 1; }
+.writer-row-actions:hover { background: color-mix(in srgb, var(--fg) 14%, transparent); color: var(--fg); }
+/* The count would collide with the button, so it steps aside on hover. */
+.writer-folder:hover .writer-folder-count { display: none; }
+@media (hover: none) and (pointer: coarse) {
+  .writer-row-actions { opacity: 0.75; }
+}
+/* Body-appended action menu. Panel/border vars only — no new palette. */
+.writer-menu {
+  min-width: 170px; padding: 4px;
+  display: flex; flex-direction: column; gap: 1px;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+}
+.writer-menu-item {
+  display: block; width: 100%; text-align: left;
+  padding: 6px 10px; border: none; border-radius: 6px; background: none;
+  font: inherit; font-size: 12px; color: var(--fg); cursor: pointer;
+  white-space: nowrap;
+}
+.writer-menu-item:hover { background: color-mix(in srgb, var(--fg) 10%, transparent); }
+.writer-menu-item.danger { color: var(--accent-primary, var(--red)); }
+.writer-menu-sep { height: 1px; margin: 3px 2px; background: var(--border); }
 @media (max-width: 768px) {
   /* One column at a time on a phone: the list overlays the editor rather than
      squeezing it into an unusable strip. */

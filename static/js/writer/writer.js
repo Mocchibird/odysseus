@@ -241,7 +241,18 @@ export async function open(docId = null) {
     try {
       _editor = await _mountEditor(el.querySelector('#writer-editor'));
       store.configure({ getContent: getMarkdown, onState: _status });
-      outline.configure({ onOpen: openDoc });
+      outline.configure({
+        onOpen: openDoc,
+        // Deleting the OPEN document: the server refuses edits to a trashed doc,
+        // so staying on it would turn every keystroke into a failed save.
+        onDeleted: (id) => { if (id === store.currentDocId()) newDocument(); },
+        onRenamed: (id, title) => {
+          if (id !== store.currentDocId()) return;
+          const el = document.getElementById('writer-title');
+          if (el) el.value = title;
+        },
+        onNewInFolder: (tagPath) => newDocument({ tag: tagPath }),
+      });
     } catch (err) {
       _status(store.State.ERROR, err);
       console.error('[writer] mount failed', err);
@@ -278,11 +289,17 @@ export async function open(docId = null) {
   _editor.focus();
 }
 
-export async function newDocument() {
+export async function newDocument({ tag = '' } = {}) {
   await store.flush();
   store.reset();
   try {
     const doc = await store.create();
+    // "New document here" should land in the folder you clicked, not Untagged.
+    if (tag) {
+      await fetch(`/api/document/${encodeURIComponent(doc.id)}/tags?tags=${encodeURIComponent(tag)}`,
+        { method: 'POST', credentials: 'same-origin' })
+        .catch((e) => console.warn('[writer] could not tag the new document:', e));
+    }
     _applyDoc(doc);
     await outline.load();
     outline.setActive(doc.id);

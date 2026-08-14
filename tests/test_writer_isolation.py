@@ -266,3 +266,51 @@ def test_writer_is_reachable_from_the_expanded_sidebar():
     assert "tool-library-btn" in src, "anchor the entry to a stable upstream row"
     # And the rail entry stays, for when the sidebar IS collapsed.
     assert "rail-writer" in src
+
+
+def test_row_menus_remove_themselves_on_close():
+    """bindMenuDismiss invokes the callback; it does NOT touch the DOM.
+
+    The documented idiom is bindMenuDismiss(popup, () => popup.remove()). Omitting
+    the remove leaked a menu element into <body> on every open, and the next menu
+    opened behind the stale one.
+    """
+    src = _read("static/js/writer/menus.js")
+    assert "menu.remove()" in src, "onClose must remove the menu node"
+
+
+def test_row_menu_outside_predicate_reads_the_event():
+    """isOutside is called with the EVENT, not the target element."""
+    src = _read("static/js/writer/menus.js")
+    assert "ev.target" in src, "isOutside receives an event; use ev.target"
+
+
+def test_row_menus_reuse_the_apps_dismiss_stack():
+    """Escape and click-away should behave like every other popover in the app."""
+    src = _read("static/js/writer/menus.js")
+    assert "escMenuStack" in src
+    assert "bindMenuDismiss" in src and "topPopupZ" in src
+
+
+def test_action_button_does_not_trigger_the_row():
+    """The '…' sits inside a row whose click opens/expands it."""
+    src = _read("static/js/writer/menus.js")
+    assert "stopPropagation" in src
+
+
+def test_deleting_the_open_document_switches_away():
+    """The server refuses edits to a trashed document.
+
+    Staying on it would turn every keystroke into a failed save, so deleting the
+    open document must move the editor to a fresh one.
+    """
+    src = _read("static/js/writer/writer.js")
+    assert "onDeleted" in src
+    assert "if (id === store.currentDocId()) newDocument();" in src
+
+
+def test_duplicate_carries_tags_so_the_copy_stays_in_its_folder():
+    src = _read("static/js/writer/outline.js")
+    dup = src.split("async function duplicateDoc", 1)[1].split("\nasync function", 1)[0]
+    assert "/tags?tags=" in dup, "a copy should land in the same folder as its original"
+    assert "current_content" in dup, "the library row has no body; read the document"
