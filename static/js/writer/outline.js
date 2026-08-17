@@ -16,11 +16,14 @@
 //   GET/PUT /api/prefs/dw_known_tags                      -> folders with no docs
 
 import menus from './menus.js';
+import db from './localdb.js';
+import sync from './sync.js';
 
 const API = '';
 const EXPANDED_KEY = 'odysseus-dw-expanded';   // shared with the old workspace
 
 let _docs = [];
+let _offline = false;   // showing the local mirror because the refresh failed
 let _knownTags = [];
 let _expanded = _loadExpanded();
 let _listSeq = 0;
@@ -110,7 +113,23 @@ function _countNode(node) {
 
 /* ── retagging ───────────────────────────────────────────────────────────── */
 
+/**
+ * Retag local-first: the change shows immediately and survives being offline.
+ *
+ * The tags op is queued even for a document that has no server id yet — the
+ * create does NOT carry tags, and sync's rekey repoints the queued op at the real
+ * id, so this is the only thing that gets a folder assignment to the server for a
+ * document written offline.
+ */
 async function _postTags(doc, next) {
+  if (await db.available()) {
+    doc.tags = next.slice();
+    await db.patchDoc(doc.id, { tags: next.slice(), touchedAt: Date.now() });
+    await db.enqueue(doc.id, 'tags', next.slice());
+    sync.refresh();
+    sync.flush();
+    return doc.tags;
+  }
   // NOTE: this endpoint takes tags as a QUERY param, not a JSON body.
   const res = await fetch(
     `${API}/api/document/${encodeURIComponent(doc.id)}/tags?tags=${encodeURIComponent(next.join(','))}`,
@@ -239,6 +258,18 @@ async function renameDoc(doc) {
   const next = await _prompt('Rename document', doc.title || '', 'Title');
   const title = (next || '').trim();
   if (!title || title === doc.title) return;
+
+  if (await db.available()) {
+    await db.patchDoc(doc.id, { title, touchedAt: Date.now() });
+    // A document with no server id yet has its title carried by the create.
+    if (!db.isLocalId(doc.id)) await db.enqueue(doc.id, 'title', title);
+    doc.title = title;
+    render();
+    _onRenamed(doc.id, title);
+    sync.refresh();
+    sync.flush();
+    return;
+  }
   const res = await fetch(`${API}/api/document/${encodeURIComponent(doc.id)}`, {
     method: 'PATCH',
     credentials: 'same-origin',
@@ -251,21 +282,53 @@ async function renameDoc(doc) {
   _onRenamed(doc.id, title);
 }
 
+/** The body, from the local cache if we hold it, else from the server. */
+async function _bodyOf(doc) {
+  if (await db.available()) {
+    const row = await db.getDoc(doc.id);
+    if (row && !row.stub && row.content !== undefined) return row.content ?? '';
+  }
+  // The library row carries metadata, not content — the body needs its own read.
+  const res = await fetch(`${API}/api/document/${encodeURIComponent(doc.id)}`, { credentials: 'same-origin' });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return (await res.json()).current_content ?? '';
+}
+
 async function duplicateDoc(doc) {
-  // Read the body first: the library row carries metadata, not content.
-  const src = await (await fetch(`${API}/api/document/${encodeURIComponent(doc.id)}`, { credentials: 'same-origin' })).json();
+  let content;
+  try {
+    content = await _bodyOf(doc);
+  } catch (_) {
+    // Only reachable offline for a document whose body was never cached.
+    _toast('Open this document once while connected before duplicating it');
+    return;
+  }
+  const title = `${doc.title || 'Untitled'} (copy)`;
+  const tags = Array.isArray(doc.tags) ? doc.tags.slice() : [];
+
+  if (await db.available()) {
+    // Local-first, so duplicating works offline and is instant online.
+    const id = db.newLocalId();
+    await db.putDoc({
+      id, title, content, tags,
+      updated_at: null, base_content: '', dirty: 1, localOnly: 1, deleted: 0, stub: 0,
+      touchedAt: Date.now(),
+    });
+    await db.enqueue(id, 'create');
+    if (tags.length) await db.enqueue(id, 'tags', tags);
+    sync.refresh();
+    sync.flush();
+    await load();
+    _toast('Duplicated');
+    return;
+  }
+
   const made = await (await fetch(`${API}/api/document`, {
     method: 'POST',
     credentials: 'same-origin',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      title: `${src.title || doc.title || 'Untitled'} (copy)`,
-      language: src.language || 'markdown',
-      content: src.current_content != null ? src.current_content : '',
-    }),
+    body: JSON.stringify({ title, language: 'markdown', content }),
   })).json();
-  // Carry the tags over so the copy lands in the same folder.
-  const tags = Array.isArray(doc.tags) ? doc.tags : [];
   if (made.id && tags.length) {
     await fetch(`${API}/api/document/${made.id}/tags?tags=${encodeURIComponent(tags.join(','))}`,
       { method: 'POST', credentials: 'same-origin' });
@@ -280,13 +343,25 @@ async function deleteDoc(doc) {
     { danger: true },
   );
   if (!ok) return;
+
+  if (await db.available()) {
+    await db.patchDoc(doc.id, { deleted: 1, touchedAt: Date.now() });
+    await db.enqueue(doc.id, 'delete');
+    // If the deleted document is the one open in the editor, get off it. The
+    // server refuses edits to a trashed document, so leaving it open would turn
+    // every keystroke into a failed save.
+    _onDeleted(doc.id);
+    _docs = _docs.filter((d) => d.id !== doc.id);
+    render();
+    sync.refresh();
+    sync.flush();
+    _toast('Moved to Trash');
+    return;
+  }
   const res = await fetch(`${API}/api/document/${encodeURIComponent(doc.id)}`, {
     method: 'DELETE', credentials: 'same-origin',
   });
   if (!res.ok) { _toast('Delete failed'); return; }
-  // If the deleted document is the one open in the editor, get off it. The server
-  // refuses edits to a trashed document, so leaving it open would turn every
-  // keystroke into a failed save.
   _onDeleted(doc.id);
   await load();
   _toast('Moved to Trash');
@@ -350,6 +425,22 @@ function _fileRow(doc) {
   label.className = 'writer-file-name';
   label.textContent = doc.title || 'Untitled';
   row.appendChild(label);
+
+  // Unsynced work is visible at a glance rather than only in the header, so you
+  // can see which documents still owe the server a write before closing the lid.
+  if (doc.unsynced) {
+    const dot = document.createElement('span');
+    dot.className = 'writer-file-dot';
+    dot.title = 'Saved on this device, not yet synced';
+    dot.setAttribute('aria-label', 'not yet synced');
+    row.appendChild(dot);
+  }
+  // Offline, a document whose body was never cached cannot be opened. Say so up
+  // front instead of letting the click fail.
+  if (doc.stub && navigator.onLine === false) {
+    row.classList.add('writer-file-remote');
+    row.title = `${doc.title || 'Untitled'} — not available offline`;
+  }
   row.addEventListener('dragstart', (e) => {
     try { e.dataTransfer.setData('text/plain', doc.id); } catch (_) { /* denied */ }
     e.dataTransfer.effectAllowed = 'copy';
@@ -438,6 +529,12 @@ export function render() {
     list.appendChild(err);
     return;
   }
+  if (_offline && list.childElementCount) {
+    const note = document.createElement('div');
+    note.className = 'writer-list-note';
+    note.textContent = 'Offline — showing documents saved on this device';
+    list.appendChild(note);
+  }
   if (!list.childElementCount) {
     const empty = document.createElement('div');
     empty.className = 'writer-list-empty';
@@ -454,8 +551,33 @@ export function render() {
 const PAGE = 50;
 const PAGE_CAP = 40;   // 2000 documents
 
+/** A local row, in the shape the tree and rows expect. */
+const _rowToDoc = (row) => ({
+  id: row.id,
+  title: row.title || 'Untitled',
+  tags: Array.isArray(row.tags) ? row.tags : [],
+  updated_at: row.updated_at || null,
+  unsynced: !!row.dirty || !!row.localOnly,
+  stub: !!row.stub,
+});
+
 export async function load() {
   const seq = ++_listSeq;
+  const local = await db.available();
+
+  // Paint from the local mirror first: instant, and offline it is the whole list.
+  // A document created offline exists ONLY here, so this is not merely a cache
+  // warm-up — skipping it would hide your newest work.
+  if (local) {
+    const rows = await db.allDocs();
+    if (seq !== _listSeq) return;
+    if (rows.length) {
+      _docs = rows.map(_rowToDoc);
+      _error = null;
+      render();
+    }
+  }
+
   try {
     const known = _knownTags.length ? _knownTags : await _loadKnownTags();
     if (seq !== _listSeq) return;
@@ -478,12 +600,30 @@ export async function load() {
     }
 
     _knownTags = known;
-    _docs = all;
+    if (local) {
+      // Fold the server's metadata into the mirror, then read the mirror back —
+      // the union is what we show, so documents that exist only locally (created
+      // offline, not yet synced) are not dropped by a refresh.
+      await db.mergeListRows(all);
+      if (seq !== _listSeq) return;
+      _docs = (await db.allDocs()).map(_rowToDoc);
+      if (seq !== _listSeq) return;
+    } else {
+      _docs = all;
+    }
     _error = null;
+    _offline = false;
     render();
   } catch (e) {
     if (seq !== _listSeq) return;
     console.error('[writer] failed to load the document list', e);
+    if (local && _docs.length) {
+      // We have a local list to show. This is a sync problem, not an empty
+      // library — say so in the footer instead of replacing the list with an error.
+      _offline = true;
+      render();
+      return;
+    }
     // Show it. An empty list that is actually a failed request is the worst of
     // both worlds — it reads as "you have no documents".
     _error = e && e.message ? e.message : 'could not load documents';

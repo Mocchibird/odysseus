@@ -149,13 +149,13 @@ def test_store_uses_only_existing_document_endpoints():
 
 
 def test_store_serialises_overlapping_saves():
-    """Two PUTs racing for one document can land out of order.
+    """Two writes racing for one document can land out of order.
 
     The store must queue a save requested while one is in flight and re-run it
     afterwards, so the last keystroke wins.
     """
     src = _read("static/js/writer/store.js")
-    assert "_inFlight" in src and "_pendingWhileInFlight" in src
+    assert "_writing" in src and "_pendingWhileWriting" in src
 
 
 def test_store_trusts_the_server_echo_not_the_local_copy():
@@ -312,5 +312,263 @@ def test_deleting_the_open_document_switches_away():
 def test_duplicate_carries_tags_so_the_copy_stays_in_its_folder():
     src = _read("static/js/writer/outline.js")
     dup = src.split("async function duplicateDoc", 1)[1].split("\nasync function", 1)[0]
-    assert "/tags?tags=" in dup, "a copy should land in the same folder as its original"
-    assert "current_content" in dup, "the library row has no body; read the document"
+    assert "tags" in dup, "a copy should land in the same folder as its original"
+    # The library row carries no body, so the copy has to read the document —
+    # from the local cache when we hold it, otherwise over the network.
+    body = src.split("async function _bodyOf", 1)[1].split("\nasync function", 1)[0]
+    assert "current_content" in body, "the library row has no body; read the document"
+    assert "row.stub" in body, "a metadata-only stub is not a usable body"
+
+
+# ── offline mode ─────────────────────────────────────────────────────────────
+#
+# The rule every guard below protects: text you typed is never lost. Offline
+# support multiplies the ways it could be — a stale id, a resurrected delete, a
+# stub mistaken for a cached body, two devices editing at once — so each of those
+# gets pinned here.
+
+
+def test_a_list_stub_is_never_opened_as_a_cached_document():
+    """The library list has metadata but NO body.
+
+    Treating such a row as a cached document would show an EMPTY editor and then
+    autosave that emptiness over the real text — silent data loss on the worst
+    possible path (just opening a document).
+    """
+    store = _read("static/js/writer/store.js")
+    assert "row.stub" in store, "store.load must reject a stub as a local copy"
+    assert "!row.stub" in store
+    db = _read("static/js/writer/localdb.js")
+    merge = db.split("async function _mergeOne", 1)[1].split("\nexport ", 1)[0]
+    assert "content:" not in merge, (
+        "merging list metadata must never write `content` — it would overwrite a "
+        "cached body with nothing"
+    )
+
+
+def test_a_queued_delete_is_not_resurrected_by_a_list_refresh():
+    """The server still lists a document until our queued delete reaches it."""
+    db = _read("static/js/writer/localdb.js")
+    merge = db.split("async function _mergeOne", 1)[1].split("\nexport ", 1)[0]
+    assert "cur.deleted" in merge, "a pending local delete outranks server metadata"
+
+
+def test_unsynced_local_edits_outrank_a_background_refresh():
+    """A refresh must never yank text out from under the person typing."""
+    store = _read("static/js/writer/store.js")
+    refresh = store.split("async function _refreshInBackground", 1)[1].split("\n/*", 1)[0]
+    assert "row.dirty" in refresh, "a dirty local row must not be overwritten"
+    assert "_docId" in refresh, "the user may have switched documents mid-request"
+
+
+def test_conflicts_park_the_other_version_before_overwriting():
+    """Order is the whole safety property here.
+
+    Our text wins in place, but the server's divergent version must be saved
+    FIRST — if parking fails we have to abort and keep the op queued, or the other
+    device's writing is gone.
+    """
+    src = _read("static/js/writer/sync.js")
+    content = src.split("async function _runContent", 1)[1].split("\nasync function", 1)[0]
+    assert content.index("_parkConflict") < content.index("_putContent("), (
+        "park the server's version before overwriting it"
+    )
+    assert "await _parkConflict" in content, "a failed park must abort the write"
+    assert "serverMoved" in content and "base_content" in content, (
+        "a real conflict needs a three-way comparison, not just 'they differ'"
+    )
+
+
+def test_sync_trusts_the_server_echo_as_the_new_base():
+    """The server can coerce a body; recording ours would fake a conflict forever."""
+    src = _read("static/js/writer/sync.js")
+    assert "saved.current_content ?? ours" in src
+
+
+def test_unsynced_text_for_a_vanished_document_is_recovered_not_dropped():
+    """404 means deleted or trashed elsewhere. We still hold text for it.
+
+    Re-creating it in place would resurrect something deliberately deleted, so it
+    lands in a clearly named new document instead — but it is never just dropped.
+    """
+    src = _read("static/js/writer/sync.js")
+    assert "_recoverOrphan" in src
+    recover = src.split("async function _recoverOrphan", 1)[1].split("\nasync function", 1)[0]
+    assert "recovered" in recover, "the recovered copy should say what it is"
+    assert "_onNotice" in recover, "silently recovering is nearly as bad as losing it"
+
+
+def test_create_rekeys_before_dropping_folded_ops():
+    """Dropping first would strand the ops that still need the new id."""
+    src = _read("static/js/writer/sync.js")
+    create = src.split("async function _runCreate", 1)[1].split("\nasync function", 1)[0]
+    assert create.index("rekeyDoc") < create.index("dropOpsOfType"), (
+        "rekey first, or queued tags/delete ops point at an id that no longer exists"
+    )
+    # Typing continues while the POST is in flight; that text has to be re-queued.
+    assert "nowContent" in create and "enqueue" in create, (
+        "content typed during the create must still be pushed"
+    )
+
+
+def test_sync_rereads_each_op_before_running_it():
+    """Running an op can drop or repoint others, so the snapshot goes stale."""
+    src = _read("static/js/writer/sync.js")
+    assert "db.getOp(stale.seq)" in src, "re-read each op instead of trusting the snapshot"
+
+
+def test_sync_preserves_per_document_ordering_without_wedging_the_queue():
+    """A failed op must not let a later op for the SAME document overtake it —
+    and must not stop unrelated documents from syncing."""
+    src = _read("static/js/writer/sync.js")
+    drain = src.split("async function _drain", 1)[1].split("\n/**", 1)[0]
+    assert "blocked" in drain and "continue" in drain
+
+
+def test_sync_takes_a_cross_tab_lock():
+    """Two tabs draining the same queue would double-write."""
+    src = _read("static/js/writer/sync.js")
+    assert "navigator.locks" in src
+    assert "ifAvailable" in src, "the second tab should skip, not queue behind the first"
+
+
+def test_sync_stops_the_pass_when_not_signed_in():
+    """Every remaining op would fail the same way; keep the queue for after login."""
+    src = _read("static/js/writer/sync.js")
+    assert "401" in src and "authRequired" in src
+
+
+def test_the_local_lane_degrades_to_server_only():
+    """Private modes can refuse IndexedDB. That must not stop you editing."""
+    db = _read("static/js/writer/localdb.js")
+    assert "export async function available" in db
+    store = _read("static/js/writer/store.js")
+    assert "_localReady" in store and "_saveToServer" in store, (
+        "with no IndexedDB the writer must fall back to talking straight to the server"
+    )
+
+
+def test_save_state_and_sync_state_are_separate():
+    """"Saved" means durable on this device; syncing is a different question.
+
+    Merging them would either claim a save that only reached the network, or nag
+    about the network when nothing is at risk.
+    """
+    src = _read("static/js/writer/writer.js")
+    assert "_syncStatus" in src and "_status" in src
+    assert "writer-sync" in _read("static/fork.css")
+
+
+def test_the_offline_shell_is_warmed_from_the_page_not_precached():
+    """sw.js deliberately does not precache the editor (~490 KB).
+
+    Warming its cache from the page keeps that decision AND keeps sw.js — an
+    upstream file — free of writer entries.
+    """
+    sync_src = _read("static/js/writer/sync.js")
+    assert "warmShell" in sync_src
+    assert "caches.keys()" in sync_src, "find the worker's live cache, don't guess its name"
+    assert "odysseus-v" in sync_src, "the cache name pattern is the coupling point"
+    sw = _read("static/sw.js")
+    for needle in ("writer.html", "writer/localdb.js", "writer/sync.js", "writer/standalone.js"):
+        assert needle not in sw, f"sw.js must not reference {needle!r}"
+
+
+def test_standalone_page_has_no_inline_script():
+    """Static files get no {{CSP_NONCE}} substitution.
+
+    script-src is 'self' plus a nonce, so an inline <script> in a statically
+    served page is silently blocked and the page just never boots.
+    """
+    import re
+
+    # Strip comments first — the file's own commentary explains this rule and
+    # mentions the tag, which a naive scan reads as a violation.
+    html = re.sub(r"<!--.*?-->", "", _read("static/writer.html"), flags=re.DOTALL)
+
+    for m in re.finditer(r"<script\b([^>]*)>", html):
+        assert "src=" in m.group(1), (
+            "writer.html must not contain an inline <script> — it is served by "
+            "StaticFiles, which does not substitute the CSP nonce"
+        )
+    assert "{{CSP_NONCE}}" not in html, "a static file never gets the nonce substituted"
+
+
+def test_standalone_page_versions_match_index_html():
+    """A versioned URL is served `immutable` and skips revalidation.
+
+    If these drift from index.html the standalone page fetches its own copies of
+    style.css/fork.css instead of reusing the ones already cached.
+    """
+    import re
+
+    def tokens(rel, name):
+        return set(re.findall(rf"{re.escape(name)}\?v=(\d+)", _read(rel)))
+
+    for asset in ("style.css", "fork.css"):
+        assert tokens("static/writer.html", asset) == tokens("static/index.html", asset), (
+            f"{asset} version in writer.html must match index.html"
+        )
+
+
+def test_standalone_page_is_not_referenced_by_upstream_files():
+    """It is a fork-only entry; upstream must not learn about it."""
+    for rel in ("static/index.html", "static/app.js", "static/sw.js"):
+        assert "writer.html" not in _read(rel), f"{rel} must not reference writer.html"
+
+
+def test_standalone_boot_reuses_the_same_writer_modules():
+    """Two copies of the editor would mean two IndexedDB writers and split state."""
+    src = _read("static/js/writer/standalone.js")
+    assert "'./writer.js'" in src, "import the shared module, don't fork the surface"
+    assert "serviceWorker" in src, "the standalone page registers the worker itself"
+
+
+def test_sync_claims_the_pass_before_its_first_await():
+    """Found in the browser: two flushes both passed the `_syncing` guard.
+
+    The flag used to be set after `await db.available()`, so a second flush could
+    slip through while the first was still awaiting. The Web Lock kept them from
+    double-writing, but the loser's pass became a silent no-op that recorded no
+    retry — so a just-enqueued op sat unsent until the next 30s poll.
+    """
+    src = _read("static/js/writer/sync.js")
+    body = src.split("export async function flush(", 1)[1].split("\n}", 1)[0]
+    claim = body.index("_syncing = true")
+    first_await = body.index("await ")
+    assert claim < first_await, "claim _syncing synchronously, before any await"
+
+
+def test_a_flush_requested_during_a_pass_is_not_dropped():
+    """An op enqueued mid-pass is not in that pass's snapshot."""
+    src = _read("static/js/writer/sync.js")
+    assert "_flushAgain" in src
+    # And the deferred request keeps its own `force`: an `online` event downgraded
+    # to a backoff-gated retry is the same silent delay all over again.
+    assert "_flushAgainForce" in src
+
+
+def test_user_initiated_pushes_bypass_the_retry_backoff():
+    """The backoff is global.
+
+    One document whose op keeps failing must not hold back every other document's
+    first sync — creating a document would otherwise sit unsynced for the length of
+    an unrelated failure's backoff.
+    """
+    src = _read("static/js/writer/store.js")
+    assert "_schedulePush(0, { force: true })" in src, (
+        "direct user actions should push past the backoff"
+    )
+    # Typing-driven pushes stay unforced — they repeat constantly.
+    assert "_schedulePush();" in src
+
+
+def test_offline_list_shows_local_documents_rather_than_an_error():
+    """A document created offline exists ONLY locally.
+
+    Replacing the list with a load error would hide the user's newest work.
+    """
+    src = _read("static/js/writer/outline.js")
+    assert "db.allDocs()" in src, "paint from the local mirror first"
+    assert "mergeListRows" in src, "the server list folds into the mirror, it does not replace it"
+    assert "_offline" in src and "writer-list-note" in src

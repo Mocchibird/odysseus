@@ -1499,6 +1499,23 @@ body.writer-open #model-picker-wrap { display: none; }
 }
 .writer-status { font-size: 11px; color: color-mix(in srgb, var(--fg) 45%, transparent); }
 .writer-status-error { color: var(--accent-primary, var(--red)); }
+/* Sync indicator — a separate axis from the save status beside it: that one says
+   "durable on this device", this one says "the server has it". Hidden entirely
+   when there is nothing to report, so a lit indicator always means something. */
+.writer-sync {
+  flex-shrink: 0;
+  padding: 2px 7px; border: 1px solid var(--border); border-radius: 4px;
+  background: none; font: inherit; font-size: 11px; cursor: pointer;
+  color: color-mix(in srgb, var(--fg) 55%, transparent);
+}
+.writer-sync:hover { background: color-mix(in srgb, var(--fg) 8%, transparent); color: var(--fg); }
+.writer-sync-warn {
+  color: var(--accent-primary, var(--red));
+  border-color: color-mix(in srgb, var(--accent-primary, var(--red)) 45%, var(--border));
+}
+/* [hidden] loses to the display above without this — the same trap the rest of
+   this file already documents for flex rows. */
+.writer-sync[hidden] { display: none; }
 /* Push the button cluster right; the status sits next to the title. */
 .writer-head #writer-new { margin-left: auto; }
 /* Two panes: document list | editor. A CSS grid whose first track collapses to
@@ -1565,6 +1582,18 @@ body.writer-open #model-picker-wrap { display: none; }
   color: var(--fg);
 }
 .writer-file:focus-visible { outline: 1px solid var(--accent-primary, var(--red)); outline-offset: -1px; }
+/* "Saved here, not on the server yet." flex-shrink:0 or the dot is squeezed to a
+   sliver next to a long title. */
+.writer-file-dot {
+  flex-shrink: 0; width: 5px; height: 5px; border-radius: 50%;
+  background: var(--accent-primary, var(--red));
+}
+/* Offline and never cached: visibly not openable, rather than a click that fails. */
+.writer-file-remote { opacity: 0.45; }
+.writer-list-note {
+  padding: 8px 10px 2px; font-size: 11px;
+  color: color-mix(in srgb, var(--fg) 40%, transparent);
+}
 .writer-pane-toggle { flex-shrink: 0; }
 /* Row "…" button: only on hover/focus so the list stays quiet, but always
    present for touch, where there is no hover to reveal it. */

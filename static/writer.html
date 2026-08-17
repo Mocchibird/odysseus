@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Writer — Odysseus</title>
+
+  <!--
+    FORK-ONLY. A standalone entry for the writing surface, deliberately NOT the
+    SPA at "/".
+
+    WHY THIS FILE EXISTS — two reasons, both about opening fast:
+
+    1. Service worker caching. sw.js serves /static/*.js|css network-first, but
+       ANY OTHER path under /static/ cache-FIRST (see its third fetch branch, and
+       the comment there that anticipates deep-linked /static/*.html pages). So
+       this page and the vendored editor .mjs files come straight out of the cache
+       — no network round trip, and it opens with no connection at all.
+    2. Weight. The SPA boots chat, sessions, email, calendar, gallery and the rest
+       before it can show you anything. This page loads the editor and nothing else.
+
+    CONSTRAINTS, both easy to break:
+      * NO INLINE SCRIPT. Static files are served by StaticFiles, which does not
+        substitute {{CSP_NONCE}}, and the app's CSP is script-src 'self' 'nonce-…'.
+        An inline <script> here is silently blocked. Inline <style> IS allowed
+        (style-src keeps 'unsafe-inline'), which is why the boot paint below is CSS.
+      * The ?v= tokens must match index.html's. A versioned URL is served
+        `immutable`, so it resolves from the HTTP cache with no revalidation; an
+        un-versioned one is `no-cache` and costs a conditional request. They are
+        part of the repo's cache-busting cascade — bump them with the rest.
+      * /static is in AUTH_EXEMPT_PREFIXES, so this page is served without a
+        session. That is fine and matches index.html: the page is a shell, and
+        every byte of document data behind it comes from authenticated /api calls.
+  -->
+
+  <link rel="manifest" href="/static/writer-manifest.json">
+  <meta name="theme-color" content="#282c34">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <link rel="apple-touch-icon" href="/static/icons/icon-192.png">
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M16 4L16 22L6 22Z' fill='%23e06c75'/%3E%3Cpath d='M16 8L16 22L24 22Z' fill='%23e06c75' opacity='0.6'/%3E%3Cpath d='M4 24Q10 20 16 24Q22 28 28 24' stroke='%23e06c75' stroke-width='2.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E">
+
+  <link rel="stylesheet" href="/static/style.css?v=561">
+  <!-- FORK: loaded after style.css so style.css stays aligned with upstream. -->
+  <link rel="stylesheet" href="/static/fork.css?v=561">
+  <link rel="modulepreload" href="/static/js/writer/standalone.js?v=561">
+
+  <style>
+    /* Paint the dark ground before any module runs, so a slow first load is a
+       calm empty surface rather than a white flash. Values fall back to the
+       theme's own variables once style.css has applied. */
+    html, body {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      background: var(--bg, #282c34);
+      color: var(--fg, #abb2bf);
+    }
+    #writer-boot {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+      font-family: 'Fira Code', ui-monospace, monospace;
+      font-size: 0.8rem;
+      opacity: 0.55;
+    }
+    #writer-boot[hidden] { display: none; }
+  </style>
+</head>
+<body>
+  <div id="writer-boot">Opening the writer…</div>
+  <script type="module" src="/static/js/writer/standalone.js?v=561"></script>
+</body>
+</html>

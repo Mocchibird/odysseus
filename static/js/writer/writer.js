@@ -21,6 +21,8 @@
 import blocks from './blocks.js';
 import store from './store.js';
 import outline from './outline.js';
+import sync from './sync.js';
+import db from './localdb.js';
 
 const V = '../../vendor/lexical';
 const PANE_KEY = 'odysseus.writer.listHidden';
@@ -82,6 +84,8 @@ function _buildShell() {
       <input type="text" id="writer-title" class="writer-title-input"
              placeholder="Untitled" spellcheck="false" autocomplete="off">
       <span class="writer-status" id="writer-status"></span>
+      <button type="button" class="writer-sync" id="writer-sync" hidden
+              title="Sync status — click to retry now"></button>
       <button type="button" class="memory-toolbar-btn" id="writer-new" title="New document">New</button>
       <button type="button" class="memory-toolbar-btn" id="writer-close" title="Close">Close</button>
     </div>
@@ -104,6 +108,9 @@ function _buildShell() {
 
   el.querySelector('#writer-close').addEventListener('click', () => close());
   el.querySelector('#writer-new').addEventListener('click', () => newDocument());
+  // Clicking the indicator retries immediately — `force` because the backoff was
+  // computed while things were failing and the user is telling us to try anyway.
+  el.querySelector('#writer-sync').addEventListener('click', () => sync.flush({ force: true }));
 
   // The list is a pane, not a modal: hidden state persists so the surface opens
   // the way you left it.
@@ -160,6 +167,46 @@ function _status(state, err) {
     el.classList.toggle('writer-status-error', state === store.State.ERROR);
   }
   window.__writer = { ...(window.__writer || {}), state, docId: store.currentDocId() };
+}
+
+/**
+ * Sync status — a SEPARATE axis from the save status above.
+ *
+ * "saved" means the text is durable on this device; this says whether the server
+ * has it. Merging the two would either claim a save that only reached the network
+ * or nag about the network when nothing is actually at risk. Stays silent when
+ * everything is synced: an indicator that is always lit is not an indicator.
+ */
+function _syncStatus(s) {
+  const el = document.getElementById('writer-sync');
+  if (!el) return;
+  let label = '';
+  let bad = false;
+  if (s.authRequired) { label = 'sign in to sync'; bad = true; }
+  else if (s.syncing) label = 'syncing…';
+  else if (!s.online) label = s.queued ? `offline · ${s.queued} queued` : 'offline';
+  else if (s.queued) { label = `${s.queued} queued`; bad = !!s.lastError; }
+  el.textContent = label;
+  el.hidden = !label;
+  el.classList.toggle('writer-sync-warn', bad);
+  el.title = s.lastError
+    ? `${s.queued} change(s) waiting — last error: ${s.lastError}. Click to retry now.`
+    : 'Sync status — click to retry now';
+  window.__writer = { ...(window.__writer || {}), sync: s };
+}
+
+/**
+ * Tell the user something that must not be missed — a conflict copy was made, or
+ * unsynced text was recovered under a new name. Falls back to console only if the
+ * app's toast helper cannot be loaded; these messages are about their data, so
+ * they are never silently dropped.
+ */
+async function _notify(msg) {
+  try {
+    const ui = await import('../ui.js');
+    if (ui.showToast) { ui.showToast(msg); return; }
+  } catch (_) { /* fall through */ }
+  console.warn('[writer]', msg);
 }
 
 async function _mountEditor(host) {
@@ -240,7 +287,28 @@ export async function open(docId = null) {
   if (!_editor) {
     try {
       _editor = await _mountEditor(el.querySelector('#writer-editor'));
-      store.configure({ getContent: getMarkdown, onState: _status });
+      store.configure({
+        getContent: getMarkdown,
+        onState: _status,
+        // A background refresh found newer server content for the open document
+        // (and store only calls this when the local copy was clean, so nothing
+        // you typed is being replaced).
+        onServerUpdate: (doc) => { _applyDoc(doc); },
+      });
+      sync.configure({
+        onState: _syncStatus,
+        onRekey: (oldId, newId) => {
+          store.adoptId(oldId, newId);
+          // The URL still points at the local id; repoint it so a reload finds
+          // the document that now exists.
+          if (String(location.hash) === `#writer=${encodeURIComponent(oldId)}`) {
+            history.replaceState(null, '', `${location.pathname}${location.search}#writer=${encodeURIComponent(newId)}`);
+          }
+          outline.setActive(store.currentDocId());
+        },
+        onListChanged: () => { outline.load().then(() => outline.setActive(store.currentDocId())); },
+        onNotice: (msg) => { _notify(msg); },
+      });
       outline.configure({
         onOpen: openDoc,
         // Deleting the OPEN document: the server refuses edits to a trashed doc,
@@ -267,7 +335,16 @@ export async function open(docId = null) {
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'hidden') store.flush();
     });
+    // Going offline/online changes what the list can offer, so repaint the rows.
+    window.addEventListener('online', () => outline.render());
+    window.addEventListener('offline', () => { outline.render(); sync.refresh(); });
   }
+  // Deliberately never stopped: the queue's whole job is to reach the server
+  // eventually, and that has to keep happening after the surface is closed.
+  sync.start();
+  // Fire and forget — the first open while online is what makes later offline
+  // opens possible, and nothing here should wait on it.
+  sync.warmShell();
 
   const wanted = docId || store.currentDocId() || store.lastDocId();
   if (!store.currentDocId() || (docId && docId !== store.currentDocId())) {
@@ -293,9 +370,13 @@ export async function newDocument({ tag = '' } = {}) {
   await store.flush();
   store.reset();
   try {
-    const doc = await store.create();
     // "New document here" should land in the folder you clicked, not Untagged.
-    if (tag) {
+    // The tag goes THROUGH create rather than being applied after it: create
+    // schedules an immediate push, so a follow-up enqueue can lose the race with
+    // the rekey and silently drop the folder. See store.create's comment.
+    const local = await db.available();
+    const doc = await store.create('Untitled', { tags: tag ? [tag] : [] });
+    if (tag && !local) {
       await fetch(`/api/document/${encodeURIComponent(doc.id)}/tags?tags=${encodeURIComponent(tag)}`,
         { method: 'POST', credentials: 'same-origin' })
         .catch((e) => console.warn('[writer] could not tag the new document:', e));
