@@ -572,3 +572,37 @@ def test_offline_list_shows_local_documents_rather_than_an_error():
     assert "db.allDocs()" in src, "paint from the local mirror first"
     assert "mergeListRows" in src, "the server list folds into the mirror, it does not replace it"
     assert "_offline" in src and "writer-list-note" in src
+
+
+def test_a_failed_local_write_is_never_reported_as_saved():
+    """localdb REPORTS failure, it does not throw.
+
+    `_write` catches an aborted transaction and returns false. Ignoring that
+    return advanced the clean baseline and reported SAVED for text that was never
+    stored — and because the baseline had moved, the exit flush short-circuited and
+    could not retry it. A quota abort became silent data loss with every indicator
+    claiming success.
+    """
+    src = _read("static/js/writer/store.js")
+    save = src.split("export async function saveNow", 1)[1].split("\n/**", 1)[0]
+    assert "const stored = await db.patchDoc" in save, "check the write's return value"
+    assert "if (!stored || !queued)" in save, "a failed store must not report SAVED"
+    # The baseline must stay put so the content is still considered unsaved.
+    assert save.index("if (!stored || !queued)") < save.index("_lastLocal = content"), (
+        "do not advance the clean baseline before the write is known to have landed"
+    )
+    assert "_retryLocalSave" in src, "a failed write needs a retry that does not require a keystroke"
+
+
+def test_a_background_refresh_cannot_overwrite_text_being_typed():
+    """The row's dirty flag lags by the local debounce.
+
+    For the first LOCAL_DEBOUNCE_MS of typing the row still looks clean, so a
+    refresh that only checked `row.dirty` replaced the editor and erased what had
+    just been typed. Gate on live editor activity instead.
+    """
+    src = _read("static/js/writer/store.js")
+    refresh = src.split("async function _refreshInBackground", 1)[1].split("\n/* ", 1)[0]
+    assert "seqAtStart" in refresh, "snapshot edit activity before the request"
+    assert "_editSeq !== seqAtStart" in refresh, "drop the refresh if the user typed meanwhile"
+    assert "isDirty()" in refresh, "and if the live editor differs from the baseline"

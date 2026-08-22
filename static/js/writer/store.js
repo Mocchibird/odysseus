@@ -59,6 +59,10 @@ let _pendingWhileWriting = false;
 let _onState = () => {};
 let _getContent = () => '';
 let _fallback = false;     // IndexedDB unavailable -> talk straight to the server
+// Counts real editor activity. A background refresh compares this across its
+// own await to know whether the user started typing while it was in flight —
+// the row's `dirty` flag lags by the local debounce and cannot answer that.
+let _editSeq = 0;
 
 async function _json(url, opts) {
   const res = await fetch(API + url, {
@@ -227,11 +231,18 @@ let _onServerUpdate = () => {};
  * the refresh would yank text out from under them.
  */
 async function _refreshInBackground(id) {
+  // Snapshot before the request: anything the user types while it is in flight
+  // must win, and `row.dirty` cannot tell us that — the local write is debounced
+  // by LOCAL_DEBOUNCE_MS, so for the first 400 ms of typing the row still looks
+  // clean. Replacing the editor in that window silently erased what they typed.
+  const seqAtStart = _editSeq;
   try {
     const doc = await _json(`/api/document/${encodeURIComponent(id)}`, { method: 'GET' });
     const row = await db.getDoc(id);
     if (!row || row.dirty) return;                 // unsynced local text wins
     if (id !== _docId) return;                     // user moved on
+    if (_editSeq !== seqAtStart) return;           // they started typing meanwhile
+    if (isDirty()) return;                         // live editor differs from the baseline
     const incoming = doc.current_content ?? '';
     await db.patchDoc(id, {
       title: doc.title || row.title,
@@ -295,8 +306,21 @@ export async function saveNow() {
 
   _writing = true;
   try {
-    await db.patchDoc(_docId, { content, dirty: 1, touchedAt: Date.now() });
-    if (!db.isLocalId(_docId)) await db.enqueue(_docId, 'content', null);
+    // localdb REPORTS failure, it does not throw: _write catches the aborted
+    // transaction and returns false. Ignoring that return advanced _lastLocal and
+    // reported SAVED for text that was never stored — and because the baseline had
+    // moved, the exit flush then short-circuited and could not retry it. A quota
+    // abort became silent data loss with every indicator claiming success.
+    const stored = await db.patchDoc(_docId, { content, dirty: 1, touchedAt: Date.now() });
+    const queued = stored && (db.isLocalId(_docId) || await db.enqueue(_docId, 'content', null));
+    if (!stored || !queued) {
+      // Leave _lastLocal alone so this content is still considered unsaved and
+      // gets retried, and say so instead of claiming a save.
+      const err = new Error('could not store on this device (storage full or blocked)');
+      _onState(State.ERROR, err);
+      _retryLocalSave();
+      return false;
+    }
     _lastLocal = content;
     _onState(State.SAVED);
     sync.refresh();
@@ -305,6 +329,7 @@ export async function saveNow() {
   } catch (err) {
     console.warn('[writer] local save failed:', err && err.message);
     _onState(State.ERROR, err);
+    _retryLocalSave();
     return false;
   } finally {
     _writing = false;
@@ -343,9 +368,27 @@ async function _saveToServer(content) {
   }
 }
 
+const LOCAL_RETRY_MS = 3000;
+
+/**
+ * Re-attempt a failed local write without needing another keystroke.
+ *
+ * `touch()` only fires on edits, so a save that failed while the user was
+ * finishing a sentence would otherwise never be retried — they would stop typing
+ * on an error and lose the text.
+ */
+function _retryLocalSave() {
+  if (_localTimer) clearTimeout(_localTimer);
+  _localTimer = setTimeout(() => { _localTimer = null; saveNow(); }, LOCAL_RETRY_MS);
+}
+
 /** Mark dirty and schedule a local save. Cheap — safe on every keystroke. */
 export function touch() {
   if (!_docId) return;
+  // Counts REAL editor activity, including the very first keystroke after an
+  // open — before any debounced write has set the row's dirty flag. A background
+  // refresh checks this to know it must not replace what is being typed.
+  _editSeq += 1;
   if (_getContent() === _lastLocal) return;   // undo back to saved state
   _onState(State.DIRTY);
   if (_localTimer) clearTimeout(_localTimer);
