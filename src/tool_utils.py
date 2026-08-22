@@ -53,7 +53,12 @@ def _truncate(text: str, limit: int = MAX_OUTPUT_CHARS) -> str:
     if not isinstance(text, str):
         text = "" if text is None else str(text)
     if len(text) > limit:
-        return text[:limit] + f"\n... (truncated, {len(text)} chars total)"
+        # FORK: save the full text and hand back an excerpt that names it, so the
+        # overflow is retrievable instead of discarded. All the logic (and the
+        # fallback to plain head truncation on any storage failure) lives in the
+        # fork module; this stays a delegation.
+        from src.tool_output_spill import truncate_with_spill
+        return truncate_with_spill(text, limit)
     return text
 
 

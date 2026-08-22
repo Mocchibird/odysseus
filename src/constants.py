@@ -72,6 +72,15 @@ MAX_OUTPUT_CHARS = 10_000       # cap for bash/python/web_search/web_fetch outpu
 MAX_READ_CHARS = 20_000         # cap for read_file / document preview
 MAX_DIFF_LINES = 400            # cap for edit_file unified-diff display
 
+# FORK: tool-output spill (src/tool_output_spill.py). When a tool's output
+# exceeds the caps above, the full text is written under DATA_DIR/<SPILL_DIR_NAME>
+# and the model gets a bounded excerpt plus that path, instead of the overflow
+# being discarded. DATA_DIR is already a tool path root, so read_file/bash can
+# reach these files — keep them there or the retrieval hint stops being true.
+SPILL_DIR_NAME = "tool_output"
+SPILL_RETENTION_DAYS = 7             # spill files are debugging aids, not records
+SPILL_MAX_FILES_PER_SESSION = 200    # bound one runaway session's disk use
+
 # web_fetch response-size policy (#3812). MAX_OUTPUT_CHARS above only trims
 # what the agent SEES; these caps bound what the server downloads, parses,
 # and writes to the content cache. The soft cap is the default download

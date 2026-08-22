@@ -612,6 +612,11 @@ async def execute_tool_block(
     way out so the binding never leaks to the next tool call.
     """
     token = _active_workspace.set(workspace or None)
+    # FORK: name the current tool call so oversized output spills to a file named
+    # after it, in this session's bucket (src/tool_output_spill.py). Same
+    # bind/reset shape as the workspace above, so it never leaks to the next call.
+    from src.tool_output_spill import bind_tool_call, unbind_tool_call
+    spill_token = bind_tool_call(session_id, getattr(block, "tool_type", None))
     try:
         output = await _execute_tool_block_impl(
             block,
@@ -623,6 +628,7 @@ async def execute_tool_block(
         )
         return output
     finally:
+        unbind_tool_call(spill_token)
         _active_workspace.reset(token)
 
 

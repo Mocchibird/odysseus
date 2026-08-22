@@ -93,3 +93,32 @@ def pytest_collection_modifyitems(config, items):
         path = getattr(item, "path", None) or item.fspath
         for marker_name in markers_for_path(path):
             item.add_marker(getattr(pytest.mark, marker_name))
+
+
+# ---------------------------------------------------------------------------
+# FORK: keep tool-output spill files out of the repo's data/ dir.
+#
+# Same principle as the DATABASE_URL default at the top of this file: the suite
+# writes no repo-local artifacts. src/tool_output_spill.py saves a tool's full
+# output under DATA_DIR whenever it exceeds MAX_OUTPUT_CHARS, so ANY test that
+# drives the real _truncate path with oversized text would otherwise drop files
+# in ./data/tool_output — several already do, incidentally, while testing
+# something else entirely.
+# ---------------------------------------------------------------------------
+import pytest  # noqa: E402
+
+
+@pytest.fixture(autouse=True, scope="session")
+def _spill_files_go_to_tmp(tmp_path_factory):
+    try:
+        from src import tool_output_spill
+    except ImportError:
+        yield  # module absent (stubbed deps) — nothing to redirect
+        return
+    root = tmp_path_factory.mktemp("tool-output-spill")
+    mp = pytest.MonkeyPatch()
+    mp.setattr(tool_output_spill, "spill_root", lambda: root)
+    try:
+        yield
+    finally:
+        mp.undo()
