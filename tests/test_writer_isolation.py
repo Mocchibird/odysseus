@@ -606,3 +606,143 @@ def test_a_background_refresh_cannot_overwrite_text_being_typed():
     assert "seqAtStart" in refresh, "snapshot edit activity before the request"
     assert "_editSeq !== seqAtStart" in refresh, "drop the refresh if the user typed meanwhile"
     assert "isDirty()" in refresh, "and if the live editor differs from the baseline"
+
+
+# ── lifecycle and identity (from the adversarial review) ─────────────────────
+
+
+def test_the_clean_baseline_comes_from_the_editor_not_the_wire():
+    """The dirty check compares against Lexical's re-serialisation.
+
+    Baselining from the server's markdown made any difference Lexical normalises
+    read as "unsaved" the moment a document opened — so merely OPENING a
+    pre-existing document rewrote it and burned a version.
+    """
+    store = _read("static/js/writer/store.js")
+    assert "export function markClean" in store
+    writer = _read("static/js/writer/writer.js")
+    apply_doc = writer.split("function _applyDoc", 1)[1].split("\n}", 1)[0]
+    assert "store.markClean(getMarkdown())" in apply_doc, (
+        "_applyDoc must re-baseline from the populated editor"
+    )
+
+
+def test_opening_a_document_from_the_hash_flushes_the_previous_one():
+    """openDoc() flushed before switching; the hash/reopen path did not, so the
+    previous document's debounced edits were dropped."""
+    src = _read("static/js/writer/writer.js")
+    body = src.split("const wanted = docId ||", 1)[1][:900]
+    assert "await store.flush()" in body, "flush before switching documents"
+
+
+def test_a_transient_load_failure_does_not_create_a_junk_document():
+    """Falling back to create() for ANY failure (offline, 5xx) silently made an
+    Untitled and overwrote lastDocId, hiding the real document."""
+    src = _read("static/js/writer/writer.js")
+    body = src.split("const wanted = docId ||", 1)[1][:1200]
+    assert "err.status === 404" in body, "only a definitively-gone document may fall back"
+
+
+def test_row_actions_resolve_the_live_document_id():
+    """A row's menu closes over the id it rendered with; sync's rekey replaces a
+    local: id with the server one, so later actions addressed a row that no
+    longer existed and silently did nothing."""
+    src = _read("static/js/writer/outline.js")
+    assert "export function notifyRekey" in src
+    assert "function _liveId" in src
+    for fn in ("renameDoc", "deleteDoc"):
+        body = src.split(f"async function {fn}(doc) {{", 1)[1].split("\n}", 1)[0]
+        assert "_liveId(doc)" in body, f"{fn} must resolve the live id"
+    assert "outline.notifyRekey" in _read("static/js/writer/writer.js")
+
+
+def test_loading_a_document_is_not_undoable():
+    """One editor and one history stack serve the whole surface, so an undo after
+    switching documents could reach past the load and stamp the PREVIOUS
+    document's body into the current one — which autosave then persisted."""
+    src = _read("static/js/writer/blocks.js")
+    load = src.split("export function loadMarkdown", 1)[1].split("\n}", 1)[0]
+    assert "history-merge" in load, "the load must not be an undoable step"
+    assert "CLEAR_HISTORY_COMMAND" in load, "the undo stack must not cross documents"
+
+
+def test_overlapping_opens_mount_one_editor():
+    """_mountEditor is async, so a second open() during the first mount passed the
+    `if (!_editor)` guard and built a SECOND Lexical editor on the same host."""
+    src = _read("static/js/writer/writer.js")
+    assert "_mounting" in src
+    assert "_mounting = _mounting || _mountEditor(" in src
+    # and a failed mount must clear the memo so a later open can retry
+    assert "_mounting = null;" in src
+
+
+def test_editor_host_is_not_editable_before_lexical_owns_it():
+    """The editor is ~490 KB and loads on first open. Anything typed into a
+    pre-editable host is wiped by setRootElement."""
+    import re
+
+    src = _read("static/js/writer/writer.js")
+    shell = src.split("el.innerHTML = `", 1)[1].split("`;", 1)[0]
+    # Strip comments: the template explains this rule and naming the attribute
+    # in prose is not a violation.
+    shell = re.sub(r"<!--.*?-->", "", shell, flags=re.DOTALL)
+    assert 'id="writer-editor"' in shell
+    assert "contenteditable=" not in shell.lower(), (
+        "let Lexical set contentEditable when it takes ownership of the host"
+    )
+
+
+def test_closing_the_surface_dismisses_any_open_row_menu():
+    """Row menus are body-appended, so one open at close time outlived the
+    surface with its click-away listener and Escape-stack entry live."""
+    src = _read("static/js/writer/writer.js")
+    close_fn = src.split("export function close() {", 1)[1].split("\n}", 1)[0]
+    assert "menus.closeMenu()" in close_fn
+
+
+# ── markdown fidelity (from the adversarial review) ──────────────────────────
+#
+# Markdown is the canonical stored form, so anything the importer or exporter
+# changes is PERSISTED by the next autosave. Each guard below marks a document
+# that was being silently rewritten. The pure normalisers are exercised for real
+# in tests/test_writer_markdown_normalisation_js.py.
+
+
+def test_checklist_requires_a_bullet():
+    """Lexical ships CHECK_LIST with an OPTIONAL bullet
+    (`/^(\\s*)(?:[-*+]\\s)?\\s?(\\[(\\s|x)?\\])\\s/i`), so an ordinary paragraph
+    that merely BEGINS with "[x] " was converted into a checklist item on open
+    and saved as one."""
+    src = _read("static/js/writer/blocks.js")
+    assert "function checkListRequiringBullet" in src
+    body = src.split("function checkListRequiringBullet", 1)[1].split("\n}", 1)[0]
+    assert "[-*+]\\s" in body, "the bullet must be required, not optional"
+    assert "(?:[-*+]" not in body, "the bullet group must not stay optional"
+    # And it must be the one actually handed to Lexical.
+    assert "checkListRequiringBullet(md)" in src
+
+
+def test_a_paragraph_keeps_its_escaped_block_marker_on_export():
+    """Lexical imports `\\# text` as a paragraph but exports `# text`, so the
+    NEXT open reads it as an h1. Verified in the browser: [paragraph] ->
+    "# not a heading" -> [heading:h1]."""
+    src = _read("static/js/writer/blocks.js")
+    assert "function paragraphEscapingBlockMarkers" in src
+    body = src.split("function paragraphEscapingBlockMarkers", 1)[1].split("\n}\n", 1)[0]
+    assert "$isParagraphNode" in body, "only paragraphs may be escaped"
+    assert "#{1,6}" in body, "a leading heading marker must be escaped"
+    # Import must stay Lexical's own paragraph handling.
+    assert "/$^/" in body, "this transformer must never match on import"
+
+
+def test_the_import_normalisers_are_applied_in_load():
+    src = _read("static/js/writer/blocks.js")
+    load = src.split("export function loadMarkdown", 1)[1].split("\n}", 1)[0]
+    for fn in ("normalizeListIndent", "normalizeCheckMarkers", "padFencedFirstLine"):
+        assert fn in load, f"{fn} must run on the way in"
+
+
+def test_list_indent_unit_is_documented_as_four():
+    """Measured, not assumed: 1-3 spaces import as level 0, 4+ nest one level."""
+    src = _read("static/js/writer/blocks.js")
+    assert "const LIST_INDENT = 4" in src

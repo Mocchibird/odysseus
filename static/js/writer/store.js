@@ -424,6 +424,24 @@ export async function flush() {
   return wrote;
 }
 
+/**
+ * Re-baseline the clean state from the EDITOR, not the wire.
+ *
+ * The dirty check is `_getContent() !== _lastLocal`, and _getContent() is
+ * Lexical's re-serialisation. Baselining from the server's markdown therefore
+ * reports "unsaved" for any difference Lexical normalises (list markers, escape
+ * placement, trailing space), so simply OPENING a pre-existing document made it
+ * dirty and the next flush rewrote it — a new version per open, and the user's
+ * stored formatting silently replaced.
+ *
+ * Called right after the editor is populated, where the round-tripped text is
+ * the honest baseline.
+ */
+export function markClean(text) {
+  _lastLocal = text ?? '';
+  _onState(State.SAVED);
+}
+
 export function isDirty() {
   return !!_docId && _getContent() !== _lastLocal;
 }
@@ -476,5 +494,5 @@ export function reset() {
 
 export default {
   State, list, create, load, rename, saveNow, touch, flush, remove,
-  isDirty, configure, currentDocId, lastDocId, reset, adoptId,
+  isDirty, configure, currentDocId, lastDocId, reset, adoptId, markClean,
 };

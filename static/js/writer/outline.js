@@ -143,7 +143,8 @@ async function _postTags(doc, next) {
 
 /** Drop a document on a folder to add that tag. `null` clears all tags. */
 async function assignTag(docId, tagPath) {
-  const doc = _docs.find((d) => d.id === docId);
+  const wanted = _liveId({ id: docId });
+  const doc = _docs.find((d) => d.id === wanted || d.id === docId);
   if (!doc) return;
   const cur = Array.isArray(doc.tags) ? doc.tags.slice() : [];
   let next;
@@ -233,6 +234,32 @@ export async function deleteTag(path) {
 
 /* ── row actions ─────────────────────────────────────────────────────────── */
 
+// local:<uuid> -> server id, recorded when sync rekeys a document. A row's menu
+// closes over the doc object it rendered with, so without this every action taken
+// after a rekey addresses an id that no longer exists.
+const _rekeyed = new Map();
+
+/** Called by the writer when sync rekeys a document. */
+export function notifyRekey(oldId, newId) {
+  if (!oldId || !newId || oldId === newId) return;
+  _rekeyed.set(oldId, newId);
+  for (const d of _docs) if (d.id === oldId) d.id = newId;
+  if (_activeId === oldId) _activeId = newId;
+  render();
+}
+
+/**
+ * The id this row means RIGHT NOW. Follows a rekey chain, so a menu built before
+ * the first sync still acts on the right document.
+ */
+function _liveId(doc) {
+  let id = doc && doc.id;
+  const seen = new Set();
+  while (_rekeyed.has(id) && !seen.has(id)) { seen.add(id); id = _rekeyed.get(id); }
+  if (doc && id && doc.id !== id) doc.id = id;
+  return id;
+}
+
 async function _ui() {
   try { return await import('../ui.js'); } catch (_) { return null; }
 }
@@ -255,22 +282,23 @@ async function _toast(msg) {
 }
 
 async function renameDoc(doc) {
+  const id = _liveId(doc);
   const next = await _prompt('Rename document', doc.title || '', 'Title');
   const title = (next || '').trim();
   if (!title || title === doc.title) return;
 
   if (await db.available()) {
-    await db.patchDoc(doc.id, { title, touchedAt: Date.now() });
+    await db.patchDoc(id, { title, touchedAt: Date.now() });
     // A document with no server id yet has its title carried by the create.
-    if (!db.isLocalId(doc.id)) await db.enqueue(doc.id, 'title', title);
+    if (!db.isLocalId(id)) await db.enqueue(id, 'title', title);
     doc.title = title;
     render();
-    _onRenamed(doc.id, title);
+    _onRenamed(id, title);
     sync.refresh();
     sync.flush();
     return;
   }
-  const res = await fetch(`${API}/api/document/${encodeURIComponent(doc.id)}`, {
+  const res = await fetch(`${API}/api/document/${encodeURIComponent(id)}`, {
     method: 'PATCH',
     credentials: 'same-origin',
     headers: { 'Content-Type': 'application/json' },
@@ -279,17 +307,18 @@ async function renameDoc(doc) {
   if (!res.ok) { _toast('Rename failed'); return; }
   doc.title = title;
   render();
-  _onRenamed(doc.id, title);
+  _onRenamed(id, title);
 }
 
 /** The body, from the local cache if we hold it, else from the server. */
 async function _bodyOf(doc) {
+  const id = _liveId(doc);
   if (await db.available()) {
-    const row = await db.getDoc(doc.id);
+    const row = await db.getDoc(id);
     if (row && !row.stub && row.content !== undefined) return row.content ?? '';
   }
   // The library row carries metadata, not content — the body needs its own read.
-  const res = await fetch(`${API}/api/document/${encodeURIComponent(doc.id)}`, { credentials: 'same-origin' });
+  const res = await fetch(`${API}/api/document/${encodeURIComponent(id)}`, { credentials: 'same-origin' });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return (await res.json()).current_content ?? '';
 }
@@ -338,6 +367,7 @@ async function duplicateDoc(doc) {
 }
 
 async function deleteDoc(doc) {
+  const id = _liveId(doc);
   const ok = await _confirm(
     `Delete “${doc.title || 'Untitled'}”? It moves to Trash and can be restored from the Library.`,
     { danger: true },
@@ -345,24 +375,24 @@ async function deleteDoc(doc) {
   if (!ok) return;
 
   if (await db.available()) {
-    await db.patchDoc(doc.id, { deleted: 1, touchedAt: Date.now() });
-    await db.enqueue(doc.id, 'delete');
+    await db.patchDoc(id, { deleted: 1, touchedAt: Date.now() });
+    await db.enqueue(id, 'delete');
     // If the deleted document is the one open in the editor, get off it. The
     // server refuses edits to a trashed document, so leaving it open would turn
     // every keystroke into a failed save.
-    _onDeleted(doc.id);
-    _docs = _docs.filter((d) => d.id !== doc.id);
+    _onDeleted(id);
+    _docs = _docs.filter((d) => d.id !== id);
     render();
     sync.refresh();
     sync.flush();
     _toast('Moved to Trash');
     return;
   }
-  const res = await fetch(`${API}/api/document/${encodeURIComponent(doc.id)}`, {
+  const res = await fetch(`${API}/api/document/${encodeURIComponent(id)}`, {
     method: 'DELETE', credentials: 'same-origin',
   });
   if (!res.ok) { _toast('Delete failed'); return; }
-  _onDeleted(doc.id);
+  _onDeleted(id);
   await load();
   _toast('Moved to Trash');
 }
@@ -656,7 +686,7 @@ export function tagsOf(docId) {
 }
 
 export default {
-  load, render, setSearch, setActive, configure, assignTag,
+  load, render, setSearch, setActive, configure, assignTag, notifyRekey,
   createTag, renameTag, deleteTag, tagsOf,
   renameDoc, duplicateDoc, deleteDoc,
 };

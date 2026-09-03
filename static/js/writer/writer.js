@@ -22,6 +22,7 @@ import blocks from './blocks.js';
 import store from './store.js';
 import outline from './outline.js';
 import sync from './sync.js';
+import menus from './menus.js';
 import db from './localdb.js';
 
 const V = '../../vendor/lexical';
@@ -48,6 +49,7 @@ function _setListHidden(hidden, { persist = true } = {}) {
 }
 
 let _editor = null;      // Lexical editor instance, created on first open
+let _mounting = null;    // in-flight _mountEditor promise (see open())
 let _lexical = null;     // resolved module namespace bundle
 let _loading = false;    // suppress autosave while we populate the editor
 let _wired = false;      // page-level listeners attached once
@@ -100,8 +102,11 @@ function _buildShell() {
         <div class="writer-list" id="writer-list"></div>
       </aside>
       <div class="writer-body">
-        <div class="writer-editor" id="writer-editor" contenteditable="true"
-             role="textbox" aria-multiline="true" spellcheck="true"></div>
+        <!-- NOT contenteditable here on purpose: the editor is ~490 KB and loads
+             on first open, and anything typed into the host before
+             setRootElement runs is wiped by the mount. Lexical sets
+             contentEditable/role itself once it owns the element. -->
+        <div class="writer-editor" id="writer-editor" spellcheck="true"></div>
       </div>
     </div>`;
   document.body.appendChild(el);
@@ -237,10 +242,10 @@ async function _mountEditor(host) {
 }
 
 /** Populate the editor without tripping autosave. */
-function _setContentQuietly(markdown) {
+function _setContentQuietly(markdown, onCommitted) {
   _loading = true;
   try {
-    blocks.loadMarkdown(_editor, _lexical, markdown);
+    blocks.loadMarkdown(_editor, _lexical, markdown, onCommitted);
   } finally {
     // The update listener runs synchronously inside loadMarkdown's editor.update,
     // so clearing after it returns is enough — but do it in a microtask as well in
@@ -252,8 +257,12 @@ function _setContentQuietly(markdown) {
 function _applyDoc(doc) {
   const title = document.getElementById('writer-title');
   if (title) title.value = doc.title === 'Untitled' ? '' : (doc.title || '');
-  _setContentQuietly(doc.current_content ?? '');
-  _status(store.State.SAVED);
+  // Baseline from the EDITOR, not the wire: the dirty check compares against
+  // Lexical's re-serialisation, so anything Lexical normalises (a trailing
+  // newline, list markers) would otherwise read as unsaved the moment the
+  // document opens — and the next flush would rewrite it. Taken in onUpdate
+  // because the committed state is the only honest baseline.
+  _setContentQuietly(doc.current_content ?? '', () => store.markClean(getMarkdown()));
   outline.setActive(doc.id);
 }
 
@@ -286,7 +295,12 @@ export async function open(docId = null) {
 
   if (!_editor) {
     try {
-      _editor = await _mountEditor(el.querySelector('#writer-editor'));
+      // _mountEditor is async, so a second open() landing during the first mount
+      // used to pass this guard too and build a SECOND Lexical editor on the same
+      // contenteditable. Memoise the in-flight promise: overlapping opens await
+      // one mount.
+      _mounting = _mounting || _mountEditor(el.querySelector('#writer-editor'));
+      _editor = await _mounting;
       store.configure({
         getContent: getMarkdown,
         onState: _status,
@@ -299,6 +313,7 @@ export async function open(docId = null) {
         onState: _syncStatus,
         onRekey: (oldId, newId) => {
           store.adoptId(oldId, newId);
+          outline.notifyRekey(oldId, newId);
           // The URL still points at the local id; repoint it so a reload finds
           // the document that now exists.
           if (String(location.hash) === `#writer=${encodeURIComponent(oldId)}`) {
@@ -322,6 +337,9 @@ export async function open(docId = null) {
         onNewInFolder: (tagPath) => newDocument({ tag: tagPath }),
       });
     } catch (err) {
+      // Clear the memo so a later open can retry rather than awaiting a promise
+      // that already rejected.
+      _mounting = null;
       _status(store.State.ERROR, err);
       console.error('[writer] mount failed', err);
       return;
@@ -347,14 +365,22 @@ export async function open(docId = null) {
   sync.warmShell();
 
   const wanted = docId || store.currentDocId() || store.lastDocId();
-  if (!store.currentDocId() || (docId && docId !== store.currentDocId())) {
+  const switching = !store.currentDocId() || (docId && docId !== store.currentDocId());
+  if (switching) {
+    // Flush first. openDoc() does this before every switch; this path (reached
+    // from #writer=<id>, and from reopening the surface) did not, so the
+    // previous document's debounced edits were dropped on the floor.
+    if (store.currentDocId()) await store.flush();
     try {
       const doc = wanted ? await store.load(wanted) : await store.create();
       _applyDoc(doc);
     } catch (err) {
-      // A remembered id can be stale (deleted or trashed) — fall back to a new one
-      // rather than leaving the surface stuck on an error.
-      if (wanted) {
+      // Only fall back to a NEW document when the wanted one is definitively
+      // gone. Doing it for every failure (offline, 5xx) silently created a junk
+      // Untitled and overwrote lastDocId, so the real document became hard to
+      // find again — the error belongs on screen instead.
+      const gone = err && (err.status === 404 || err.status === 403);
+      if (wanted && gone) {
         try { _applyDoc(await store.create()); } catch (e2) { _status(store.State.ERROR, e2); }
       } else {
         _status(store.State.ERROR, err);
@@ -394,6 +420,9 @@ export async function newDocument({ tag = '' } = {}) {
 
 export function close() {
   store.flush();
+  // The row menus are body-appended, so a menu open at close time would outlive
+  // the surface — with its click-away listener and Escape-stack entry still live.
+  menus.closeMenu();
   const el = document.getElementById('writer-surface');
   if (el) el.setAttribute('hidden', '');
   document.body.classList.remove('writer-open');
