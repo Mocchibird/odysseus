@@ -7,7 +7,7 @@ from pathlib import Path
 from src import tool_implementations
 from src.agent_tools import TOOL_TAGS, ToolBlock
 import src.tool_execution as tool_execution
-from src.tool_execution import execute_tool_block
+from src.tool_execution import NO_TOOL_SECURITY_CONTEXT, execute_tool_block
 from src.tool_index import ALWAYS_AVAILABLE, ASSISTANT_ALWAYS_AVAILABLE, BUILTIN_TOOL_DESCRIPTIONS
 from src.tool_parsing import _TOOL_NAME_MAP
 from src.tool_security import is_public_blocked_tool, plan_mode_disabled_tools
@@ -70,6 +70,7 @@ def test_send_ping_dispatches_through_tool_execution(monkeypatch):
     desc, result = asyncio.run(execute_tool_block(
         ToolBlock("send_ping", json.dumps({"message": "test"})),
         owner="admin",
+        security_context=NO_TOOL_SECURITY_CONTEXT,
     ))
 
     assert desc == "send_ping"

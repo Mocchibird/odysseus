@@ -8,7 +8,7 @@
     "lint:js": "eslint static/app.js static/js"
   },
   "devDependencies": {
-    "@antithesishq/bombadil": "^0.6.1",
+    "@antithesishq/bombadil": "^0.7.0",
     "eslint": "^9.0.0",
     "globals": "^15.0.0",
     "stylelint": "^16.0.0"

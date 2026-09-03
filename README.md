@@ -1,10 +1,17 @@
 <p align="center">
-  <img src="docs/odysseus-wordmark.png" alt="Odysseus" width="238">
+  <img src="assets/branding/odysseus-wordmark.png" alt="Odysseus" width="238">
 </p>
 
 # Odysseus
 
-> **Branch note:** `dev` is the default branch and contains the latest development changes, but it may be unstable. For the more stable curated branch, use [`main`](https://github.com/pewdiepie-archdaemon/odysseus/tree/main).
+<p align="center">
+  <a href="#quick-start">Quick Start</a> ·
+  <a href="website/setup.md">Setup Guide</a> ·
+  <a href="CONTRIBUTING.md">Contributing</a> ·
+  <a href="ROADMAP.md">Roadmap</a>
+</p>
+
+> **Branch note:** `dev` is the default branch and contains the latest development changes, but it may be unstable. For the more stable curated branch, use [`main`](https://github.com/odysseus-dev/odysseus/tree/main).
 
 ```
 ───────────────────────────────────────────────
@@ -12,7 +19,9 @@
 ───────────────────────────────────────────────
 ```
 
-![Odysseus](docs/odysseus-browser.jpg)
+<p align="center">
+  <img src="assets/branding/odysseus-browser.jpg" alt="Odysseus interface">
+</p>
 
 A self-hosted AI workspace -- meant to be the self-hosted version of the UI experience you get from ChatGPT and Claude. But with more jank and fun. Running on your own hardware, with your own data -- local-first, privacy-first, and no trojan.
 
@@ -33,7 +42,7 @@ A self-hosted AI workspace -- meant to be the self-hosted version of the UI expe
   - **Extras** -- more to explore, happy if you give it a go!<br>　<sub>image editor · theme editor · file uploads (vision + PDF) · web search · presets · sessions · 2FA</sub>
 
 ## Demo
-A full, hover-to-play tour lives on the landing page (`docs/index.html`).
+A full, hover-to-play tour lives on the landing page (`website/index.html`).
 
 <details>
 <summary>Screenshots / clips</summary>
@@ -110,6 +119,8 @@ cd odysseus
 
 It launches at `http://127.0.0.1:7860`. To expose it to your phone over a trusted LAN/VPN such as Tailscale, bind all interfaces:
 
+Native installs, GPU notes, Windows/macOS instructions, HTTPS, and configuration live in the [setup guide](website/setup.md).
+
 ```bash
 ODYSSEUS_HOST=0.0.0.0 ./start-macos.sh
 # then open http://<tailscale-ip>:7860
@@ -124,6 +135,8 @@ expose this port directly to the public internet. To build a clickable app wrapp
 ```bash
 ./build-macos-app.sh
 ```
+
+A full hover-to-play tour lives on the [Odysseus landing page](https://odysseus-dev.github.io/odysseus/). Its source lives under [`website/`](website/).
 
 <details>
 <summary>Cookbook, GPU, Ollama, and troubleshooting notes</summary>
@@ -297,7 +310,7 @@ you pick a Proton preset so you can see whether IMAP and SMTP are reachable
 before saving the account.
 
 **Adding more Proton accounts** (e.g. another user on a multi-user instance):
-see [docs/proton-multiple-accounts.md](docs/proton-multiple-accounts.md).
+see [website/proton-multiple-accounts.md](website/proton-multiple-accounts.md).
 
 **Useful checks.**
 
@@ -419,7 +432,7 @@ uv pip sync requirements.lock                          # reproduce it exactly la
 ### Outlook / Office 365 email
 Odysseus email accounts currently use IMAP/SMTP username-password auth. Outlook
 and Microsoft 365 generally require OAuth instead, so normal Microsoft mailbox
-passwords will fail. See [docs/email-outlook.md](docs/email-outlook.md) for the
+passwords will fail. See [website/email-outlook.md](website/email-outlook.md) for the
 current limitation and the planned integration direction.
 
 ## Security Notes
@@ -495,6 +508,13 @@ Key settings:
 | `ODYSSEUS_EMAIL_COMPOSE_UPLOAD_MAX_BYTES` | `26214400` | Email compose attachment cap in bytes (25 MB). |
 | `ODYSSEUS_STT_MAX_AUDIO_BYTES` | `26214400` | Speech-to-text audio cap in bytes (25 MB). |
 | `ODYSSEUS_ICS_MAX_BYTES` | `10485760` | Calendar `.ics` import cap in bytes (10 MB). |
+
+Odysseus is a self-hosted workspace with powerful local tools. Keep auth enabled, keep private data out of Git, and do not expose raw model/service ports publicly.
+
+- Keep `AUTH_ENABLED=true` for any network-accessible deployment.
+- Keep `LOCALHOST_BYPASS=false` outside local development.
+
+Deployment details are in the [setup guide](website/setup.md#security-notes).
 
 All upload-limit vars are validated (must be a positive integer) and optional; an invalid value fails fast at startup.
 
@@ -584,11 +604,11 @@ All user data lives in `data/` (gitignored): `app.db` (sessions, messages, docum
 
 ## Star History
 
-<a href="https://www.star-history.com/?repos=odysseus-dev%2Fodysseus&type=date&legend=top-left">
+<a href="https://star-history.dera.page/#odysseus-dev/odysseus&type=date&legend=top-left">
  <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=odysseus-dev/odysseus&type=date&theme=dark&legend=top-left" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=odysseus-dev/odysseus&type=date&legend=top-left" />
-   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=odysseus-dev/odysseus&type=date&legend=top-left" />
+   <source media="(prefers-color-scheme: dark)" srcset="https://star-history.dera.page/svg?repos=odysseus-dev/odysseus&type=date&theme=dark&legend=top-left" />
+   <source media="(prefers-color-scheme: light)" srcset="https://star-history.dera.page/svg?repos=odysseus-dev/odysseus&type=date&legend=top-left" />
+   <img alt="Star History Chart" src="https://star-history.dera.page/svg?repos=odysseus-dev/odysseus&type=date&legend=top-left" />
  </picture>
 </a>
 

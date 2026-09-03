@@ -26,6 +26,10 @@ try:
     import sqlalchemy  # noqa: F401
     import sqlalchemy.orm  # noqa: F401
     import core.database  # noqa: F401
+    # Same reason: a test that stubs core.database shadows the `core` package, so
+    # a later `from core.log_safety import ...` raises ModuleNotFoundError even
+    # though the module exists. Import it for real first.
+    import core.log_safety  # noqa: F401
     import src.database
 except ImportError:
     pass  # not installed - the stubs below will handle it

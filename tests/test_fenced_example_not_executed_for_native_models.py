@@ -50,6 +50,24 @@ def _patch_common(monkeypatch, exec_calls):
     monkeypatch.setattr(al, "get_setting", lambda key, default=None: default, raising=False)
     monkeypatch.setattr(al, "get_mcp_manager", lambda: None, raising=False)
     monkeypatch.setattr(al, "estimate_tokens", lambda *a, **k: 10, raising=False)
+    # These tests exercise tool-channel parsing, not owner authorization.
+    monkeypatch.setattr(al, "blocked_tools_for_owner", lambda owner: set(), raising=False)
+    # Skills are injected as untrusted context that ARMS the post-external tool
+    # gate (untrusted_context_message(..., arm_tool_gate=True)), so on a machine
+    # with any published skill every tool start needs an explicit approval and
+    # nothing executes. That is real behaviour, but it makes these parsing tests
+    # depend on the developer's data dir — so suppress the lookup, in the same
+    # spirit as the RAG/MCP/settings stubs above.
+    import services.memory.skills as _skills_mod
+    monkeypatch.setattr(_skills_mod.SkillsManager, "load", lambda self, owner=None: [], raising=False)
+    monkeypatch.setattr(
+        _skills_mod.SkillsManager, "get_relevant_skills",
+        lambda self, *a, **k: [], raising=False,
+    )
+    monkeypatch.setattr(
+        _skills_mod.SkillsManager, "index_for",
+        lambda self, *a, **k: [], raising=False,
+    )
 
     async def _fake_exec(block, *a, **k):
         exec_calls.append(block)

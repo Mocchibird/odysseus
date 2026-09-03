@@ -9545,9 +9545,9 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
 
   /** Save manual edits */
   export async function saveDocument({ silent = false, forceVersion = false } = {}) {
-    if (!activeDocId) return;
+    if (!activeDocId) return false;
     const textarea = document.getElementById('doc-editor-textarea');
-    if (!textarea) return;
+    if (!textarea) return false;
     const savingDocId = activeDocId;
     saveCurrentToMap();
     const localDoc = docs.get(savingDocId);
@@ -9574,7 +9574,7 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
       });
       if (res.status === 404) {
         if (silent && localDoc?.language === 'email') {
-          return;
+          return false;
         }
         // Streaming/empty email drafts can leave a local tab pointing at a temp
         // or already-deleted document. Do not keep surfacing autosave errors for
@@ -9586,7 +9586,7 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
         }
         _syncDocIndicator();
         if (!silent && uiModule) uiModule.showError('Document no longer exists');
-        return;
+        return false;
       }
       if (!res.ok) throw new Error(`Document save failed: HTTP ${res.status}`);
       const doc = await res.json();
@@ -9600,6 +9600,7 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
       _syncDocIndicator();
       _emitDocsChanged('update', savingDocId);
       if (!silent && uiModule) uiModule.showToast(forceVersion ? 'New version saved' : 'Document saved');
+      return true;
     } catch (e) {
       console.error('Failed to save document:', e);
       const now = Date.now();
@@ -9607,6 +9608,7 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
         uiModule.showError(silent ? 'Autosave failed' : 'Failed to save document');
         _lastAutoSaveErrorAt = now;
       }
+      return false;
     }
   }
 
@@ -9890,6 +9892,11 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
     const container = document.createElement('div');
     container.style.cssText = 'padding:20px;font-family:sans-serif;font-size:12px;color:#000;background:#fff;line-height:1.6;';
     container.innerHTML = html;
+    // This container is detached, so the document-scoped flush mdToHtml
+    // schedules never sees it. Typeset the deferred math before html2pdf
+    // rasterises, or the PDF gets raw formula source. renderMath() returns
+    // immediately, without loading KaTeX, when there is nothing pending.
+    await markdownModule.renderMath(container);
     const baseName = _getExportBaseName();
     window.html2pdf().set({
       margin: 10,

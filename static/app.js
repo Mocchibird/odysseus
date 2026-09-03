@@ -12,9 +12,9 @@ import modelsModule from './js/models.js';
 import ragModule from './js/rag.js';
 import presetsModule from './js/presets.js';
 import searchModule from './js/search.js';
-import chatModule from './js/chat.js?v=537';
-import compareModule from './js/compare/index.js';
-import documentModule from './js/document.js?v=537';
+import chatModule from './js/chat.js?v=562';
+import compareModule from './js/compare/index.js?v=562';
+import documentModule from './js/document.js?v=562';
 import searchChatModule from './js/search-chat.js';
 import { makeWindowDraggable } from './js/windowDrag.js';
 import {
@@ -24,7 +24,7 @@ import {
   settleSessionHydration
 } from './js/startupShell.js';
 import markdownModule from './js/markdown.js';
-import chatRenderer from './js/chatRenderer.js';
+import chatRenderer from './js/chatRenderer.js?v=562';
 import sessionModule from './js/sessions.js';
 import memoryModule from './js/memory.js';
 import voiceRecorderModule from './js/voiceRecorder.js';
@@ -39,15 +39,15 @@ import { UI_VIS_DEFAULT_OFF, resolveVisibility } from './js/ui_visibility.js';
 // 'gallery-refresh' listener (so a chat upload shows in the gallery
 // immediately even if the panel was never opened) — which would silently
 // never run if deferred to first open.
-import galleryModule from './js/gallery.js?v=527';
+import galleryModule from './js/gallery.js?v=562';
 import tasksModule from './js/tasks.js?v=20260723tasksbulkfeedback1';
 import calendarModule from './js/calendar.js';
-import adminModule from './js/admin.js?v=537';
-import settingsModule from './js/settings.js?v=527';
+import adminModule from './js/admin.js?v=562';
+import settingsModule from './js/settings.js?v=562';
 // FORK: runtime-inject fork-only UI (e.g. the API Tokens panel) into stable
 // upstream anchors, so index.html stays aligned with upstream. Side-effect
 // import — the module self-runs on load. See static/js/fork-ui.js.
-import './js/fork-ui.js?v=561';
+import './js/fork-ui.js?v=562';
 // Eagerly bind unified minimize/restore behavior across all tool modals.
 import './js/modalManager.js';
 // Desktop window tiling — drag a modal near an edge/corner to snap.
@@ -64,6 +64,7 @@ import * as researchPanelModule from './js/research/panel.js?v=20260630researcht
 import ttsModule from './js/tts-ai.js';
 import spinnerModule from './js/spinner.js';
 import { initKeyboardShortcuts } from './js/keyboard-shortcuts.js';
+import { getSettings } from './js/appConfig.js';
 import { initSidebarLayout, syncRailSide } from './js/sidebar-layout.js';
 import { initSectionCollapse, initSectionDrag } from './js/section-management.js';
 
@@ -74,7 +75,7 @@ import { initSectionCollapse, initSectionDrag } from './js/section-management.js
 // re-awaiting. (tasks/calendar are NOT lazy — they have boot side effects and
 // stay eagerly imported above.)
 const _lazyModule = (loader) => { let m; return async () => (m ||= (await loader()).default); };
-const _gallery  = _lazyModule(() => import('./js/gallery.js?v=527'));
+const _gallery  = _lazyModule(() => import('./js/gallery.js?v=562'));
 const _health   = _lazyModule(() => import('./js/health.js?v=529'));
 const _today    = _lazyModule(() => import('./js/today.js?v=422'));
 
@@ -1605,13 +1606,11 @@ function initializeEventListeners() {
     })
     .catch(() => {});
 
-  // Hide Gallery when image generation is disabled in settings
-  const _prefetchedSettings = sessionStorage.getItem('ody-prefetch-settings');
-  sessionStorage.removeItem('ody-prefetch-settings');
-  window._initSettingsReady = (_prefetchedSettings
-    ? Promise.resolve(JSON.parse(_prefetchedSettings))
-    : fetch(`${API_BASE}/api/auth/settings`, { credentials: 'same-origin' }).then(r => r.json())
-  ).then(settings => {
+  // Hide Gallery when image generation is disabled in settings.
+  // getSettings() consumes the login prefetch itself, so every other module
+  // that asks for settings this load gets the same snapshot without a request.
+  window._initSettingsReady = getSettings()
+    .then(settings => {
       // NOTE: image_gen_enabled only governs *generating* images in chat — the
       // tool is blocked server-side (chat_routes / agent_loop). The Gallery
       // holds uploads and past images too, so it stays visible regardless;
@@ -3676,7 +3675,7 @@ function startOdysseusApp() {
   modelsModule.init(API_BASE);
   ragModule.init(API_BASE);
   presetsModule.init(API_BASE);
-  searchModule.init(API_BASE);
+  searchModule.init();
   chatModule.init(API_BASE);
   chatModule.initListeners();
   groupModule.init(API_BASE);
