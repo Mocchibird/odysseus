@@ -229,15 +229,16 @@ function _injectWriterSidebarItem() {
   });
   item.querySelector('#writer-new-doc-btn').addEventListener('click', (ev) => {
     ev.stopPropagation();
-    location.hash = '#writer';
-    // The surface mounts asynchronously on first open; wait for it before asking
-    // for a new document.
-    const start = Date.now();
-    const tryNew = () => {
-      if (window.writerModule && window.writerModule.getEditor()) window.writerModule.newDocument();
-      else if (Date.now() - start < 8000) setTimeout(tryNew, 120);
-    };
-    tryNew();
+    // Ask the writer directly rather than setting the hash and polling for the
+    // editor: the hash makes open() resolve a document of its own, so the poll's
+    // newDocument() then created a SECOND one (an empty Untitled that autosave
+    // persisted). openNew() mounts and creates exactly one.
+    import('./writer/writer.js')
+      .then((mod) => mod.default.openNew())
+      .catch((e) => {
+        console.warn('[fork-ui] could not open the writer:', e);
+        location.hash = '#writer';           // last resort: at least open it
+      });
   });
   anchor.insertAdjacentElement('afterend', item);
 }

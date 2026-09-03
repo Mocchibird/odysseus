@@ -288,10 +288,18 @@ async function openDoc(id) {
 }
 
 /** Open (or reopen) the surface. `docId` wins; otherwise resume, else create. */
-export async function open(docId = null) {
+export async function open(docId = null, { deferDocument = false } = {}) {
   const el = _buildShell();
   el.removeAttribute('hidden');
   document.body.classList.add('writer-open');
+  // fork.css sets a static z-index for the surface, but tool windows climb an
+  // unbounded bring-to-front counter (and dock chips reach 10030), so a static
+  // value put the writer BEHIND an already-open tool window — it looked like the
+  // surface simply did not open. Raise it from the shared source of truth.
+  try {
+    const { topPortalZ } = await import('../toolWindowZOrder.js');
+    el.style.zIndex = String(topPortalZ());
+  } catch (_) { /* fork.css's static z-index stands */ }
 
   if (!_editor) {
     try {
@@ -365,7 +373,10 @@ export async function open(docId = null) {
   sync.warmShell();
 
   const wanted = docId || store.currentDocId() || store.lastDocId();
-  const switching = !store.currentDocId() || (docId && docId !== store.currentDocId());
+  // deferDocument: the caller is about to supply one (see openNew). Resolving one
+  // here as well is what produced two documents per click.
+  const switching = !deferDocument
+    && (!store.currentDocId() || (docId && docId !== store.currentDocId()));
   if (switching) {
     // Flush first. openDoc() does this before every switch; this path (reached
     // from #writer=<id>, and from reopening the surface) did not, so the
@@ -390,6 +401,18 @@ export async function open(docId = null) {
   // Refresh in the background: a stale list is better than a blocked open.
   outline.load().then(() => outline.setActive(store.currentDocId()));
   _editor.focus();
+}
+
+/**
+ * Open the surface and start a NEW document — one document, deterministically.
+ *
+ * Replaces the old pattern of setting location.hash and then polling for the
+ * editor: that raced open()'s own document resolution and created two.
+ */
+export async function openNew({ tag = '' } = {}) {
+  await open(null, { deferDocument: true });
+  if (!_editor) return null;                 // mount failed; open() reported it
+  return newDocument({ tag });
 }
 
 export async function newDocument({ tag = '' } = {}) {
@@ -478,7 +501,7 @@ export function init() {
 }
 
 const writerModule = {
-  init, open, close, isOpen, newDocument, openDoc, outline,
+  init, open, close, isOpen, newDocument, openNew, openDoc, outline,
   getEditor, getLexical, setMarkdown, getMarkdown,
   store,
 };

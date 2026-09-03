@@ -202,19 +202,47 @@ export function allDocs() {
  * The library list has no content, so this must never write `content` — a row we
  * hold the real body for has to keep it, and a row we do not stays a stub.
  */
-export function mergeListRows(metas) {
+export function mergeListRows(metas, pendingIds) {
+  const pending = pendingIds instanceof Set ? pendingIds : new Set(pendingIds || []);
   return _write([DOCS], async (tx) => {
     const store = tx.objectStore(DOCS);
-    for (const meta of metas || []) await _mergeOne(store, meta);
+    for (const meta of metas || []) await _mergeOne(store, meta, pending);
     return true;
   });
 }
 
-export function mergeListRow(meta) {
-  return _write([DOCS], (tx) => _mergeOne(tx.objectStore(DOCS), meta));
+/**
+ * Delete mirror rows the server no longer lists.
+ *
+ * Without this the mirror only ever grew: a document deleted or archived from
+ * the Library stayed in the writer's list forever, and opening it queued ops
+ * against an id the server 404s — which blocks that document's queue on every
+ * pass. Only safe to call after a COMPLETE refresh, and it never touches a row
+ * with local intent (unsynced, local-only, pending delete, or queued ops).
+ */
+export function pruneMissing(serverIds, pendingIds) {
+  const keep = serverIds instanceof Set ? serverIds : new Set(serverIds || []);
+  const pending = pendingIds instanceof Set ? pendingIds : new Set(pendingIds || []);
+  return _write([DOCS], async (tx) => {
+    const store = tx.objectStore(DOCS);
+    const rows = (await _req(store.getAll())) || [];
+    let removed = 0;
+    for (const row of rows) {
+      if (keep.has(row.id)) continue;
+      if (row.dirty || row.localOnly || row.deleted || row.metaDirty) continue;
+      if (pending.has(row.id)) continue;
+      await _req(store.delete(row.id));
+      removed += 1;
+    }
+    return removed;
+  });
 }
 
-async function _mergeOne(store, meta) {
+export function mergeListRow(meta) {
+  return _write([DOCS], (tx) => _mergeOne(tx.objectStore(DOCS), meta, new Set()));
+}
+
+async function _mergeOne(store, meta, pending) {
   const cur = await _req(store.get(meta.id));
 
   // A delete queued locally must survive a refresh that still lists the document
@@ -222,9 +250,11 @@ async function _mergeOne(store, meta) {
   // would make it reappear in the list and then vanish again once sync catches up.
   if (cur && cur.deleted) return true;
 
-  if (cur && cur.dirty) {
-    // Unsynced local edits outrank server metadata for title/tags: the user may
-    // have renamed or retagged offline and that change is still queued.
+  // Local intent outranks server metadata. `dirty` alone is not enough: it is set
+  // only by CONTENT saves, so a rename or retag (which write title/tags) left it
+  // clear and the refresh chained right after a rename reverted the new title.
+  // A queued op, or metaDirty, is the honest signal.
+  if (cur && (cur.dirty || cur.metaDirty || (pending && pending.has(meta.id)))) {
     await _req(store.put({ ...cur, updated_at: cur.updated_at || meta.updated_at || null }));
     return true;
   }
@@ -239,6 +269,7 @@ async function _mergeOne(store, meta) {
     deleted: 0,
     localOnly: 0,
     dirty: 0,
+    metaDirty: 0,
     // Keep a body we already hold; otherwise this stays a metadata-only stub.
     stub: holdsBody ? 0 : 1,
     touchedAt: (cur && cur.touchedAt) || Date.parse(meta.updated_at || '') || Date.now(),
@@ -381,7 +412,7 @@ export function setMeta(k, v) {
 export default {
   open, available, newLocalId, isLocalId,
   getDoc, putDoc, patchDoc, allDocs, dirtyDocs, removeDoc, rekeyDoc,
-  mergeListRow, mergeListRows,
+  mergeListRow, mergeListRows, pruneMissing,
   enqueue, outbox, getOp, outboxCount, dequeue, markOpFailed, dropOpsFor, dropOpsOfType,
   getMeta, setMeta,
 };

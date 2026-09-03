@@ -58,7 +58,9 @@ export const THEME = {
     code: 'writer-code',
     strikethrough: 'writer-strike',
     highlight: 'writer-highlight',
-    underline: 'writer-underline',
+    // NO underline. Markdown cannot express it, so the exporter dropped it
+    // silently — text looked underlined until the next open, then wasn't.
+    // registerAll refuses the command too, so it can never be applied.
   },
 };
 
@@ -236,12 +238,20 @@ export function transformersFor(md, lex) {
  * block in place as you type, and `**bold**` closes into real formatting.
  */
 export function registerAll(editor, lex) {
-  const { richText, list, history, markdown, utils } = lex;
+  const { richText, list, history, markdown, utils, core } = lex;
   return utils.mergeRegister(
     richText.registerRichText(editor),
     list.registerList(editor),
     history.registerHistory(editor, history.createEmptyHistoryState(), 300),
     markdown.registerMarkdownShortcuts(editor, transformersFor(markdown, lex)),
+    // Swallow underline (Cmd/Ctrl+U). Returning true stops rich-text applying a
+    // format the markdown exporter cannot store — better to not offer it than to
+    // show it and lose it. See THEME.text above.
+    editor.registerCommand(
+      core.FORMAT_TEXT_COMMAND,
+      (payload) => payload === 'underline',
+      core.COMMAND_PRIORITY_NORMAL,
+    ),
   );
   // registerLink is NOT here. In 0.49 it takes a signal-backed extension config
   // (it reads `config.validateUrl.peek()`), not a plain options object, so calling

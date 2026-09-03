@@ -25,6 +25,7 @@ const EXPANDED_KEY = 'odysseus-dw-expanded';   // shared with the old workspace
 let _docs = [];
 let _offline = false;   // showing the local mirror because the refresh failed
 let _knownTags = [];
+let _knownTagsSeq = 0;   // bumped by every local folder mutation (see load())
 let _expanded = _loadExpanded();
 let _listSeq = 0;
 let _search = '';
@@ -55,13 +56,35 @@ async function _loadKnownTags() {
   } catch (_) { return []; }
 }
 
-function _saveKnownTags() {
-  fetch(`${API}/api/prefs/dw_known_tags`, {
-    method: 'PUT',
-    credentials: 'same-origin',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ value: _knownTags }),
-  }).catch(() => { /* folder memory is a convenience, not correctness */ });
+/**
+ * Persist the folder list as a UNION with whatever is stored.
+ *
+ * This used to PUT the local array wholesale, so a folder created in another tab
+ * — or on another device — was deleted by the next folder action taken here.
+ * Read-merge-write keeps concurrent clients additive. Deletions still work: they
+ * go through _saveKnownTags with `replace`, which is the one case that must win.
+ */
+async function _saveKnownTags({ replace = false } = {}) {
+  _knownTagsSeq += 1;
+  try {
+    let value = _knownTags;
+    if (!replace) {
+      const stored = await _loadKnownTags();
+      const seen = new Map();
+      for (const t of [...stored, ..._knownTags]) {
+        const k = t.toLowerCase();
+        if (!seen.has(k)) seen.set(k, t);
+      }
+      value = [...seen.values()];
+      _knownTags = value;
+    }
+    await fetch(`${API}/api/prefs/dw_known_tags`, {
+      method: 'PUT',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ value }),
+    });
+  } catch (_) { /* folder memory is a convenience, not correctness */ }
 }
 
 /* ── the tag tree ────────────────────────────────────────────────────────── */
@@ -124,7 +147,7 @@ function _countNode(node) {
 async function _postTags(doc, next) {
   if (await db.available()) {
     doc.tags = next.slice();
-    await db.patchDoc(doc.id, { tags: next.slice(), touchedAt: Date.now() });
+    await db.patchDoc(doc.id, { tags: next.slice(), metaDirty: 1, touchedAt: Date.now() });
     await db.enqueue(doc.id, 'tags', next.slice());
     sync.refresh();
     sync.flush();
@@ -182,7 +205,15 @@ function _makeDropTarget(el, tagPath) {
 /* ── folder CRUD ─────────────────────────────────────────────────────────── */
 
 function _normPath(p) {
-  return String(p || '').split('/').map((s) => s.trim()).filter(Boolean).join('/');
+  // Commas cannot survive: the server stores tags as a comma-separated column,
+  // so "Recipes, drafts" would split into two tags and the folder the user typed
+  // would stay empty. Strip them rather than create folders nobody asked for.
+  return String(p || '')
+    .replace(/,/g, ' ')
+    .split('/')
+    .map((seg) => seg.trim().replace(/\s+/g, ' '))
+    .filter(Boolean)
+    .join('/');
 }
 
 export function createTag(path) {
@@ -213,7 +244,7 @@ export async function renameTag(oldPath, newPath) {
     try { await _postTags(doc, next); } catch (e) { console.error('[writer] rename tag failed', e); }
   }
   _knownTags = [...new Set(_knownTags.map(rewrite))];
-  _saveKnownTags();
+  _saveKnownTags({ replace: true });   // a rename removes the old path
   render();
 }
 
@@ -228,7 +259,7 @@ export async function deleteTag(path) {
     catch (e) { console.error('[writer] delete tag failed', e); }
   }
   _knownTags = _knownTags.filter((t) => !hit(t));
-  _saveKnownTags();
+  _saveKnownTags({ replace: true });   // a delete must not be re-unioned back
   render();
 }
 
@@ -288,7 +319,7 @@ async function renameDoc(doc) {
   if (!title || title === doc.title) return;
 
   if (await db.available()) {
-    await db.patchDoc(id, { title, touchedAt: Date.now() });
+    await db.patchDoc(id, { title, metaDirty: 1, touchedAt: Date.now() });
     // A document with no server id yet has its title carried by the create.
     if (!db.isLocalId(id)) await db.enqueue(id, 'title', title);
     doc.title = title;
@@ -352,12 +383,18 @@ async function duplicateDoc(doc) {
     return;
   }
 
-  const made = await (await fetch(`${API}/api/document`, {
+  const res = await fetch(`${API}/api/document`, {
     method: 'POST',
     credentials: 'same-origin',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ title, language: 'markdown', content }),
-  })).json();
+  });
+  if (!res.ok) {
+    // Claiming success for a copy that does not exist is worse than the failure.
+    _toast('Could not duplicate this document');
+    return;
+  }
+  const made = await res.json();
   if (made.id && tags.length) {
     await fetch(`${API}/api/document/${made.id}/tags?tags=${encodeURIComponent(tags.join(','))}`,
       { method: 'POST', credentials: 'same-origin' });
@@ -477,7 +514,10 @@ function _fileRow(doc) {
   });
   row.addEventListener('click', () => _onOpen(doc.id));
   row.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); _onOpen(doc.id); }
+    // Only the row itself. Without this, Enter/Space on the "…" button bubbled
+    // here and opened the document instead of its menu.
+    if (e.target !== row) return;
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); _onOpen(_liveId(doc)); }
   });
   row.appendChild(menus.actionButton('Document actions',
     (btn) => menus.openMenu(btn, _fileMenuItems(doc))));
@@ -609,11 +649,13 @@ export async function load() {
   }
 
   try {
+    const knownSeqAtStart = _knownTagsSeq;
     const known = _knownTags.length ? _knownTags : await _loadKnownTags();
     if (seq !== _listSeq) return;
 
     const all = [];
     let total = null;
+    let complete = false;   // did the paging loop reach the end of the list?
     for (let page = 0; page < PAGE_CAP; page += 1) {
       const params = new URLSearchParams({
         sort: 'recent', offset: String(page * PAGE), limit: String(PAGE),
@@ -625,22 +667,34 @@ export async function load() {
       const batch = Array.isArray(data.documents) ? data.documents : [];
       all.push(...batch);
       if (total === null && typeof data.total === 'number') total = data.total;
-      if (batch.length < PAGE) break;
-      if (total !== null && all.length >= total) break;
+      if (batch.length < PAGE) { complete = true; break; }
+      if (total !== null && all.length >= total) { complete = true; break; }
     }
 
-    _knownTags = known;
     if (local) {
+      // Documents with a QUEUED OP have local intent the server list cannot know
+      // about yet (a rename, a retag, a delete). Without this the refresh chained
+      // straight after a rename reverted the new title.
+      const pending = new Set((await db.outbox()).map((o) => o.docId));
+      if (seq !== _listSeq) return;
       // Fold the server's metadata into the mirror, then read the mirror back —
       // the union is what we show, so documents that exist only locally (created
       // offline, not yet synced) are not dropped by a refresh.
-      await db.mergeListRows(all);
+      await db.mergeListRows(all, pending);
+      // Only prune when the server's list was COMPLETE. Pruning off a truncated
+      // page would delete cached documents that simply were not on it.
+      if (complete) await db.pruneMissing(new Set(all.map((d) => d.id)), pending);
       if (seq !== _listSeq) return;
       _docs = (await db.allDocs()).map(_rowToDoc);
       if (seq !== _listSeq) return;
     } else {
       _docs = all;
     }
+    // FINDING 18: assigned only after the awaits above, and only if nothing
+    // touched it meanwhile — restoring a snapshot taken before them reverted a
+    // folder create/rename/delete that completed while the refresh was in
+    // flight, and then persisted the reverted list.
+    if (_knownTagsSeq === knownSeqAtStart) _knownTags = known;
     _error = null;
     _offline = false;
     render();

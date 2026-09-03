@@ -746,3 +746,106 @@ def test_list_indent_unit_is_documented_as_four():
     """Measured, not assumed: 1-3 spaces import as level 0, 4+ nest one level."""
     src = _read("static/js/writer/blocks.js")
     assert "const LIST_INDENT = 4" in src
+
+
+# ── identity, refresh and affordances (from the adversarial review) ──────────
+
+
+def test_local_intent_outranks_a_list_refresh():
+    """`dirty` is set only by CONTENT saves, so a rename or retag left it clear
+    and the refresh chained right after a rename reverted the new title. A queued
+    op (or metaDirty) is the honest signal."""
+    db = _read("static/js/writer/localdb.js")
+    merge = db.split("async function _mergeOne", 1)[1].split("\nexport ", 1)[0]
+    assert "cur.metaDirty" in merge and "pending" in merge
+    outline = _read("static/js/writer/outline.js")
+    assert "metaDirty: 1" in outline, "rename/retag must mark metadata as locally changed"
+    assert "db.mergeListRows(all, pending)" in outline
+
+
+def test_the_mirror_is_pruned_only_after_a_complete_refresh():
+    """The mirror only ever grew: a document deleted from the Library stayed in
+    the writer's list forever, and editing it queued ops the server 404s — which
+    blocks that document's queue on every pass. Pruning off a TRUNCATED page
+    would instead delete cached documents that simply were not on it."""
+    db = _read("static/js/writer/localdb.js")
+    assert "export function pruneMissing" in db
+    prune = db.split("export function pruneMissing", 1)[1].split("\n}", 1)[0]
+    for guard in ("row.dirty", "row.localOnly", "row.deleted", "pending.has"):
+        assert guard in prune, f"pruning must never drop a row with local intent ({guard})"
+    outline = _read("static/js/writer/outline.js")
+    assert "if (complete) await db.pruneMissing(" in outline
+
+
+def test_folder_state_is_not_reverted_by_an_in_flight_refresh():
+    """load() restored a _knownTags snapshot taken BEFORE its awaits, reverting a
+    folder create/rename/delete that completed meanwhile — and persisting the
+    reverted list."""
+    src = _read("static/js/writer/outline.js")
+    assert "_knownTagsSeq" in src
+    assert "if (_knownTagsSeq === knownSeqAtStart) _knownTags = known;" in src
+
+
+def test_folder_memory_is_written_as_a_union():
+    """dw_known_tags was PUT wholesale, so a folder created in another tab was
+    deleted by the next folder action here."""
+    src = _read("static/js/writer/outline.js")
+    save = src.split("async function _saveKnownTags", 1)[1].split("\n}", 1)[0]
+    assert "_loadKnownTags()" in save, "read-merge-write, not blind replace"
+    # A rename or delete removes entries, so those must replace rather than union.
+    assert "_saveKnownTags({ replace: true })" in src
+
+
+def test_a_comma_cannot_enter_a_folder_name():
+    """The server stores tags in a comma-separated column, so "a, b" split into
+    two tags and the folder the user typed stayed empty."""
+    src = _read("static/js/writer/outline.js")
+    norm = src.split("function _normPath", 1)[1].split("\n}", 1)[0]
+    assert "replace(/,/g" in norm
+
+
+def test_keyboard_activation_on_the_row_button_opens_the_menu():
+    """The row's keydown fired for Enter/Space anywhere inside it, so keyboard
+    users opened the document instead of its menu."""
+    src = _read("static/js/writer/outline.js")
+    assert "if (e.target !== row) return;" in src
+
+
+def test_duplicate_does_not_claim_success_when_the_create_failed():
+    src = _read("static/js/writer/outline.js")
+    dup = src.split("async function duplicateDoc", 1)[1].split("\nasync function", 1)[0]
+    assert "if (!res.ok)" in dup, "check the create before toasting Duplicated"
+
+
+def test_the_new_document_button_creates_exactly_one():
+    """It set location.hash (making open() resolve a document of its own) and THEN
+    polled for the editor to call newDocument() — producing two, one an empty
+    Untitled that autosave persisted."""
+    fork_ui = _read("static/js/fork-ui.js")
+    assert "openNew()" in fork_ui
+    assert "tryNew" not in fork_ui, "the editor-polling race must be gone"
+    writer = _read("static/js/writer/writer.js")
+    assert "export async function openNew" in writer
+    assert "deferDocument" in writer, "open() must not resolve a document the caller supplies"
+
+
+def test_the_surface_z_index_comes_from_the_shared_stack():
+    """Tool windows climb an unbounded bring-to-front counter and dock chips reach
+    10030, so a static z-index put the writer BEHIND an open tool window."""
+    src = _read("static/js/writer/writer.js")
+    assert "toolWindowZOrder.js" in src
+    assert "topPortalZ()" in src
+
+
+def test_underline_is_neither_offered_nor_styled():
+    """Cmd+U applied it, fork.css rendered it, and the markdown exporter dropped
+    it silently — formatting that vanishes on the next open."""
+    import re
+
+    src = _read("static/js/writer/blocks.js")
+    theme = src.split("  text: {", 1)[1].split("},", 1)[0]
+    # Strip comments: these guards describe the rule in prose, and matching the
+    # bare word would flag the explanation rather than the code.
+    theme = re.sub(r"//[^\n]*", "", theme)
+    assert "underline:" not in theme, "no theme class for a format that cannot be saved"
+    assert "FORMAT_TEXT_COMMAND" in src and "'underline'" in src, "the command must be refused"
