@@ -2190,9 +2190,10 @@ def _build_system_prompt(
                 except (TypeError, ValueError):
                     _skill_max_injected = 3
                 _skill_max_injected = max(0, min(12, _skill_max_injected))
+                _own_skills = sm.load(owner=owner)
                 relevant_skills = sm.get_relevant_skills(
                     last_user,
-                    skills=sm.load(owner=owner),
+                    skills=_own_skills,
                     threshold=0.25,
                     max_items=_skill_max_injected,
                     min_confidence=_skill_min_conf,
@@ -2251,9 +2252,26 @@ def _build_system_prompt(
                     _skills_text = "\n".join(lines)
                     if _skill_index_block:
                         _skills_text = _skill_index_block + "\n\n" + _skills_text
+                    # FORK: arm the post-external tool gate only when a skill
+                    # the USER wrote or imported is in play.
+                    #
+                    # Upstream arms unconditionally, which is right for their
+                    # tree: skill text is user-editable, and an imported skill
+                    # really is external content. But this fork ships a virtual
+                    # built-in skill (quiz-spoiler-markdown) that every instance
+                    # always has, so unconditional arming meant EVERY tool call
+                    # raised an approval card forever — the gate stopped
+                    # distinguishing anything. Built-in skill text is shipped
+                    # code reviewed in this repo, not third-party input.
+                    #
+                    # sm.load() returns only the owner's real skills; the virtual
+                    # built-ins come from available_skills/index_for. So an empty
+                    # list means whatever got injected is built-in-only.
+                    _skills_are_first_party_only = not _own_skills
                     _skills_message = untrusted_context_message(
                         "skills",
                         _skills_text,
+                        arm_tool_gate=not _skills_are_first_party_only,
                     )
                 else:
                     _skills_message = None
