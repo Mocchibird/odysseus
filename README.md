@@ -47,16 +47,17 @@ A full, hover-to-play tour lives on the landing page (`website/index.html`).
 <details>
 <summary>Screenshots / clips</summary>
 
-### Chat & Agents
-![Chat & Agents](docs/chat.gif)
-### Deep Research
-![Deep Research](docs/research.gif)
-### Compare
-![Compare](docs/compare.gif)
-### Documents
-![Documents](docs/document.gif)
-### Notes & Tasks
-![Notes & Tasks](docs/notes.gif)
+The clips below are the same ones the landing page plays. GitHub does not render
+`.webm` inline, so they are links — or open `website/index.html` locally for the
+hover-to-play tour.
+
+- [Chat & Agents](website/chat.webm)
+- [Deep Research](website/research.webm)
+- [Compare](website/compare.webm)
+- [Documents](website/document.webm)
+- [Notes & Tasks](website/notes.webm)
+- [Gallery](website/gallery.webm)
+- [Themes](website/theme.webm)
 
 </details>
 
