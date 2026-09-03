@@ -5384,7 +5384,10 @@ body.bg-pattern-sparkles {
       background:var(--bg);
       color:var(--fg);
       border:1px solid var(--fg);
-      font-size:12px;
+      /* font-size:0 hides the literal ✖ in the markup so the masked ::before
+         below is the ONLY glyph — without it the button renders both. The
+         accessible name comes from aria-label, not this text. */
+      font-size:0;
       width:24px;
       height:24px;
       padding:0;

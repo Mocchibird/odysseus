@@ -12,9 +12,9 @@ import modelsModule from './js/models.js';
 import ragModule from './js/rag.js';
 import presetsModule from './js/presets.js';
 import searchModule from './js/search.js';
-import chatModule from './js/chat.js?v=562';
-import compareModule from './js/compare/index.js?v=562';
-import documentModule from './js/document.js?v=562';
+import chatModule from './js/chat.js?v=563';
+import compareModule from './js/compare/index.js?v=563';
+import documentModule from './js/document.js?v=563';
 import searchChatModule from './js/search-chat.js';
 import { makeWindowDraggable } from './js/windowDrag.js';
 import {
@@ -24,7 +24,7 @@ import {
   settleSessionHydration
 } from './js/startupShell.js';
 import markdownModule from './js/markdown.js';
-import chatRenderer from './js/chatRenderer.js?v=562';
+import chatRenderer from './js/chatRenderer.js?v=563';
 import sessionModule from './js/sessions.js';
 import memoryModule from './js/memory.js';
 import voiceRecorderModule from './js/voiceRecorder.js';
@@ -39,15 +39,15 @@ import { UI_VIS_DEFAULT_OFF, resolveVisibility } from './js/ui_visibility.js';
 // 'gallery-refresh' listener (so a chat upload shows in the gallery
 // immediately even if the panel was never opened) — which would silently
 // never run if deferred to first open.
-import galleryModule from './js/gallery.js?v=562';
+import galleryModule from './js/gallery.js?v=563';
 import tasksModule from './js/tasks.js?v=20260723tasksbulkfeedback1';
 import calendarModule from './js/calendar.js';
-import adminModule from './js/admin.js?v=562';
-import settingsModule from './js/settings.js?v=562';
+import adminModule from './js/admin.js?v=563';
+import settingsModule from './js/settings.js?v=563';
 // FORK: runtime-inject fork-only UI (e.g. the API Tokens panel) into stable
 // upstream anchors, so index.html stays aligned with upstream. Side-effect
 // import — the module self-runs on load. See static/js/fork-ui.js.
-import './js/fork-ui.js?v=562';
+import './js/fork-ui.js?v=563';
 // Eagerly bind unified minimize/restore behavior across all tool modals.
 import './js/modalManager.js';
 // Desktop window tiling — drag a modal near an edge/corner to snap.
@@ -75,7 +75,7 @@ import { initSectionCollapse, initSectionDrag } from './js/section-management.js
 // re-awaiting. (tasks/calendar are NOT lazy — they have boot side effects and
 // stay eagerly imported above.)
 const _lazyModule = (loader) => { let m; return async () => (m ||= (await loader()).default); };
-const _gallery  = _lazyModule(() => import('./js/gallery.js?v=562'));
+const _gallery  = _lazyModule(() => import('./js/gallery.js?v=563'));
 const _health   = _lazyModule(() => import('./js/health.js?v=529'));
 const _today    = _lazyModule(() => import('./js/today.js?v=422'));
 

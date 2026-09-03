@@ -6,7 +6,7 @@
 import spinnerModule from './spinner.js';
 import uiModule, { styledConfirm, showToast, emptyStateIcon } from './ui.js';
 import { folderDisplayName, sortedFolders } from './emailInbox.js';
-import settingsModule from './settings.js?v=562';
+import settingsModule from './settings.js?v=563';
 import * as Modals from './modalManager.js';
 import { topPortalZ } from './toolWindowZOrder.js';
 import { makeWindowDraggable } from './windowDrag.js';
@@ -6114,7 +6114,7 @@ function _wireAttachmentHandlers(reader, folder) {
               ownerModal.classList.add('hidden');
             }
           }
-          const docMod = await import('./document.js?v=562');
+          const docMod = await import('./document.js?v=563');
           const load = (docMod && docMod.loadDocument) || (docMod && docMod.default && docMod.default.loadDocument);
           if (typeof load === 'function') {
             await load(json.doc_id);
