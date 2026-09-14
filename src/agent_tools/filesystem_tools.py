@@ -5,7 +5,7 @@ import re
 import difflib
 import shutil
 import time
-from typing import Optional, Dict, Any, Tuple, List
+from typing import Optional, Dict, Any
 
 from src.constants import MAX_READ_CHARS, MAX_DIFF_LINES
 
@@ -310,11 +310,18 @@ class WriteFileTool:
                     body = str(_a.get("content", ""))
             except (json.JSONDecodeError, TypeError, ValueError):
                 pass
+        from src.tool_execution import app_store_write_guard
         try:
             path = _resolve_tool_path(raw_path)
         except ValueError as e:
-            return {"error": f"write_file: {e}", "exit_code": 1}
-        from src.tool_execution import app_store_write_guard
+            # Refused. If it was refused for landing in an app-owned store,
+            # say which tool to use instead: most of those stores now sit
+            # behind upstream's application-state deny, which rejects them
+            # before the guard below can ever run, and its generic wording
+            # teaches a weak model nothing. The refusal is upstream's either
+            # way — only the message changes.
+            _hint = app_store_write_guard(os.path.realpath(os.path.expanduser(raw_path)))
+            return {"error": f"write_file: {_hint or e}", "exit_code": 1}
         _guard = app_store_write_guard(path)
         if _guard:
             return {"error": f"write_file: {_guard}", "exit_code": 1}

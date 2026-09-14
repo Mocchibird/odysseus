@@ -130,12 +130,36 @@ def test_write_guard_covers_all_app_stores_but_not_plain_data():
 
 
 def test_write_file_tool_end_to_end_refusal():
+    """Refused AND told which tool to use, through both refusal paths.
+
+    Two lanes reach the same outcome, and the teaching message must survive
+    both. The Files store now sits behind upstream's application-state deny,
+    so _resolve_tool_path rejects it before the guard can run; uploads is
+    still a readable root, so the guard itself fires. A weak model that only
+    hears "inside the application state directory" writes the stub somewhere
+    else instead of calling manage_files — which is the exact false-success
+    this guard exists to stop.
+    """
     from src.agent_tools.filesystem_tools import WriteFileTool
+    from src.constants import UPLOAD_DIR
     from src.file_store import _files_dir
-    bad = os.path.join(_files_dir(), "owner", "Stub.md")
-    r = asyncio.run(WriteFileTool().execute(f"{bad}\n# stub", {"workspace": None}))
-    assert r["exit_code"] == 1
-    assert "manage_files" in r["error"]
+
+    # (path, the phrase that makes the refusal instructive for THAT store)
+    lanes = (
+        # Behind upstream's app-state deny: names the tool to use instead.
+        (os.path.join(_files_dir(), "owner", "Stub.md"), "manage_files"),
+        # Still a readable root, so the guard itself fires: explains what the
+        # directory is for, which is the useful steer — there is no tool that
+        # adds to uploads, attachments land there on their own.
+        (os.path.join(str(UPLOAD_DIR), "Stub.md"), "uploads store"),
+    )
+    for bad, teaches in lanes:
+        r = asyncio.run(WriteFileTool().execute(f"{bad}\n# stub", {"workspace": None}))
+        assert r["exit_code"] == 1, bad
+        assert teaches in r["error"], f"{bad} -> {r['error']}"
+        # Generic confinement wording alone is the failure mode being guarded.
+        assert r["error"] != f"write_file: path '{bad}' is inside the application state directory"
+        assert not os.path.exists(bad), "a refused write must not land"
 
 
 # ── Agent docs steer storing attachments to manage_files ─────────────────────

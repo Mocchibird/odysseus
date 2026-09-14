@@ -42,8 +42,8 @@ import { UI_VIS_DEFAULT_OFF, resolveVisibility } from './js/ui_visibility.js';
 import galleryModule from './js/gallery.js?v=563';
 import tasksModule from './js/tasks.js?v=20260723tasksbulkfeedback1';
 import calendarModule from './js/calendar.js';
-import adminModule from './js/admin.js?v=563';
-import settingsModule from './js/settings.js?v=563';
+import adminModule from './js/admin.js?v=564';
+import settingsModule from './js/settings.js?v=564';
 // FORK: runtime-inject fork-only UI (e.g. the API Tokens panel) into stable
 // upstream anchors, so index.html stays aligned with upstream. Side-effect
 // import — the module self-runs on load. See static/js/fork-ui.js.
