@@ -78,10 +78,13 @@ MAX_READ_CHARS = 20_000         # cap for read_file / document preview
 MAX_DIFF_LINES = 400            # cap for edit_file unified-diff display
 
 # FORK: tool-output spill (src/tool_output_spill.py). When a tool's output
-# exceeds the caps above, the full text is written under DATA_DIR/<SPILL_DIR_NAME>
-# and the model gets a bounded excerpt plus that path, instead of the overflow
-# being discarded. DATA_DIR is already a tool path root, so read_file/bash can
-# reach these files — keep them there or the retrieval hint stops being true.
+# exceeds the caps above, the full text is written under
+# AGENT_WORKSPACE_DIR/<SPILL_DIR_NAME> and the model gets a bounded excerpt plus
+# that path, instead of the overflow being discarded. The spill root must stay a
+# readable tool path root or the retrieval hint stops being true — DATA_DIR
+# itself is NOT one (_is_app_state_path denies all of it but the carve-outs in
+# tool_execution._agent_readable_data_subdirs), which is why the spill lives in
+# the agent workspace. tool_output_spill.SPILL_PARENT_DIR owns that choice.
 SPILL_DIR_NAME = "tool_output"
 SPILL_RETENTION_DAYS = 7             # spill files are debugging aids, not records
 SPILL_MAX_FILES_PER_SESSION = 200    # bound one runaway session's disk use
