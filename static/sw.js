@@ -42,7 +42,7 @@ const PRECACHE = [
   '/',
   '/static/manifest.json',
   '/static/style.css?v=563',
-  '/static/fork.css?v=563',
+  '/static/fork.css?v=564',
   '/static/app.js?v=563',
   '/static/js/storage.js',
   '/static/js/appConfig.js',
