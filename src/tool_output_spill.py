@@ -23,15 +23,18 @@ bad and both common:
 
 THE FIX
 -------
-Persist the full output verbatim to a session-scoped file under DATA_DIR, and
-give the model a bounded excerpt plus an opaque **locator** and a **retrieval
-hint**. The tail is kept as well as the head, and the middle is one grep away
-instead of gone.
+Persist the full output verbatim to a session-scoped file under the agent's
+own workspace, and give the model a bounded excerpt plus an opaque **locator**
+and a **retrieval hint**. The tail is kept as well as the head, and the middle
+is one grep away instead of gone.
 
-This works because DATA_DIR is already a tool path root (see
-``tool_execution._tool_path_roots``), so ``read_file`` and ``bash`` can reach a
-spill file. The retrieval hint is a promise the agent can actually keep — do not
-move spill storage outside DATA_DIR without also fixing the hint.
+This works because ``AGENT_WORKSPACE_DIR`` is a tool path root (it is in
+``tool_execution._agent_readable_data_subdirs``, which feeds
+``_tool_path_roots``), so ``read_file`` and ``bash`` can reach a spill file. The
+retrieval hint is a promise the agent can actually keep, so spill storage MUST
+stay under a readable root — ``tests/test_tool_output_spill.py`` asserts this,
+because upstream once narrowed the roots from DATA_DIR to a carve-out list and
+silently turned every locator into a path the agent is refused.
 
 DESIGN CREDIT
 -------------
@@ -65,8 +68,8 @@ KNOWN LIMITATIONS
   which the bound context does not carry, so it is deliberately not guessed at.
   Retention bounds the cost.
 * **Spilling is storage, not access control.** The session id namespaces writes;
-  it does not authorise reads. Anything that can reach DATA_DIR can read any
-  spill file, exactly as with any other file under the agent's roots.
+  it does not authorise reads. Anything that can reach the agent workspace can
+  read any spill file, exactly as with any other file under the agent's roots.
 * **No retrieval API.** The locator is a plain path and retrieval is whatever
   read_file/bash can do with it. That is the point — it reuses tools the agent
   already has rather than adding a bespoke one.
@@ -83,7 +86,7 @@ from pathlib import Path
 from typing import Optional, Tuple
 
 from src.constants import (
-    DATA_DIR,
+    AGENT_WORKSPACE_DIR,
     SPILL_DIR_NAME,
     SPILL_MAX_FILES_PER_SESSION,
     SPILL_RETENTION_DAYS,
@@ -139,8 +142,14 @@ def _safe_component(raw: Optional[str], fallback: str) -> str:
     return (cleaned[:48] or fallback)
 
 
+# The directory the spill tree hangs off. Must stay a readable tool path root:
+# a locator the agent cannot open is worse than no locator, because the hint
+# promises a retrieval that then fails. See SPILL_PARENT_DIR's guard test.
+SPILL_PARENT_DIR = AGENT_WORKSPACE_DIR
+
+
 def spill_root() -> Path:
-    return Path(DATA_DIR) / SPILL_DIR_NAME
+    return Path(SPILL_PARENT_DIR) / SPILL_DIR_NAME
 
 
 def _session_dir(session_id: Optional[str]) -> Path:
@@ -237,7 +246,7 @@ def truncate_with_spill(text: str, limit: int) -> str:
     marker = marker_for(total)
     body = limit - len(marker)
     if body < _MIN_BODY_CHARS:
-        # No room for a real excerpt (a very deep DATA_DIR makes the marker long).
+        # No room for a real excerpt (a very deep spill root makes the marker long).
         # Still surface the locator: pointing at the bytes is worth more than a
         # few hundred more characters of head.
         short = f"\n... [output saved at {locator}] ...\n"

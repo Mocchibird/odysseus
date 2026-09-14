@@ -178,27 +178,40 @@ def test_retention_drops_files_past_the_age_limit(spill_dir, monkeypatch):
 
 
 def test_the_hint_points_somewhere_the_agent_can_actually_read():
-    """DATA_DIR is a tool path root; the retrieval hint depends on it.
+    """The retrieval hint promises the agent can open the locator. Prove it.
 
-    If spill storage moves outside DATA_DIR, read_file/bash can no longer open a
-    spill file and the hint becomes a lie. Deliberately takes no spill_dir
-    fixture so it reads the REAL root (and does not reload the module, which
-    would clobber other tests' patches).
+    Spill files live under SPILL_PARENT_DIR; if that is not a readable tool path
+    root, read_file/bash cannot open one and the hint becomes a lie. This is not
+    hypothetical: upstream narrowed the native-file roots from DATA_DIR to an
+    explicit carve-out list, and every locator silently became a path read_file
+    refuses — files still written, hint still printed, retrieval always failing.
+
+    Deliberately takes no spill_dir fixture so it reads the REAL root (and does
+    not reload the module, which would clobber other tests' patches).
     """
-    from src.constants import DATA_DIR, SPILL_DIR_NAME
+    from src.constants import SPILL_DIR_NAME
+    from src.tool_execution import (
+        _can_traverse_tool_path,
+        _is_denied_tool_path,
+        _tool_path_roots,
+    )
 
     # Composed from the constants, NOT from spill_root(): conftest redirects that
     # function for the whole session so the suite writes no repo-local artifacts.
     # The constants are what an operator would actually change.
-    root = (Path(DATA_DIR) / SPILL_DIR_NAME).resolve()
-    assert str(root).startswith(str(Path(DATA_DIR).resolve()))
+    parent = Path(spill.SPILL_PARENT_DIR).resolve()
+    root = (parent / SPILL_DIR_NAME).resolve()
+    assert str(root).startswith(str(parent))
     assert SPILL_DIR_NAME in root.parts
 
-    # And that root must be inside a directory the file tools are allowed to open.
-    from src.tool_execution import _tool_path_roots
-    assert any(str(root).startswith(r) for r in _tool_path_roots()), (
-        "spill files must live under a tool path root or the agent cannot read them"
+    # The parent must be an allowed root, and must not be caught by any of the
+    # deny rules layered on top of the allowlist (sensitive path, app state,
+    # hard link) — being on the list is not by itself permission to read.
+    assert str(parent) in _tool_path_roots(), (
+        f"{parent} is not a tool path root — spill locators are unreadable"
     )
+    assert not _is_denied_tool_path(str(parent))
+    assert _can_traverse_tool_path(str(parent))
 
 
 def test_the_hint_tells_the_model_what_to_do(spill_dir):
@@ -239,3 +252,32 @@ def test_spilling_is_skipped_for_small_limits(spill_dir):
     assert out.startswith("abcdefghij")
     assert "truncated" in out
     assert not list(spill_dir.rglob("*.txt")), "no file should be written for a tiny limit"
+
+
+def test_a_spilled_locator_survives_the_real_path_resolver(spill_dir, monkeypatch):
+    """End-to-end: the emitted path must pass the resolver read_file runs.
+
+    spill_dir is a tmp root, so point the resolver's allowlist at it — the test
+    above pins the production root. What is checked here is the locator itself:
+    that what lands in the marker is a real, resolvable, non-denied path and not
+    something only this module's own bookkeeping believes in.
+    """
+    import os
+
+    from src import tool_execution
+
+    monkeypatch.setattr(
+        tool_execution, "_tool_path_roots",
+        lambda: [os.path.realpath(str(spill_dir))],
+    )
+    token = _bound()
+    try:
+        out = _truncate("z" * 200_000, 4000)
+    finally:
+        spill.unbind_tool_call(token)
+
+    locator = out.split("saved at ")[-1].split()[0].rstrip("]")
+    resolved = tool_execution._resolve_tool_path(locator)   # raises if refused
+    assert os.path.isfile(resolved)
+    with open(resolved, encoding="utf-8") as handle:
+        assert handle.read() == "z" * 200_000, "the spill must be verbatim"
