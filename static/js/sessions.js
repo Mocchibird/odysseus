@@ -373,6 +373,9 @@ let _sessionListFocused = false;
 function _deselectCurrentSession(sid) {
   if (currentSessionId !== sid) return;
   currentSessionId = null;
+  window.dispatchEvent(new CustomEvent('odysseus:session-changed', {
+    detail: { sessionId: null },
+  }));
   uiModule.el('chat-history').innerHTML = '';
   uiModule.el('current-meta').textContent = 'Odysseus Chat';
   Storage.remove('lastSessionId');
@@ -2088,6 +2091,9 @@ export async function selectSession(id, { keepSidebar = false, showLoading = tru
       try { window.documentModule.clearSelection(); } catch {}
     }
     currentSessionId = id;
+    window.dispatchEvent(new CustomEvent('odysseus:session-changed', {
+      detail: { sessionId: id ? id : null },
+    }));
     try { window.__odysseusLastSelectedSessionId = id; } catch (_) {}
     // Identify Assistant / task-output sessions so we don't "trap" the user
     // there on return. Skipped from both `lastSessionId` persistence and the
@@ -2483,6 +2489,9 @@ export async function createDirectChat(url, modelId, endpointId, opts = {}) {
   _skipAutoSelect = true;
   _suppressNextSessionLoading = true;
   currentSessionId = null;
+  window.dispatchEvent(new CustomEvent('odysseus:session-changed', {
+    detail: { sessionId: null },
+  }));
   try { window.__odysseusLastSelectedSessionId = ''; } catch (_) {}
   Storage.remove('lastSessionId');
   history.replaceState(null, '', window.location.pathname);
@@ -2598,6 +2607,9 @@ export async function materializePendingSession() {
     }
     _pendingChat = null;
     currentSessionId = payload.id;
+    window.dispatchEvent(new CustomEvent('odysseus:session-changed', {
+      detail: { sessionId: payload.id, materialized: true },
+    }));
     if (!isIncognito) {
       Storage.set('lastSessionId', payload.id);
       history.replaceState(null, '', '#' + payload.id);
@@ -2669,6 +2681,9 @@ export function getCurrentEndpointUrl() {
 export function setCurrentSessionId(id) {
   _sessionNavToken++;
   currentSessionId = id;
+  window.dispatchEvent(new CustomEvent('odysseus:session-changed', {
+    detail: { sessionId: id ? id : null },
+  }));
   try { window.__odysseusLastSelectedSessionId = id || ''; } catch (_) {}
   if (!id) {
     _suppressNextSessionLoading = true;

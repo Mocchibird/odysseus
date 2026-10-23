@@ -133,3 +133,28 @@ def test_unaudited_or_below_threshold_published_skill_is_not_injected(tmp_path):
     assert not sm.get_relevant_skills(
         "premature skill", min_confidence=0.80,
     )
+
+
+def test_auto_approve_off_injects_published_skills_without_an_audit(tmp_path):
+    # #6634: OFF used min_confidence=2.0, which no 0-1 confidence clears, so
+    # every user skill was rejected. Publishing is the approval when OFF.
+    (tmp_path / "skills").mkdir()
+    for name, status in (("premature-skill", "published"), ("draft-skill", "draft")):
+        path = _write_skill_md(tmp_path / "skills", name)
+        text = path.read_text(encoding="utf-8").replace("audit_verdict: pass\n", "")
+        path.write_text(text.replace("status: published", f"status: {status}"), encoding="utf-8")
+    sm = SkillsManager(str(tmp_path))
+
+    query = "premature skill draft skill"
+    # threshold=0 isolates the eligibility gate from relevance scoring.
+    # FORK: the fork ships a built-in skill (quiz-spoiler-markdown); built-ins
+    # are always eligible, and threshold=0 returns every eligible skill.
+    from services.memory.skills import QUIZ_SPOILER_MARKDOWN_SKILL_NAME
+    assert _names(sm.get_relevant_skills(query, threshold=0.0, published_only=True)) - {
+        QUIZ_SPOILER_MARKDOWN_SKILL_NAME
+    } == {"premature-skill"}
+    # Auto-approve ON still needs a passing audit, as before (the fork's
+    # built-in is exempt from the audit, as upstream's built-in rule says).
+    assert not (_names(sm.get_relevant_skills(query, threshold=0.0, min_confidence=0.85)) - {
+        QUIZ_SPOILER_MARKDOWN_SKILL_NAME
+    })

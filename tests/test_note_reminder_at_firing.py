@@ -69,8 +69,14 @@ def _run(notes, monkeypatch, tmp_path, owner="alice"):
     calls = []
 
     async def fake_dispatch(**kw):
+        # Like the real dispatch_reminder, the dispatcher owns the per-note
+        # {at, channel} receipt the scanner's 25-minute reping guard reads.
         calls.append(kw)
-        return {"ok": True}
+        state = tmp_path / f"note_pings_{owner}.json"
+        cache = json.loads(state.read_text()) if state.exists() else {}
+        cache[kw["note_id"]] = {"at": datetime.now(timezone.utc).isoformat(), "channel": "browser"}
+        state.write_text(json.dumps(cache))
+        return {"ok": True, "browser_sent": True}
 
     monkeypatch.setattr(cd, "SessionLocal", lambda: _DB(notes))
     monkeypatch.setattr(nr, "dispatch_reminder", fake_dispatch)

@@ -2246,17 +2246,25 @@ async def action_audit_skills(owner: str, **kwargs) -> Tuple[str, bool]:
 
 async def action_ping_notes(owner: str, **kwargs) -> Tuple[str, bool]:
     """Background note-due scanner. Fires a reminder for any note whose
-    `due_date` falls in the current ±5-minute window and hasn't been pinged
-    within the last 25 minutes. Mirrors `action_ping_events` for calendar.
+    `due_date` falls in the current ±90-second window and hasn't been delivered
+    through its configured channel in the last 25 minutes, plus the fork's
+    once-a-day `reminder_at` nag until the note is checked off.
 
-    State (`data/note_pings.json`): {note_id: iso_ts_of_last_ping}. Pruned
-    on each run by dropping entries for notes that are gone/archived/replied.
+    Per-owner state: {note_id: {at, channel}} written by dispatch_reminder
+    (legacy timestamps still accepted), plus the scanner's own per-day
+    `<id>#rem` gates. Pruned on each run by dropping entries for notes that are
+    gone/archived/replied.
     """
     try:
         import json as _json
         from datetime import datetime as _dt, timezone as _tz, timedelta as _td, time as _dtime
         from pathlib import Path as _P
         from core.database import SessionLocal as _SL, Note as _N
+        from src.settings import load_settings
+
+        channel = load_settings().get("reminder_channel", "browser")
+        external_channel = channel in ("email", "ntfy", "webhook")
+        delivery_key = f"{channel}_sent" if external_channel else "browser_sent"
 
         # Per-owner state file so cache-pruning doesn't cross-delete other
         # users' entries (review C4). Legacy path kept as fallback so a
@@ -2321,8 +2329,8 @@ async def action_ping_notes(owner: str, **kwargs) -> Tuple[str, bool]:
             sent = []
             # Keys this scan actually wrote (the per-day `<id>#rem` gates). Used
             # by the merge-before-write below so we overlay only our own entries
-            # and never clobber dispatch_reminder's concurrent {at, channel}
-            # markers for the due-date `<id>` keys.
+            # and never clobber dispatch_reminder's {at, channel} receipts for
+            # the due-date `<id>` keys (dispatch owns those).
             written = set()
 
             def _all_checked(n):
@@ -2339,7 +2347,7 @@ async def action_ping_notes(owner: str, **kwargs) -> Tuple[str, bool]:
                     it.get("done") or it.get("checked") for it in items
                 )
 
-            async def _fire(n):
+            async def _fire(n, queue_browser=True):
                 """Compose the reminder text from the note row and dispatch it."""
                 title = (n.title or "Reminder").strip() or "Reminder"
                 body_parts = []
@@ -2365,6 +2373,7 @@ async def action_ping_notes(owner: str, **kwargs) -> Tuple[str, bool]:
                 result = await dispatch_reminder(
                     title=title, note_body=body, note_id=n.id,
                     owner=n.owner or owner or "",
+                    queue_browser=queue_browser,
                 )
                 return title, (result or {})
 
@@ -2388,36 +2397,38 @@ async def action_ping_notes(owner: str, **kwargs) -> Tuple[str, bool]:
                 due = _parse_due(n.due_date)
                 if due and abs((due - now).total_seconds()) <= window.total_seconds():
                     recent = False
+                    browser_recent = False
                     last = cache.get(n.id)
                     if last:
                         try:
+                            last_channel = None
                             if isinstance(last, dict):
+                                last_channel = last.get("channel")
                                 last = last.get("at")
                             last_dt = _dt.fromisoformat(str(last))
                             if last_dt.tzinfo is None:
                                 last_dt = last_dt.replace(tzinfo=_tz.utc)
-                            recent = last_dt >= reping_cutoff
+                            if last_dt >= reping_cutoff:
+                                if not external_channel or last_channel == channel:
+                                    recent = True
+                                else:
+                                    # Browser-only receipts do not prove external
+                                    # delivery, but the fallback must not be queued twice.
+                                    browser_recent = last_channel in (None, "browser")
                         except Exception:
                             pass
                     if not recent:
                         try:
-                            title, result = await _fire(n)
-                            # Only record a real push. On a dedup skip we still
-                            # mark `fired` so we don't also fire the reminder_at
-                            # nudge for the same note in this tick, but we leave
-                            # dispatch's on-disk {at, channel} marker untouched
-                            # (the merge below preserves it) and don't re-count.
-                            if _dispatch_sent(result):
-                                sent.append(title)
-                                _sent_ch = (
-                                    "email" if result.get("email_sent")
-                                    else "ntfy" if result.get("ntfy_sent")
-                                    else "webhook" if result.get("webhook_sent")
-                                    else "quiet" if result.get("quiet_hours")
-                                    else "browser"
-                                )
-                                cache[n.id] = {"at": now.isoformat(), "channel": _sent_ch}
-                                written.add(n.id)
+                            title, result = await _fire(n, queue_browser=not browser_recent)
+                            # dispatch_reminder owns the {at, channel} receipt for
+                            # this note. A dedup skip or a failed external send is
+                            # not counted; either way `fired` keeps the reminder_at
+                            # nudge from also going out this tick.
+                            if not result.get("skipped"):
+                                if result.get(delivery_key):
+                                    sent.append(title)
+                                else:
+                                    logger.warning("ping_notes: %s delivery failed for %s", channel, n.id)
                             fired = True
                         except Exception as e:
                             logger.warning(f"ping_notes: due dispatch failed for {n.id}: {e}")
@@ -2476,7 +2487,7 @@ async def action_ping_notes(owner: str, **kwargs) -> Tuple[str, bool]:
                 logger.warning(f"ping_notes: cache write failed: {e}")
 
             if not sent:
-                raise TaskNoop(f"scanned {len(notes)} note(s), none due in ±{WINDOW_SEC}s")
+                raise TaskNoop(f"scanned {len(notes)} note(s), no reminders delivered")
             preview = "; ".join(sent[:3])
             extra = f" (+{len(sent) - 3} more)" if len(sent) > 3 else ""
             return f"Pinged {len(sent)} note(s): {preview}{extra}", True
