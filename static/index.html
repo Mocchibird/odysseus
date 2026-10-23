@@ -247,7 +247,14 @@
   <link rel="preload" as="font" type="font/woff2" crossorigin href="/static/fonts/FiraCode-Regular.woff2">
   <link rel="preload" as="font" type="font/woff2" crossorigin href="/static/fonts/FiraCode-SemiBold.woff2">
   <link rel="stylesheet" href="/static/style.css?v=20260921chatgptusage2">
-  <!-- FORK: fork-only CSS, loaded after style.css so style.css stays aligned with upstream. -->
+  <!-- Panel stylesheets split out of style.css for maintainability. They are
+       eager and their order is load-bearing: the cascade is the concatenation of
+       these files in this order, so they must stay in this order here and in the
+       PRECACHE list in sw.js. None of them is lazy-loaded. -->
+  <link rel="stylesheet" href="/static/css/documents-gallery-editor.css?v=20260923csssplit1">
+  <link rel="stylesheet" href="/static/css/email-calendar-notes-tasks.css?v=20260923csssplit2">
+  <link rel="stylesheet" href="/static/css/cookbook-research-memory-settings.css?v=20260923csssplit3">
+  <!-- FORK: fork-only CSS, loaded after style.css and the panel stylesheets so those stay aligned with upstream. -->
   <link rel="stylesheet" href="/static/fork.css?v=564">
   <link rel="modulepreload" href="/static/app.js?v=20260921chatgptusage2">
 <link rel="modulepreload" href="/static/js/chat.js?v=20260917toolttft1">

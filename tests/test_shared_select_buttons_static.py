@@ -1,11 +1,23 @@
 from pathlib import Path
 
+from tests.helpers.stylesheets import app_css
+
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def _occurrences(text, needle):
+    """Every index of needle, so an assertion does not depend on which copy of
+    a selector the cascade happens to put first."""
+    out, i = [], text.find(needle)
+    while i != -1:
+        out.append(i)
+        i = text.find(needle, i + 1)
+    return out
+
+
 def test_bulk_select_triggers_share_dot_and_x_icons():
-    css = (ROOT / "static" / "style.css").read_text()
+    css = app_css()
 
     for selector in (
         "#memory-select-btn",
@@ -37,14 +49,14 @@ def test_library_titles_have_highlighted_respective_icons():
 
     # FORK: the Library has a fifth section, Files, with its own titled icon.
     assert source.count('class="doclib-section-title-icon"') == 5
-    assert "color: var(--accent, var(--red));" in (ROOT / "static" / "style.css").read_text()
+    assert "color: var(--accent, var(--red));" in app_css()
     for title in ("Chats", "Archive", "Research", "Documents", "Files"):
         assert f">{title} <span" in source
 
 
 def test_library_select_follows_tidy():
     source = (ROOT / "static" / "js" / "documentLibrary.js").read_text()
-    css = (ROOT / "static" / "style.css").read_text()
+    css = app_css()
 
     assert source.index('id="doclib-chats-tidy-btn"') < source.index('id="doclib-chats-select-btn"')
     assert source.index('id="doclib-research-tidy-btn"') < source.index('id="doclib-research-select-btn"')
@@ -68,7 +80,7 @@ def test_library_select_follows_tidy():
 
 def test_library_filter_chips_match_skills_count_markup():
     source = (ROOT / "static" / "js" / "documentLibrary.js").read_text()
-    css = (ROOT / "static" / "style.css").read_text()
+    css = app_css()
 
     assert "function _setLibraryCountChipContent" in source
     assert "chip.replaceChildren(text, value)" in source
@@ -90,7 +102,7 @@ def test_launch_cookbook_filter_chips_match_skills():
 
 
 def test_launch_search_select_and_tags_move_up_together():
-    css = (ROOT / "static" / "style.css").read_text()
+    css = app_css()
 
     rule = css[css.index("#serve-search,"):css.index("#serve-search,") + 140]
     assert "#hwfit-cache-select," in rule
@@ -110,11 +122,16 @@ def test_launch_search_select_and_tags_move_up_together():
 
 
 def test_launch_server_selector_and_model_search_move_up_together():
-    css = (ROOT / "static" / "style.css").read_text()
+    css = app_css()
 
-    rule = css[css.index("#hwfit-server-select,"):css.index("#hwfit-server-select,") + 130]
-    assert "#hwfit-search" in rule
-    assert "top: -2px !important;" in rule
+    # The stylesheets are split across several files, so this selector group
+    # is not guaranteed to be the first occurrence of its opening selector.
+    # Check every occurrence instead of a fixed offset into the cascade.
+    rules = [css[i:i + 130] for i in _occurrences(css, "#hwfit-server-select,")]
+    assert any(
+        "#hwfit-search" in rule and "top: -2px !important;" in rule
+        for rule in rules
+    ), "no #hwfit-server-select rule groups #hwfit-search with top: -2px !important"
 
 
 def test_launch_heading_uses_accented_flame_icon():
@@ -134,7 +151,7 @@ def test_launch_heading_reports_cached_model_count():
 
 
 def test_launch_search_matches_document_library_search_treatment():
-    css = (ROOT / "static" / "style.css").read_text()
+    css = app_css()
 
     rule = css[css.index("#hwfit-search {", css.index("#hwfit-server-select,")):][:700]
     assert "height: 30px;" in rule
@@ -152,7 +169,7 @@ def test_launch_search_matches_document_library_search_treatment():
 
 def test_memory_filter_chips_match_skills_and_are_not_cropped():
     source = (ROOT / "static" / "js" / "memory.js").read_text()
-    css = (ROOT / "static" / "style.css").read_text()
+    css = app_css()
 
     assert "skills-summary-chip memory-filter-chip" in source
     assert "btn.replaceChildren(label, count)" in source
