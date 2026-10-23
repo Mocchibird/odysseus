@@ -498,17 +498,18 @@ def test_standalone_page_versions_match_index_html():
     """A versioned URL is served `immutable` and skips revalidation.
 
     If these drift from index.html the standalone page fetches its own copies of
-    style.css/fork.css instead of reusing the ones already cached.
+    the app stylesheets instead of reusing the ones already cached. Upstream
+    split style.css into ordered fragments, so compare the whole cascade:
+    same files, same order, same tokens.
     """
     import re
 
-    def tokens(rel, name):
-        return set(re.findall(rf"{re.escape(name)}\?v=(\d+)", _read(rel)))
+    def sheets(rel):
+        return re.findall(r'<link rel="stylesheet" href="(/static/(?:css/[^"]+|fork\.css[^"]*))">', _read(rel))
 
-    for asset in ("style.css", "fork.css"):
-        assert tokens("static/writer.html", asset) == tokens("static/index.html", asset), (
-            f"{asset} version in writer.html must match index.html"
-        )
+    index_sheets = sheets("static/index.html")
+    assert index_sheets and index_sheets[-1].startswith("/static/fork.css?v="), "fork.css loads last"
+    assert sheets("static/writer.html") == index_sheets, "writer.html must link index.html's stylesheet cascade"
 
 
 def test_standalone_page_is_not_referenced_by_upstream_files():

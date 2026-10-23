@@ -6,7 +6,7 @@
     "url": "https://github.com/odysseus-dev/odysseus.git"
   },
   "scripts": {
-    "lint:css": "stylelint static/style.css static/fork.css",
+    "lint:css": "stylelint \"static/css/*.css\" static/fork.css",
     "lint:js": "eslint static/app.js static/js",
     "test:photo-editor": "playwright test --config tests/e2e/playwright.config.js",
     "test:photo-editor:install": "playwright install chromium firefox webkit",

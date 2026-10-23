@@ -30,7 +30,7 @@ def test_versioned_js_is_immutable():
 
 def test_versioned_css_is_immutable():
     client = _client()
-    resp = client.get("/static/style.css?v=999")
+    resp = client.get("/static/css/00-tokens.css?v=999")
     assert resp.status_code == 200
     assert resp.headers["cache-control"] == "public, max-age=31536000, immutable"
 

@@ -4,7 +4,7 @@
 silently won/masked it" footgun the ROADMAP flags).
 
 Usage:
-    python scripts/css_media_audit.py                  # audit static/style.css
+    python scripts/css_media_audit.py                  # audit the whole app cascade
     python scripts/css_media_audit.py path/to.css      # audit another file
     python scripts/css_media_audit.py --selector .foo  # show every definition of one selector
 
@@ -14,8 +14,16 @@ compiler. Pure stdlib; safe (read-only).
 """
 from __future__ import annotations
 
+import glob
+import os
 import sys
 from collections import defaultdict
+
+# The app's CSS is a set of ordered fragments (static/css/*.css, then the fork's
+# static/fork.css), so the default audit spans all of them.
+_DEFAULT_PATHS = sorted(glob.glob(os.path.join("static", "css", "*.css"))) + [
+    os.path.join("static", "fork.css"),
+]
 
 
 def _scan(css: str):
@@ -72,7 +80,7 @@ def _scan(css: str):
 
 
 def main(argv):
-    path = "static/style.css"
+    paths = _DEFAULT_PATHS
     want = None
     args = argv[1:]
     if "--selector" in args:
@@ -80,10 +88,16 @@ def main(argv):
         want = args[k + 1] if k + 1 < len(args) else None
         args = args[:k] + args[k + 2:]
     if args:
-        path = args[0]
+        paths = [args[0]]
 
-    with open(path, encoding="utf-8") as fh:
-        defs = _scan(fh.read())
+    defs: dict[str, list] = defaultdict(list)
+    for path in paths:
+        with open(path, encoding="utf-8") as fh:
+            for sel, hits in _scan(fh.read()).items():
+                for ln, media in hits:
+                    loc = ln if len(paths) == 1 else f"{os.path.basename(path)}:{ln}"
+                    defs[sel].append((loc, media))
+    path = paths[0] if len(paths) == 1 else "app cascade"
 
     if want:
         hits = defs.get(want, [])

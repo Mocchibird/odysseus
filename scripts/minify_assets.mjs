@@ -44,7 +44,13 @@ for (const f of jsFiles) {
 }
 
 let cssBefore = 0, cssAfter = 0;
-for (const c of ['static/style.css', 'static/fork.css']) {
+// The app CSS is a set of ordered fragments under static/css (upstream split
+// style.css), plus the fork's static/fork.css.
+const cssFiles = [
+  ...readdirSync('static/css').filter((n) => n.endsWith('.css')).map((n) => join('static/css', n)),
+  'static/fork.css',
+];
+for (const c of cssFiles) {
   const src = readFileSync(c, 'utf8');
   const out = await esbuild.transform(src, { loader: 'css', minify: true });
   writeFileSync(c, out.code);

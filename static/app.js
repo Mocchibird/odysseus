@@ -47,7 +47,7 @@ import { UI_VIS_DEFAULT_OFF, resolveVisibility } from './js/ui_visibility.js?v=2
 import tasksModule from './js/tasks.js?v=20260914taskmodel1';
 import calendarModule from './js/calendar.js?v=20260914emailsource11';
 import notesModule from './js/notes.js?v=20260911notesselectioncancel1';
-import adminModule from './js/admin.js?v=20260921chatgptusage2';
+import adminModule from './js/admin.js?v=20260929csssplit';
 import settingsModule from './js/settings.js?v=20260912writingstyle3';
 // FORK: runtime-inject fork-only UI (e.g. the API Tokens panel) into stable
 // upstream anchors, so index.html stays aligned with upstream. Side-effect

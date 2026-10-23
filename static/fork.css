@@ -1,10 +1,11 @@
-/* fork.css — fork-only CSS, loaded AFTER style.css.
+/* fork.css — fork-only CSS, loaded AFTER every upstream stylesheet.
  *
- * Addon strategy (see odysseus-addon-strategy memory): keep static/style.css
- * aligned with upstream so syncs are fast-forwards; fork-only rules live here.
- * Extracted by namespace — every class below appears ZERO times in upstream
- * style.css, so these are provably fork-only + unique selectors (cascade-safe
- * loaded last). ADD NEW FORK CSS HERE, not in style.css.
+ * Addon strategy (see odysseus-addon-strategy memory): keep upstream's CSS
+ * (static/css/*.css, formerly one static/style.css) aligned with upstream so
+ * syncs stay cheap; fork-only rules live here.
+ * Extracted by namespace — every class below appears ZERO times in upstream's
+ * CSS, so these are provably fork-only + unique selectors (cascade-safe
+ * loaded last). ADD NEW FORK CSS HERE, not in static/css/.
  */
 
 /* Markdown callouts / admonitions (`> [!info]`, `[!warning]`, …) rendered by
