@@ -32,7 +32,8 @@ def test_read_route_has_server_side_deadline():
 
 
 def test_frontend_has_bounded_read_fetch():
-    js = (ROOT / "static" / "js" / "emailLibrary.js").read_text(encoding="utf-8")
+    # emailLibrary.js is a re-export wrapper; the library lives in emailLibrary/.
+    js = (ROOT / "static" / "js" / "emailLibrary" / "index.js").read_text(encoding="utf-8")
     # The bounded helper exists and uses an AbortController deadline.
     assert "function _emailReadFetch(" in js
     assert "AbortController" in js
