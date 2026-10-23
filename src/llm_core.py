@@ -3251,7 +3251,7 @@ async def _stream_llm_inner(url: str, model: str, messages: List[Dict], temperat
             yield f'event: error\ndata: {json.dumps({"error": "Network error", "status": 502, "fallback_eligible": False})}\n\n'
         except Exception as e:
             logger.error(f"Ollama stream error: {e}")
-            yield f'event: error\ndata: {json.dumps({"error": str(e), "status": 502, "fallback_eligible": False})}\n\n'
+            yield f'event: error\ndata: {json.dumps({"error": _stream_failure_message(e), "status": 502, "fallback_eligible": False})}\n\n'
         return
 
     # ── Anthropic streaming ──
@@ -3404,7 +3404,7 @@ async def _stream_llm_inner(url: str, model: str, messages: List[Dict], temperat
             yield f'event: error\ndata: {json.dumps({"error": "Network error", "status": 502, "fallback_eligible": False})}\n\n'
         except Exception as e:
             logger.error(f"Anthropic stream error: {e}")
-            yield f'event: error\ndata: {json.dumps({"error": str(e), "status": 502, "fallback_eligible": False})}\n\n'
+            yield f'event: error\ndata: {json.dumps({"error": _stream_failure_message(e), "status": 502, "fallback_eligible": False})}\n\n'
         return
 
     # ── OpenAI-compatible streaming ──
@@ -3874,7 +3874,17 @@ async def _stream_llm_inner(url: str, model: str, messages: List[Dict], temperat
         yield f'event: error\ndata: {json.dumps({"error": "Network error", "status": 502, "fallback_eligible": False})}\n\n'
     except Exception as e:
         logger.error(f"Stream error: {e}")
-        yield f'event: error\ndata: {json.dumps({"error": str(e), "status": 502, "fallback_eligible": False})}\n\n'
+        yield f'event: error\ndata: {json.dumps({"error": _stream_failure_message(e), "status": 502, "fallback_eligible": False})}\n\n'
+
+
+def _stream_failure_message(error: BaseException) -> str:
+    """Client-facing text for an unexpected streaming failure.
+
+    The raw exception can carry request URLs, local paths or provider internals;
+    callers log it server-side and stream only this generic message, like the
+    named transport failures above it.
+    """
+    return f"Model stream failed ({type(error).__name__})"
 
 
 def _summarize_stream_error(err_chunk: Optional[str]) -> str:

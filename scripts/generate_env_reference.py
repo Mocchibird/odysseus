@@ -488,8 +488,9 @@ VARIABLE_NOTES: dict[str, tuple[str, str, str]] = {
     # -- Agent loop and tool execution -------------------------------------
     "ODYSSEUS_TOOL_APPROVAL_GATE": (
         "Agent loop and tool execution", USER,
-        "Security-relevant. Truthy makes tool calls pass through the approval gate. "
-        "Off by default.",
+        "Security-relevant. On by default: after external content enters a run, "
+        "tools that execute code, mutate state or cause external side effects need "
+        "a separate approval. Set to 0 to opt out.",
     ),
     "ODYSSEUS_MCP_ALLOWED_COMMANDS": (
         "Agent loop and tool execution", USER,
@@ -548,7 +549,7 @@ VARIABLE_NOTES: dict[str, tuple[str, str, str]] = {
     "ODYSSEUS_TOOL_CONTRACT_ROOT": (
         "Agent loop and tool execution", INTERNAL,
         "Directory holding the tool-contract scripts the clean-agent preview loads. "
-        "The default is a path on the maintainer's own machine.",
+        "The default resolves to the bundled scripts directory relative to the installed/source tree.",
     ),
 
     # -- Browser automation -------------------------------------------------
@@ -881,6 +882,26 @@ VARIABLE_NOTES: dict[str, tuple[str, str, str]] = {
         "Testing, capture and development tooling", INTERNAL,
         "Timeout in seconds for that call. Clamped to 15-120.",
     ),
+    "ODYSSEUS_DOCKER_TEST_IMAGE": (
+        "Testing, capture and development tooling", INTERNAL,
+        "Docker image tag exercised by the DevOps Docker entrypoint integration tests.",
+    ),
+    "ODYSSEUS_LLAMA_SERVER": (
+        "Testing, capture and development tooling", INTERNAL,
+        "Binary name or path to llama-server used by the related-flow audit script.",
+    ),
+    "ODYSSEUS_QA_PASSWORD": (
+        "Testing, capture and development tooling", INTERNAL,
+        "Account password passed to the related-flow audit script when authenticating.",
+    ),
+    "ODYSSEUS_SFT_DIR": (
+        "Testing, capture and development tooling", INTERNAL,
+        "Base directory containing SFT training datasets for the search teacher pipeline.",
+    ),
+    "ODYSSEUS_TINY_MODEL_PATH": (
+        "Testing, capture and development tooling", INTERNAL,
+        "Path to a local compact model GGUF file used in Cookbook serve lifecycle audit flows.",
+    ),
 
     # -- Build and release metadata ----------------------------------------
     "ODYSSEUS_BUILD_VERSION": (
@@ -950,6 +971,20 @@ Anything computed at import time - `get_default_data_dir()` - is shown as
 written, because that is the honest answer. A few call sites supply their
 fallback with `or` rather than a default argument; those show as *unset* and say
 so in the last column."""
+
+
+# FORK: the fork's own variables are documented in scripts/env_reference_fork.py.
+def _load_fork_notes() -> dict:
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "env_reference_fork", Path(__file__).resolve().parent / "env_reference_fork.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.FORK_VARIABLE_NOTES
+
+
+VARIABLE_NOTES.update(_load_fork_notes())
 
 
 def naive_line_scan(repo_root: Path = REPO_ROOT) -> set[str]:

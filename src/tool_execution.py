@@ -132,6 +132,12 @@ def get_active_execution_bridge() -> AgentExecutionBridge | None:
     return _active_execution_bridge.get()
 
 
+def _tui_host_bridge_endpoint_url(url: str, path: str) -> str:
+    """Replace a validated bridge URL's path without changing its authority."""
+    from src.agent_tools.subprocess_tools import host_shell_bridge_endpoint_url
+    return host_shell_bridge_endpoint_url(url, path)
+
+
 def _tui_host_bridge_patch_url(
     client_runtime_context: Optional[Dict[str, Any]],
 ) -> tuple[str, str] | None:
@@ -152,11 +158,7 @@ def _tui_host_bridge_patch_url(
     from src.agent_tools.subprocess_tools import is_host_shell_bridge_url_allowed
     if not is_host_shell_bridge_url_allowed(url):
         return None
-    if url.endswith("/run"):
-        url = url[:-4] + "/patch"
-    elif not url.endswith("/patch"):
-        url += "/patch"
-    return url, token
+    return _tui_host_bridge_endpoint_url(url, "/patch"), token
 
 
 async def _apply_patch_via_tui_host_bridge(
@@ -172,7 +174,7 @@ async def _apply_patch_via_tui_host_bridge(
         import httpx
 
         timeout = httpx.Timeout(125.0, connect=5.0, write=10.0, pool=5.0)
-        async with httpx.AsyncClient(timeout=timeout) as client:
+        async with httpx.AsyncClient(timeout=timeout, trust_env=False) as client:
             response = await client.post(
                 url,
                 headers={"x-odysseus-tui-bridge-token": token},
@@ -232,7 +234,7 @@ async def _bridge_post(bridge: Dict, path: str, payload: Dict, *, timeout_s: flo
             "error": f"{err_prefix}: invalid TUI host bridge",
             "exit_code": 1,
         }
-    base = url.rsplit("/", 1)[0] if url.endswith(("/run", "/read", "/write")) else url.rstrip("/")
+    target = _tui_host_bridge_endpoint_url(url, path)
     try:
         import httpx
         timeout = httpx.Timeout(
@@ -241,9 +243,9 @@ async def _bridge_post(bridge: Dict, path: str, payload: Dict, *, timeout_s: flo
             write=10.0,
             pool=5.0,
         )
-        async with httpx.AsyncClient(timeout=timeout) as client:
+        async with httpx.AsyncClient(timeout=timeout, trust_env=False) as client:
             response = await client.post(
-                f"{base}{path}",
+                target,
                 headers={"x-odysseus-tui-bridge-token": token},
                 json=payload,
             )
@@ -299,13 +301,13 @@ async def _cancel_bridge_request(bridge: Dict, request_id: str) -> None:
     from src.agent_tools.subprocess_tools import is_host_shell_bridge_url_allowed
     if not token or not is_host_shell_bridge_url_allowed(url):
         return
-    base = url.rsplit("/", 1)[0]
+    target = _tui_host_bridge_endpoint_url(url, "/cancel")
     try:
         import httpx
         timeout = httpx.Timeout(5.0, connect=2.0, write=2.0, pool=2.0)
-        async with httpx.AsyncClient(timeout=timeout) as client:
+        async with httpx.AsyncClient(timeout=timeout, trust_env=False) as client:
             await client.post(
-                f"{base}/cancel",
+                target,
                 headers={"x-odysseus-tui-bridge-token": token},
                 json={"request_id": request_id},
             )
@@ -1680,7 +1682,7 @@ async def execute_tool_block(
     if (isinstance(security_context, ToolRunSecurityContext)
             and security_context.delegated_credential):
         from src.tool_capabilities import delegated_tool_is_blocked
-        if delegated_tool_is_blocked(getattr(block, "tool_type", None)):
+        if delegated_tool_is_blocked(getattr(block, "tool_type", None), getattr(block, "content", None)):
             decision = security_context.decision_for(block.tool_type, block.content)
             return blocked_tool_result(block.tool_type, decision.reason)
 

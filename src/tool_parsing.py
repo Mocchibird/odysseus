@@ -194,9 +194,32 @@ _TOOL_CODE_OPEN_RE = re.compile(r"<tool_code>\s*\{", re.IGNORECASE)
 _TOOL_CODE_CLOSE_RE = re.compile(r"\}\s*</tool_code>", re.IGNORECASE)
 
 # Pattern 4b: Gemma-style <|tool_call|> call:tool_name{args} <tool_call|>
-_GEMMA_TOOL_CALL_RE = re.compile(
-    r"<\|?tool_call\|?>\s*call:([\w\d_-]+)\s*(\{[\s\S]*?\})\s*<\|?tool_call\|?>",
+_GEMMA_TOOL_CALL_OPEN_RE = re.compile(
+    r"<\|?tool_call\|?>\s*call:([\w\d_-]+)\s*\{",
     re.IGNORECASE,
+)
+_GEMMA_TOOL_CALL_CLOSE_RE = re.compile(
+    r"\}\s*<\|?tool_call\|?>",
+    re.IGNORECASE,
+)
+
+# Native Qwen markup shares the same non-nesting delimiter grammar as the
+# XML helpers. Literal closers keep whitespace and opener floods linear;
+# values are stripped by the caller, as in the original regex path.
+_QWEN_FUNCTION_OPEN_RE = re.compile(r"<function=([A-Za-z_][\w:.-]*)>\s*")
+_QWEN_FUNCTION_CLOSE_RE = re.compile(r"</function>")
+_QWEN_PARAMETER_OPEN_RE = re.compile(r"<parameter=([A-Za-z_]\w*)>\s*")
+_QWEN_PARAMETER_CLOSE_RE = re.compile(r"</parameter>")
+_QWEN_PYTHON_ARG_KEY_RE = re.compile(r"[A-Za-z_]\w*")
+_QWEN_PYTHON_ARG_VALUE_RE = re.compile(r"\s*=\s*(['\"].*?['\"]|[^,]+)")
+_ANGLE_TAG_OPEN_RE = re.compile(r"<")
+_NONEMPTY_ANGLE_TAG_OPEN_RE = re.compile(r"<(?=[^>])")
+_ANGLE_TAG_CLOSE_RE = re.compile(r">")
+_EMAIL_LOCAL_RE = re.compile(r"[\w.+-]+")
+_EMAIL_ADDRESS_RE = re.compile(r"[\w.+-]+@[\w.-]+\.\w+")
+_ASCII_EMAIL_LOCAL_RE = re.compile(r"[A-Za-z0-9.!#$%&\x27*+/=?^_`{|}~-]+")
+_ASCII_EMAIL_ADDRESS_RE = re.compile(
+    r"[A-Za-z0-9.!#$%&\x27*+/=?^_`{|}~-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}"
 )
 
 # Pattern 4c: Open-function wrapper emitted by some local MLX/Exo models.
@@ -568,6 +591,34 @@ _PLAIN_UI_OPEN_PANEL_RE = re.compile(
     r"((?:\s+(?:day|week|month|year|agenda)(?:\s+view)?(?:\s+\d{4}-\d{2}(?:-\d{2})?)?)?)"
     r"\s*(?:`{1,3})?\s*$"
 )
+_PLAIN_UI_CANDIDATE_RE = re.compile(r"ui_control", re.IGNORECASE)
+
+
+def _iter_plain_ui_open_panel(text: str):
+    """Yield line-anchored UI commands without retrying every blank line."""
+    pos = 0
+    while candidate := _PLAIN_UI_CANDIDATE_RE.search(text, pos):
+        line_start = text.rfind("\n", 0, candidate.start()) + 1
+        match = _PLAIN_UI_OPEN_PANEL_RE.match(text, line_start)
+        if match is not None:
+            yield match
+            pos = match.end()
+            continue
+        newline = text.find("\n", candidate.end())
+        pos = len(text) if newline < 0 else newline + 1
+
+
+def _strip_plain_ui_open_panel(text: str) -> str:
+    matches = list(_iter_plain_ui_open_panel(text))
+    if not matches:
+        return text
+    out = []
+    pos = 0
+    for match in matches:
+        out.append(text[pos:match.start()])
+        pos = match.end()
+    out.append(text[pos:])
+    return "".join(out)
 
 
 # ---------------------------------------------------------------------------
@@ -1018,6 +1069,43 @@ def _strip_raw_openai_tool_call_json(text: str) -> str:
     return "".join(pieces)
 
 
+def iter_email_addresses(text: str, *, ascii_only: bool = False):
+    """Find legacy email-shaped strings without retrying every word suffix.
+
+    Match the address only at the start of each maximal local-part token.
+    When that attempt fails, every suffix has the same '@'/domain boundary
+    and must fail too. Local/domain character runs are each scanned a bounded
+    number of times, including malformed text with no '@' or domain dot.
+    """
+    local_re = _ASCII_EMAIL_LOCAL_RE if ascii_only else _EMAIL_LOCAL_RE
+    address_re = _ASCII_EMAIL_ADDRESS_RE if ascii_only else _EMAIL_ADDRESS_RE
+    pos = 0
+    while token := local_re.search(text, pos):
+        address = address_re.match(text, token.start())
+        if address is not None:
+            yield address.group(0)
+            pos = address.end()
+        else:
+            pos = token.end()
+
+
+def _iter_qwen_python_args(raw_args: str):
+    """Match each maximal key once, then its value at that fixed position.
+
+    If a word has no following equals sign, none of its suffixes can have one
+    either. Advancing past it avoids the old unanchored regex's O(n^2) retries
+    on a long malformed key, while preserving permissive quoted/bare values.
+    """
+    pos = 0
+    while key := _QWEN_PYTHON_ARG_KEY_RE.search(raw_args, pos):
+        value = _QWEN_PYTHON_ARG_VALUE_RE.match(raw_args, key.end())
+        if value is not None:
+            yield key.group(0), value.group(1)
+            pos = value.end()
+        else:
+            pos = key.end()
+
+
 def _parse_qwen3_native_text_call(
     text: str,
     additional_tool_names: Optional[Iterable[str]] = None,
@@ -1044,13 +1132,14 @@ def _parse_qwen3_native_text_call(
 
     # Qwen native text rendering:
     # <tool_call><function=manage_notes><parameter=action>list</parameter>...
-    fn_match = re.search(r"<function=([A-Za-z_][\w:.-]*)>\s*([\s\S]*?)\s*</function>", text)
+    fn_match = next(_iter_named_blocks(
+        text, _QWEN_FUNCTION_OPEN_RE, _QWEN_FUNCTION_CLOSE_RE
+    ), None)
     if fn_match:
-        name, raw_body = fn_match.groups()
+        name, raw_body = fn_match
         args = {}
-        for key, raw_value in re.findall(
-            r"<parameter=([A-Za-z_]\w*)>\s*([\s\S]*?)\s*</parameter>",
-            raw_body,
+        for key, raw_value in _iter_named_blocks(
+            raw_body.rstrip(), _QWEN_PARAMETER_OPEN_RE, _QWEN_PARAMETER_CLOSE_RE,
         ):
             value = raw_value.strip()
             if value and value[0] in "[{\"":
@@ -1111,7 +1200,7 @@ def _parse_qwen3_native_text_call(
             or normalized_name in declared_names
         ):
             args = {}
-            for key, raw_value in re.findall(r"([A-Za-z_]\w*)\s*=\s*(['\"].*?['\"]|[^,]+)", raw_args):
+            for key, raw_value in _iter_qwen_python_args(raw_args):
                 try:
                     args[key] = ast.literal_eval(raw_value.strip())
                 except (ValueError, SyntaxError):
@@ -1452,6 +1541,45 @@ def _parse_tool_code_block(raw: str) -> Optional[ToolBlock]:
         return ToolBlock(tool_name, content.strip())
     return None
 
+_GEMMA_FALLBACK_KEY_RE = re.compile(r"\w++")
+_GEMMA_FALLBACK_COLON_RE = re.compile(r"\s*+:")
+_GEMMA_FALLBACK_BOUNDARY_RE = re.compile(r"(?<!\s)(\s*+)(?:,\s*+\w++\s*+:|})")
+
+
+def _iter_gemma_fallback_items(body):
+    """Preserve permissive k:v recovery with one pass over keys/boundaries."""
+    boundaries = list(_GEMMA_FALLBACK_BOUNDARY_RE.finditer(body))
+    boundary_index = 0
+    pos = 0
+    newline = body.find("\n")
+    while key := _GEMMA_FALLBACK_KEY_RE.search(body, pos):
+        colon = _GEMMA_FALLBACK_COLON_RE.match(body, key.end())
+        if colon is None:
+            pos = key.end()
+            continue
+        start = colon.end()
+        while start < len(body) and body[start].isspace():
+            start += 1
+        if start < len(body) and body[start] in "\"'":
+            start += 1
+        while boundary_index < len(boundaries) and boundaries[boundary_index].end(1) < start:
+            boundary_index += 1
+        if boundary_index == len(boundaries):
+            return
+        boundary = boundaries[boundary_index]
+        end = max(start, boundary.start())
+        if 0 <= newline < start:
+            newline = body.find("\n", start)
+        if newline >= 0 and newline < end:
+            pos = key.end()
+            continue
+        capture_end = end
+        if capture_end > start and body[capture_end - 1] in "\"'":
+            capture_end -= 1
+        yield key.group(0), body[start:capture_end].strip()
+        pos = end
+
+
 def _parse_gemma_tool_call(tool_name: str, body: str) -> Optional[ToolBlock]:
     """Parse a Gemma-style call:tool_name{...} block into a ToolBlock."""
     tool_name = tool_name.strip().lower().replace("-", "_")
@@ -1476,12 +1604,7 @@ def _parse_gemma_tool_call(tool_name: str, body: str) -> Optional[ToolBlock]:
             if not isinstance(params, dict):
                 params = {}
         except Exception:
-            # Simple regex key-value extraction fallback
-            params = {}
-            for m in re.finditer(r'(\w+)\s*:\s*["\']?(.*?)["\']?(?=\s*,\s*\w+\s*:|\s*\})', body):
-                k = m.group(1)
-                v = m.group(2).strip()
-                params[k] = v
+            params = dict(_iter_gemma_fallback_items(body))
 
     from src.tool_schemas import function_call_to_tool_block
     return function_call_to_tool_block(tool_name, json.dumps(params))
@@ -1535,9 +1658,9 @@ def _iter_delimited(text, open_re, close_re):
         pos = cm.end()
 
 
-def _strip_delimited(text: str, open_re, close_re) -> str:
-    """Remove every ``open_re ... close_re`` span (forward-only; see
-    _iter_delimited). Equivalent to ``open_re([\\s\\S]*?)close_re`` ``re.sub('')``
+def _strip_delimited(text: str, open_re, close_re, replacement: str = "") -> str:
+    """Replace every ``open_re ... close_re`` span (forward-only; see
+    _iter_delimited). Equivalent to ``open_re([\\s\\S]*?)close_re`` substitution
     for these delimiters, without the O(n^2) rescan on unclosed openers."""
     spans = list(_iter_delimited(text, open_re, close_re))
     if not spans:
@@ -1546,9 +1669,21 @@ def _strip_delimited(text: str, open_re, close_re) -> str:
     last = 0
     for match_start, _inner_start, _inner_end, match_end in spans:
         out.append(text[last:match_start])
+        out.append(replacement)
         last = match_end
     out.append(text[last:])
     return "".join(out)
+
+
+def strip_angle_tags(text: str, replacement: str = "", *, allow_empty: bool = False) -> str:
+    """Linear equivalent of replacing ``<[^>]+>`` (or ``<[^>]*>``).
+
+    This preserves the existing flat text cleanup, including nested '<' and
+    malformed tails; it does not interpret HTML. Stop once no '>' is reachable
+    instead of retrying a suffix scan at every '<' in untrusted text.
+    """
+    opener = _ANGLE_TAG_OPEN_RE if allow_empty else _NONEMPTY_ANGLE_TAG_OPEN_RE
+    return _strip_delimited(text, opener, _ANGLE_TAG_CLOSE_RE, replacement)
 
 
 def _iter_named_blocks(text, open_re, close_re):
@@ -1984,10 +2119,10 @@ def parse_tool_blocks(
 
     # Pattern 4b: Gemma-style <|tool_call|> blocks
     if not blocks:
-        for m in _GEMMA_TOOL_CALL_RE.finditer(text):
-            tool_name = m.group(1)
-            body = m.group(2)
-            block = _parse_gemma_tool_call(tool_name, body)
+        for tool_name, body in _iter_named_blocks(
+            text, _GEMMA_TOOL_CALL_OPEN_RE, _GEMMA_TOOL_CALL_CLOSE_RE
+        ):
+            block = _parse_gemma_tool_call(tool_name, "{" + body + "}")
             if block:
                 blocks.append(block)
 
@@ -2024,7 +2159,7 @@ def parse_tool_blocks(
     # from weaker native-tool models after reading the tool docs but failing to
     # emit the actual structured call.
     if not blocks:
-        m = _PLAIN_UI_OPEN_PANEL_RE.search(text)
+        m = next(_iter_plain_ui_open_panel(text), None)
         if m:
             blocks.append(ToolBlock("ui_control", f"open_panel {m.group(1).lower()}{m.group(2).lower()}".strip()))
 
@@ -2067,7 +2202,7 @@ def strip_tool_blocks(
     cleaned = _strip_delimited(cleaned, _XML_TOOL_CALL_OPEN_RE, _XML_TOOL_CALL_CLOSE_RE)
     cleaned = _XML_OPEN_TOOL_CALL_RE.sub('', cleaned)
     cleaned = _strip_delimited(cleaned, _TOOL_CODE_OPEN_RE, _TOOL_CODE_CLOSE_RE)
-    cleaned = _GEMMA_TOOL_CALL_RE.sub('', cleaned)
+    cleaned = _strip_delimited(cleaned, _GEMMA_TOOL_CALL_OPEN_RE, _GEMMA_TOOL_CALL_CLOSE_RE)
     cleaned = _strip_delimited(cleaned, _FUNCTION_MODEL_OPEN_RE, _FUNCTION_MODEL_CLOSE_RE)
     cleaned = _strip_raw_openai_tool_call_json(cleaned)
     declared_xml_calls = _parse_declared_direct_xml_calls(
@@ -2086,7 +2221,7 @@ def strip_tool_blocks(
         if raw_web_json:
             _, (start, end) = raw_web_json
             cleaned = cleaned[:start] + cleaned[end:]
-    cleaned = _PLAIN_UI_OPEN_PANEL_RE.sub("", cleaned)
+    cleaned = _strip_plain_ui_open_panel(cleaned)
     # Strip bare <invoke> blocks not wrapped in <tool_call>
     cleaned = _strip_bare_invoke_markup(cleaned)
     cleaned = re.sub(r'\n{3,}', '\n\n', cleaned)
