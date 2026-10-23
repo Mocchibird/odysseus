@@ -255,7 +255,8 @@ def test_live_refresh_wiring_present():
     root = Path(__file__).resolve().parents[1]
     j = lambda p: (root / "static" / "js" / p).read_text(encoding="utf-8")
     document, chat = document_source(), j("chat.js")
-    library, notes, tasks = j("documentLibrary.js"), j("notes.js"), j("tasks.js")
+    # notes.js is a compatibility shim; the Notes feature lives in features/notes.
+    library, notes, tasks = j("documentLibrary.js"), j("features/notes/index.js"), j("tasks.js")
 
     # document.js: a single emit helper fired from user mutations AND the agent
     # SSE finalize, plus the titles-cache invalidation listener.
