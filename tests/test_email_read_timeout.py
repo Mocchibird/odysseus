@@ -21,7 +21,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_read_route_has_server_side_deadline():
-    src = (ROOT / "routes" / "email_routes.py").read_text(encoding="utf-8")
+    src = (ROOT / "routes" / "email" / "email_routes.py").read_text(encoding="utf-8")
     # The read route bounds the IMAP read so it can't hang forever.
     assert "wait_for(" in src
     assert "_read_email_sync" in src

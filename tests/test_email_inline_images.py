@@ -5,7 +5,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_inline_image_attachments_expose_cid_metadata_source():
-    source = (ROOT / "routes" / "email_helpers.py").read_text()
+    source = (ROOT / "routes" / "email" / "email_helpers.py").read_text()
 
     assert 'part.get("Content-ID"' in source
     assert 'part.get("Content-Location"' in source

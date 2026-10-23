@@ -57,8 +57,8 @@ def test_proton_bridge_wrapper_installs_fido_runtime_dependency():
 
 
 def test_proton_bridge_backend_sidecar_routes_exist():
-    helpers = (ROOT / "routes" / "email_helpers.py").read_text(encoding="utf-8")
-    routes = (ROOT / "routes" / "email_routes.py").read_text(encoding="utf-8")
+    helpers = (ROOT / "routes" / "email" / "email_helpers.py").read_text(encoding="utf-8")
+    routes = (ROOT / "routes" / "email" / "email_routes.py").read_text(encoding="utf-8")
 
     assert '"proton-bridge"' in helpers
     assert "_LOCAL_MAIL_BRIDGE_HOSTS" in helpers
