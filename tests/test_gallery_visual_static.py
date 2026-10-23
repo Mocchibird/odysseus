@@ -158,7 +158,13 @@ def test_gallery_body_uses_available_window_height_without_grid_crop():
     modal_rule = css[modal_start:modal_start + 180]
     grid_rule = css[css.index(".gallery-grid {"):][:300]
     assert "align-content: start;" in grid_rule
-    assert "max-height: calc(92vh - 165px);" in grid_rule
+    # FORK: the scroll (and its available-height cap) lives on the plain
+    # .gallery-grid-scroll wrapper, never on the grid: an iOS grid that is its
+    # own overflow scroller mis-positions its rows.
+    scroll_rule = css[css.index(".gallery-grid-scroll {"):][:300]
+    assert "max-height: calc(92vh - 165px);" in scroll_rule
+    assert "overflow-y: auto;" in scroll_rule
+    assert "overflow-y" not in grid_rule
     assert "max-height: 60vh;" not in grid_rule
 
 

@@ -1682,7 +1682,6 @@ body.notes-drag-mode .note-card {
 }
 .notes-select-trigger {
   position: relative;
-  top: 3px;
   flex-shrink: 0;
   background: var(--bg);
   color: var(--fg);

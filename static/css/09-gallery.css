@@ -460,12 +460,10 @@ body.gallery-selecting .gallery-dl-btn,
   grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
   align-content: start;
   gap: 8px;
-  max-height: calc(92vh - 165px);
-  overflow-y: auto;
   padding: 2px;
   transition: border-color 0.15s, background 0.15s;
-  /* No max-height / overflow here — see .gallery-grid-scroll above. */
-  align-content: start;
+  /* No max-height / overflow here — see .gallery-grid-scroll (fork.css): a grid
+     that is its own overflow scroller mis-positions rows on iOS. */
 }
 .gallery-grid.gallery-dragover {
   border: 2px dashed var(--red);
@@ -892,8 +890,6 @@ body.gallery-selecting .gallery-dl-btn,
   font-size: 12px;
   padding: 4px 8px;
   border-radius: 4px;
-  position: relative;
-  top: -2px;
 }
 /* Slightly larger header icons (back/edit/heart/⋮) — override the inline 14px. */
 .gallery-detail-header svg { width: 16px; height: 16px; }
@@ -927,8 +923,6 @@ body.gallery-selecting .gallery-dl-btn,
   width: 28px;
   height: 26px;
   padding: 0;
-  position: relative;
-  top: -2px;
 }
 .gallery-detail-menu {
   position: absolute;

@@ -59,7 +59,9 @@ details.md-callout[open] > summary::after { transform: rotate(-135deg); }
    and align-content:start does NOT fix it. A normal block scroller containing
    a naturally-growing grid is immune. */
 .gallery-grid-scroll {
-  max-height: 60vh;
+  /* Upstream's available-window height for the gallery body (it used to sit on
+     .gallery-grid itself). */
+  max-height: calc(92vh - 165px);
   overflow-y: auto;
 }
 /* CSS pseudo-fullscreen for the 360 viewer — the Fullscreen API can't target a
