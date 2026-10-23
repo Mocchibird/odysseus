@@ -37,6 +37,17 @@ services:
       # Ollama at http://host.docker.internal:11434 and Proton Mail Bridge
       # at host.docker.internal:1143/1025 when Bridge runs on the host.
       - "host.docker.internal:host-gateway"
+    # FORK: the agent's bash/python run inside bubblewrap (src/containment.py,
+    # enforcing). As the non-root app user, bwrap needs user namespaces
+    # (blocked by Docker's default seccomp profile), a fresh /proc mount
+    # (blocked by Docker's masked /proc paths) and, on AppArmor hosts, mount
+    # permission (denied by docker-default). The container stays non-root with
+    # no added capabilities; these relax Docker's filters on the container so
+    # the stricter per-command sandbox can exist inside it.
+    security_opt:
+      - seccomp=unconfined
+      - apparmor=unconfined
+      - systempaths=unconfined
     environment:
       - LLM_HOST=${LLM_HOST:-localhost}
       - LLM_HOSTS=${LLM_HOSTS:-}

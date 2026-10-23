@@ -37,6 +37,9 @@ ENV DEBIAN_FRONTEND=noninteractive \
 # cover optional audio work (ffmpeg also transcodes mic webm->PCM for Azure STT).
 # gosu lets the entrypoint drop privileges cleanly so signals still reach
 # uvicorn directly (no extra shell layer like `su`/`sudo` would add).
+# FORK: bubblewrap is the sandbox src/containment.py uses for the agent's
+# native bash/python (enforcing by default; without it they refuse to run).
+# It needs the compose security_opt entries on the odysseus service.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     cmake \
@@ -61,6 +64,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     dnsutils \
     nmap \
     gosu \
+    bubblewrap \
     libgl1 \
     libglib2.0-0t64 \
     libxcb1 \
