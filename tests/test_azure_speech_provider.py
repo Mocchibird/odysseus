@@ -45,7 +45,12 @@ def test_frontend_exposes_azure_tts_and_wiring():
     # azure option in BOTH provider selects + the key/region inputs.
     assert html.count('<option value="azure"') == 2
     assert "set-ttsAzureKey" in html and "set-ttsAzureRegion" in html
-    js = (ROOT / "static" / "js" / "settings.js").read_text(encoding="utf-8")
+    # settings.js is split into static/js/settings/*.js upstream; speech UI
+    # wiring lives in settings/speech.js.
+    js = "\n".join(
+        p.read_text(encoding="utf-8")
+        for p in [ROOT / "static" / "js" / "settings.js", *sorted((ROOT / "static" / "js" / "settings").glob("*.js"))]
+    )
     assert "azure_speech_key" in js and "azure_speech_region" in js
     assert "set-ttsAzureRow" in js
     # the mic recorder must send azure recordings to the server transcriber.

@@ -14,7 +14,12 @@ ROOT = Path(__file__).resolve().parents[1]
 TTS_SRC = (ROOT / "services" / "tts" / "tts_service.py").read_text(encoding="utf-8")
 STT_SRC = (ROOT / "services" / "stt" / "stt_service.py").read_text(encoding="utf-8")
 HTML = (ROOT / "static" / "index.html").read_text(encoding="utf-8")
-SETTINGS_JS = (ROOT / "static" / "js" / "settings.js").read_text(encoding="utf-8")
+# Upstream split settings.js into static/js/settings/*.js (speech lives in
+# settings/speech.js), so read the shell plus every settings module.
+SETTINGS_JS = "\n".join(
+    p.read_text(encoding="utf-8")
+    for p in [ROOT / "static" / "js" / "settings.js", *sorted((ROOT / "static" / "js" / "settings").glob("*.js"))]
+)
 VR_JS = (ROOT / "static" / "js" / "voiceRecorder.js").read_text(encoding="utf-8")
 TTS_JS = (ROOT / "static" / "js" / "tts-ai.js").read_text(encoding="utf-8")
 
