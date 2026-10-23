@@ -6283,3 +6283,10 @@ def with_turn_contract(func):
                     yield chunk
 
     return wrapped
+
+
+# FORK: register the fork's tool families (health, pings, gallery, library
+# files) so request authority can grant them. See src/turn_contract_fork.py.
+from src.turn_contract_fork import register as _register_fork_families  # noqa: E402
+
+_register_fork_families()

@@ -735,48 +735,12 @@ async def _route_tool_via_bridge(tool: str, content: str, session_id: Optional[s
 #      rule 2 is independent of which root a path arrived through.
 # ---------------------------------------------------------------------------
 
-_SENSITIVE_BASENAMES: set[str] = {
-    ".ssh", ".gnupg", ".gitconfig",
-    ".bashrc", ".bash_profile", ".bash_logout",
-    ".zshrc", ".zprofile", ".zshenv",
-    ".profile", ".tcshrc", ".cshrc",
-    ".env", ".netrc",
-}
-
-_SENSITIVE_FILE_PATTERNS: tuple[str, ...] = (
-    "authorized_keys", "id_rsa", "id_ed25519", "id_ecdsa",
-    "known_hosts", "auth.json", "app.db", "settings.json",
+# Compatibility exports: the same deny predicate protects tool access and
+# artifact observations, so hashing cannot become a sensitive-file side channel.
+from src.agent_runtime.path_policy import (
+    _SENSITIVE_BASENAMES, _SENSITIVE_FILE_PATTERNS,
+    _SENSITIVE_BASENAMES_CF, _SENSITIVE_FILE_PATTERNS_CF, _is_sensitive_path,
 )
-
-# Case-folded views used for matching. On a case-insensitive filesystem
-# (Windows, default macOS) ".SSH/AUTHORIZED_KEYS" and ".env" resolve to the
-# same protected files as their lowercase forms, so the deny-list has to fold
-# case before comparing — the sibling resolver already normcases paths for the
-# same reason. casefold (not os.path.normcase) because normcase is a no-op on
-# POSIX, which is exactly where the macOS read-exfil path lives.
-_SENSITIVE_BASENAMES_CF: frozenset[str] = frozenset(b.casefold() for b in _SENSITIVE_BASENAMES)
-_SENSITIVE_FILE_PATTERNS_CF: frozenset[str] = frozenset(p.casefold() for p in _SENSITIVE_FILE_PATTERNS)
-
-
-def _is_sensitive_path(resolved: str) -> bool:
-    """Return True if *resolved* falls under a sensitive directory or
-    matches a sensitive filename — regardless of what root it sits under.
-
-    Matching is case-insensitive: on Windows / default macOS a case-variant
-    name (``.SSH``, ``AUTHORIZED_KEYS``, ``Id_Rsa``) points at the same file as
-    the lowercase form, so a case-sensitive check would let it slip past the
-    deny-list in every file tool that relies on it.
-    """
-    parts = [p.casefold() for p in resolved.split(os.sep)]
-    filename = parts[-1] if parts else ""
-
-    # Check if any path component is a sensitive directory.
-    for part in parts:
-        if part in _SENSITIVE_BASENAMES_CF:
-            return True
-
-    # Check filename against known sensitive files.
-    return filename in _SENSITIVE_FILE_PATTERNS_CF
 
 
 def _path_within(resolved: str, root: str) -> bool:
@@ -1503,6 +1467,7 @@ async def _direct_fallback(
             "client_runtime_context": client_runtime_context,
             "disabled_tools": frozenset(disabled_tools or ()),
             "tool_policy": tool_policy,
+            "request_authority": active_request_authority(),
         }
 
         from src.agent_tools import TOOL_HANDLERS
@@ -1542,6 +1507,14 @@ async def _document_tool_dispatch(
 # Dispatcher
 # ---------------------------------------------------------------------------
 
+from src.agent_runtime.journal import dispatched, mark_authorized, mark_dispatch, record_action
+from src.agent_runtime.authority import (
+    MISSING_AUTHORITY, ExactOperation, RequestAuthority, active_request_authority,
+    bind_request_authority, save_background_authority,
+)
+
+
+@record_action
 async def execute_tool_block(
     block: Any,
     session_id: Optional[str] = None,
@@ -1558,6 +1531,7 @@ async def execute_tool_block(
     exact_approval: Optional[ExactToolApproval] = None,
     active_document_id: Optional[str] = None,
     client_runtime_context: Optional[Dict[str, Any]] = None,
+    request_authority=MISSING_AUTHORITY,
 ) -> Tuple[str, Dict]:
     """Execute a single tool block. Returns (description, result_dict).
 
@@ -1578,6 +1552,40 @@ async def execute_tool_block(
             "security_context must be a ToolRunSecurityContext or "
             "NO_TOOL_SECURITY_CONTEXT"
         )
+
+    authority = active_request_authority() if request_authority is MISSING_AUTHORITY else request_authority
+    parent = active_request_authority()
+    if isinstance(authority, RequestAuthority) and parent is not None and authority is not parent:
+        authority = parent.intersect(authority)
+    try:
+        operation = ExactOperation.normalize(getattr(block, "tool_type", None), getattr(block, "content", None))
+        valid = isinstance(authority, RequestAuthority) and authority.bound_to(
+            owner=owner, session_id=session_id, workspace=workspace)
+        if valid:
+            authority = authority.restrict(tool_policy, disabled_tools)
+        exact_admission = bool(
+            valid and not authority.inherited and not authority.restricted(operation)
+            and exact_approval is not None and exact_approval.matches(
+                owner=owner, session_id=session_id, workspace=workspace,
+                tool_name=getattr(block, "tool_type", None), content=getattr(block, "content", None)))
+        admitted = valid and (authority.permits(operation) or exact_admission)
+    except (ValueError, TypeError, AttributeError) as error:
+        return f"{getattr(block, 'tool_type', '')}: invalid arguments", {
+            "error": (f"Tool arguments are not valid JSON: {error}"
+                      if isinstance(error, json.JSONDecodeError) else str(error)),
+            "exit_code": 1, "blocked": True,
+            "failure_kind": "request_authority_denied",
+        }
+    if not admitted:
+        reason = "The exact operation is outside server request authority."
+        if tool_policy and any(tool_policy.blocks(name) for name in email_tool_policy_names(getattr(block, "tool_type", ""))):
+            reason = f"Execution of tool '{getattr(block, 'tool_type', '')}' is forbade by the active tool policy."
+        elif isinstance(authority, RequestAuthority) and authority.restricted(operation):
+            reason = "The exact operation is disabled by user or server request authority policy."
+        return f"{getattr(block, 'tool_type', '')}: BLOCKED", {
+            "error": reason,
+            "exit_code": 1, "blocked": True, "failure_kind": "request_authority_denied",
+        }
 
     from src.turn_contract import active_turn_contract
     contract = active_turn_contract()
@@ -1678,31 +1686,32 @@ async def execute_tool_block(
     from src.tool_output_spill import bind_tool_call, unbind_tool_call
     spill_token = bind_tool_call(session_id, getattr(block, "tool_type", None))
     try:
-        output = await _execute_tool_block_impl(
-            block,
-            session_id=session_id,
-            disabled_tools=disabled_tools,
-            owner=owner,
-            progress_cb=progress_cb,
-            tool_policy=tool_policy,
-            approved_document_id=(
-                exact_approval.pending.document_id
-                if approval_claimed
-                else None
-            ),
-            approved_document_version=(
-                exact_approval.pending.document_version
-                if approval_claimed
-                else None
-            ),
-            approved_document_digest=(
-                exact_approval.pending.document_digest
-                if approval_claimed
-                else None
-            ),
-            active_document_id=active_document_id,
-            client_runtime_context=client_runtime_context,
-        )
+        with bind_request_authority(authority):
+            output = await _execute_tool_block_impl(
+                block,
+                session_id=session_id,
+                disabled_tools=disabled_tools,
+                owner=owner,
+                progress_cb=progress_cb,
+                tool_policy=tool_policy,
+                approved_document_id=(
+                    exact_approval.pending.document_id
+                    if approval_claimed
+                    else None
+                ),
+                approved_document_version=(
+                    exact_approval.pending.document_version
+                    if approval_claimed
+                    else None
+                ),
+                approved_document_digest=(
+                    exact_approval.pending.document_digest
+                    if approval_claimed
+                    else None
+                ),
+                active_document_id=active_document_id,
+                client_runtime_context=client_runtime_context,
+            )
         if isinstance(security_context, ToolRunSecurityContext):
             security_context.observe_tool_result(
                 getattr(block, "tool_type", None),
@@ -1874,14 +1883,15 @@ async def _execute_tool_block_impl(
         if rejected is not None:
             return rejected
 
+    mark_authorized()
     if bridge_owns_tool:
         try:
-            return await execution_bridge.route_tool(
+            return await dispatched(execution_bridge.route_tool(
                 tool,
                 content,
                 session_id,
                 client_runtime_context,
-            )
+            ))
         except asyncio.CancelledError:
             raise
         except Exception as exc:
@@ -1902,7 +1912,7 @@ async def _execute_tool_block_impl(
             )
 
     if tool in _ROUTED_BRIDGE_TOOLS and _client_bridge(client_runtime_context) is not None:
-        return await _route_tool_via_bridge(tool, content, session_id, client_runtime_context)
+        return await dispatched(_route_tool_via_bridge(tool, content, session_id, client_runtime_context))
 
     # Background execution: a `bash` block whose first line is the `#!bg`
     # marker runs DETACHED — returns a job id immediately so the chat stream
@@ -1912,7 +1922,11 @@ async def _execute_tool_block_impl(
         _is_bg, _bg_cmd = _split_bg_marker(content)
         if _is_bg and _bg_cmd:
             from src import bg_jobs
+            mark_dispatch()
             rec = bg_jobs.launch(_bg_cmd, session_id=session_id, cwd=agent_cwd())
+            # Only this server launch may seal detached-job authority; a
+            # handler/bridge output carrying a job id is not a grant source.
+            save_background_authority(rec["id"], active_request_authority())
             short = _bg_cmd.strip().split(chr(10))[0][:80]
             desc = f"bash (background): {short}"
             result = {
@@ -1937,41 +1951,41 @@ async def _execute_tool_block_impl(
     if tool == "generate_image":
         from src.ai_interaction import do_generate_image
         desc = "generate_image"
-        result = await do_generate_image(content, session_id=session_id, owner=owner)
+        result = await dispatched(do_generate_image(content, session_id=session_id, owner=owner))
     elif tool in _MCP_TOOL_MAP:
         first_line = content.split(chr(10))[0][:80]
         desc = f"{tool}: {first_line}"
-        result = await _call_mcp_tool(tool, content, progress_cb=progress_cb)
+        result = await dispatched(_call_mcp_tool(tool, content, progress_cb=progress_cb))
     elif tool in ("grep", "glob", "ls", "get_workspace", "host_shell"):
         # Code-navigation tools — no MCP server; run the direct implementation.
         first_line = content.split(chr(10))[0][:80]
         desc = f"{tool}: {first_line}"
-        result = await _direct_fallback(
+        result = await dispatched(_direct_fallback(
             tool,
             content,
             progress_cb=progress_cb,
             owner=owner,
             client_runtime_context=client_runtime_context,
-        ) \
+        )) \
             or {"error": f"{tool}: execution failed", "exit_code": 1}
     elif tool == "apply_patch" and _tui_host_bridge_patch_url(client_runtime_context):
         first_line = content.split(chr(10))[0][:80]
         desc = f"{tool}: {first_line}" if first_line else tool
-        result = await _apply_patch_via_tui_host_bridge(content, client_runtime_context)
+        result = await dispatched(_apply_patch_via_tui_host_bridge(content, client_runtime_context))
     elif tool in ("apply_patch", "todowrite"):
         first_line = content.split(chr(10))[0][:80]
         desc = f"{tool}: {first_line}" if first_line else tool
-        result = await _direct_fallback(tool, content, session_id=session_id, owner=owner) \
+        result = await dispatched(_direct_fallback(tool, content, session_id=session_id, owner=owner)) \
             or {"error": f"{tool}: execution failed", "exit_code": 1}
     elif tool == "manage_bg_jobs":
         # Inspect/kill detached `bash` jobs; needs session_id to scope to chat.
         desc = f"manage_bg_jobs: {content.split(chr(10))[0][:80]}"
-        result = await _direct_fallback(tool, content, session_id=session_id, owner=owner) \
+        result = await dispatched(_direct_fallback(tool, content, session_id=session_id, owner=owner)) \
             or {"error": "manage_bg_jobs: execution failed", "exit_code": 1}
     elif tool in ("create_document", "update_document", "edit_document",
                   "suggest_document", "manage_documents"):
         desc = f"{tool}: {content.split(chr(10))[0][:80]}"
-        result = await _document_tool_dispatch(
+        result = await dispatched(_document_tool_dispatch(
             tool,
             content,
             session_id,
@@ -1979,14 +1993,14 @@ async def _execute_tool_block_impl(
             document_id=approved_document_id or active_document_id,
             document_version=approved_document_version,
             document_digest=approved_document_digest,
-        ) \
+        )) \
             or {"error": f"{tool}: execution failed", "exit_code": 1}
         if tool in ("edit_document", "suggest_document") and "title" in (result or {}):
             desc = f"{tool}: {result.get('title', '')}"
     elif tool == "search_chats":
         query = content.split("\n")[0].strip()
         desc = f"search_chats: {query[:80]}"
-        result = await do_search_chats(query, owner=owner)
+        result = await dispatched(do_search_chats(query, owner=owner))
     elif tool in ("chat_with_model", "ask_teacher", "list_models"):
         # Migrated to the agent_tools registry (#3629/#4445): dispatched through
         # TOOL_HANDLERS (via _document_tool_dispatch) with the owner/session ctx
@@ -1994,7 +2008,7 @@ async def _execute_tool_block_impl(
         # impls now live in src/agent_tools/model_interaction_tools.py.
         first_line = content.split(chr(10))[0].strip()[:60]
         desc = f"{tool}: {first_line}" if first_line else tool
-        result = await _document_tool_dispatch(tool, content, session_id, owner) \
+        result = await dispatched(_document_tool_dispatch(tool, content, session_id, owner)) \
             or {"error": f"{tool}: execution failed", "exit_code": 1}
     elif tool in ("create_session", "list_sessions", "send_to_session", "manage_session"):
         # Migrated to the agent_tools registry (#3629): dispatched through
@@ -2002,116 +2016,116 @@ async def _execute_tool_block_impl(
         # live in src/agent_tools/session_tools.py.
         first_line = content.split(chr(10))[0].strip()[:60]
         desc = f"{tool}: {first_line}" if first_line else tool
-        result = await _document_tool_dispatch(tool, content, session_id, owner) \
+        result = await dispatched(_document_tool_dispatch(tool, content, session_id, owner)) \
             or {"error": f"{tool}: execution failed", "exit_code": 1}
     elif tool in ("pipeline", "manage_memory", "ui_control"):
         from src.ai_interaction import dispatch_ai_tool
-        desc, result = await dispatch_ai_tool(tool, content, session_id, owner=owner)
+        desc, result = await dispatched(dispatch_ai_tool(tool, content, session_id, owner=owner))
     elif tool == "manage_tasks":
         desc = "manage_tasks"
-        result = await do_manage_tasks(content, owner=owner)
+        result = await dispatched(do_manage_tasks(content, owner=owner))
     elif tool == "manage_skills":
         desc = "manage_skills"
-        result = await do_manage_skills(content, owner=owner)
+        result = await dispatched(do_manage_skills(content, owner=owner))
     elif tool == "api_call":
         first_line = content.split("\n")[0].strip()[:60]
         desc = f"api_call: {first_line}"
-        result = await do_api_call(content)
+        result = await dispatched(do_api_call(content))
     elif tool == "send_ping":
         desc = "send_ping"
-        result = await do_send_ping(content, owner=owner)
+        result = await dispatched(do_send_ping(content, owner=owner))
     elif tool in ("manage_endpoints", "manage_mcp", "manage_webhooks", "manage_tokens", "manage_settings"):
         # Registry-dispatched (agent_tools.admin_tools); owner threaded for ownership/admin checks.
         desc = tool
-        result = await _direct_fallback(tool, content, owner=owner) \
+        result = await dispatched(_direct_fallback(tool, content, owner=owner)) \
             or {"error": f"{tool}: execution failed", "exit_code": 1}
     elif tool == "search_files":
         desc = "search_files"
-        result = await do_search_files(content, owner=owner)
+        result = await dispatched(do_search_files(content, owner=owner))
     elif tool == "manage_files":
         desc = "manage_files"
-        result = await do_manage_files(content, owner=owner)
+        result = await dispatched(do_manage_files(content, owner=owner))
     elif tool == "manage_gallery":
         desc = "manage_gallery"
-        result = await do_manage_gallery(content, owner=owner)
+        result = await dispatched(do_manage_gallery(content, owner=owner))
     elif tool == "manage_notes":
         desc = "manage_notes"
-        result = await do_manage_notes(content, owner=owner)
+        result = await dispatched(do_manage_notes(content, owner=owner))
     elif tool == "manage_health":
         desc = "manage_health"
-        result = await do_manage_health(content, owner=owner)
+        result = await dispatched(do_manage_health(content, owner=owner))
     elif tool == "manage_calendar":
         desc = "manage_calendar"
-        result = await do_manage_calendar(content, owner=owner)
+        result = await dispatched(do_manage_calendar(content, owner=owner))
     elif tool == "download_model":
         desc = "download_model"
-        result = await do_download_model(content, owner=owner)
+        result = await dispatched(do_download_model(content, owner=owner))
     elif tool == "serve_model":
         desc = "serve_model"
-        result = await do_serve_model(content, owner=owner)
+        result = await dispatched(do_serve_model(content, owner=owner))
     elif tool == "list_served_models":
         desc = "list_served_models"
-        result = await do_list_served_models(content, owner=owner)
+        result = await dispatched(do_list_served_models(content, owner=owner))
     elif tool == "stop_served_model":
         desc = "stop_served_model"
-        result = await do_stop_served_model(content, owner=owner)
+        result = await dispatched(do_stop_served_model(content, owner=owner))
     elif tool == "tail_serve_output":
         desc = "tail_serve_output"
-        result = await do_tail_serve_output(content, owner=owner)
+        result = await dispatched(do_tail_serve_output(content, owner=owner))
     elif tool == "list_downloads":
         desc = "list_downloads"
-        result = await do_list_downloads(content, owner=owner)
+        result = await dispatched(do_list_downloads(content, owner=owner))
     elif tool == "cancel_download":
         desc = "cancel_download"
-        result = await do_cancel_download(content, owner=owner)
+        result = await dispatched(do_cancel_download(content, owner=owner))
     elif tool == "search_hf_models":
         desc = "search_hf_models"
-        result = await do_search_hf_models(content, owner=owner)
+        result = await dispatched(do_search_hf_models(content, owner=owner))
     elif tool == "list_cached_models":
         desc = "list_cached_models"
-        result = await do_list_cached_models(content, owner=owner)
+        result = await dispatched(do_list_cached_models(content, owner=owner))
     elif tool == "app_api":
         desc = "app_api"
-        result = await do_app_api(content, owner=owner)
+        result = await dispatched(do_app_api(content, owner=owner))
     elif tool == "list_serve_presets":
         desc = "list_serve_presets"
-        result = await do_list_serve_presets(content, owner=owner)
+        result = await dispatched(do_list_serve_presets(content, owner=owner))
     elif tool == "serve_preset":
         desc = "serve_preset"
-        result = await do_serve_preset(content, owner=owner)
+        result = await dispatched(do_serve_preset(content, owner=owner))
     elif tool == "adopt_served_model":
         desc = "adopt_served_model"
-        result = await do_adopt_served_model(content, owner=owner)
+        result = await dispatched(do_adopt_served_model(content, owner=owner))
     elif tool == "list_cookbook_servers":
         desc = "list_cookbook_servers"
-        result = await do_list_cookbook_servers(content, owner=owner)
+        result = await dispatched(do_list_cookbook_servers(content, owner=owner))
     elif tool == "edit_image":
         desc = "edit_image"
-        result = await do_edit_image(content, owner=owner)
+        result = await dispatched(do_edit_image(content, owner=owner))
     elif tool == "edit_file":
-        result = await _direct_fallback(tool, content) or {"error": "edit failed", "exit_code": 1}
+        result = await dispatched(_direct_fallback(tool, content)) or {"error": "edit failed", "exit_code": 1}
         desc = result.get("output") or result.get("error") or "edit_file"
     elif tool == "trigger_research":
         desc = "trigger_research"
-        result = await do_trigger_research(content, owner=owner, chat_session_id=session_id)
+        result = await dispatched(do_trigger_research(content, owner=owner, chat_session_id=session_id))
     elif tool == "manage_research":
         desc = "manage_research"
-        result = await do_manage_research(content, owner=owner)
+        result = await dispatched(do_manage_research(content, owner=owner))
     elif tool == "resolve_contact":
         desc = "resolve_contact"
-        result = await do_resolve_contact(content, owner=owner)
+        result = await dispatched(do_resolve_contact(content, owner=owner))
     elif tool == "manage_contact":
         desc = "manage_contact"
-        result = await do_manage_contact(content, owner=owner)
+        result = await dispatched(do_manage_contact(content, owner=owner))
     elif tool == "vault_search":
         desc = "vault_search"
-        result = await do_vault_search(content, owner=owner)
+        result = await dispatched(do_vault_search(content, owner=owner))
     elif tool == "vault_get":
         desc = "vault_get"
-        result = await do_vault_get(content, owner=owner)
+        result = await dispatched(do_vault_get(content, owner=owner))
     elif tool == "vault_unlock":
         desc = "vault_unlock"
-        result = await do_vault_unlock(content, owner=owner)
+        result = await dispatched(do_vault_unlock(content, owner=owner))
     elif tool in BUILTIN_EMAIL_TOOLS:
         # Bare email tool name from fenced-block models (e.g. Ollama) — route to MCP email server.
         # Non-admin owners never reach here: BUILTIN_EMAIL_TOOLS ⊆ NON_ADMIN_BLOCKED_TOOLS,
@@ -2157,7 +2171,7 @@ async def _execute_tool_block_impl(
                 if session_id:
                     args = dict(args)
                     args[_EMAIL_MCP_SESSION_ARG] = session_id
-                result = await mcp.call_tool(qualified, args)
+                result = await dispatched(mcp.call_tool(qualified, args))
         else:
             result = {"error": "MCP manager not available", "exit_code": 1}
     elif tool.startswith("mcp__"):
@@ -2176,7 +2190,7 @@ async def _execute_tool_block_impl(
                     if session_id:
                         args = dict(args)
                         args[_EMAIL_MCP_SESSION_ARG] = session_id
-                result = _normalize_mcp_text_error(await mcp.call_tool(tool, args))
+                result = _normalize_mcp_text_error(await dispatched(mcp.call_tool(tool, args)))
         else:
             desc = f"mcp: {tool}"
             result = {"error": "MCP manager not available", "exit_code": 1}
@@ -2185,7 +2199,7 @@ async def _execute_tool_block_impl(
     elif tool in dynamic_handlers:
         first_line = content.split(chr(10))[0][:80]
         desc = f"registry: {tool} {first_line}".strip()
-        res = await _direct_fallback(
+        res = await dispatched(_direct_fallback(
             tool,
             content,
             progress_cb=progress_cb,
@@ -2194,7 +2208,7 @@ async def _execute_tool_block_impl(
             client_runtime_context=client_runtime_context,
             disabled_tools=disabled_tools,
             tool_policy=tool_policy,
-        )
+        ))
 
         if isinstance(res, tuple):
             desc, result = res

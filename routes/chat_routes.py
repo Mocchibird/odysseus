@@ -95,6 +95,7 @@ from src.model_profiles import (
     tool_schema_profile,
 )
 from src.tool_execution import AgentExecutionBridge, bind_execution_bridge
+from src.agent_runtime.authority import is_internal_tool_request, request_authority_for_http
 from src.turn_contract import (
     FAMILY_TOOLS, bind_turn_contract, preserve_bound_editor_selected_tools,
     requested_capabilities, resolve_turn_contract,
@@ -103,6 +104,15 @@ from src.turn_contract import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _append_internal_chat_context(ctx, message):
+    tagged = untrusted_context_message("internal tool request", message)
+    ctx.messages.append(tagged)
+    routed = getattr(ctx, "route_messages", None)
+    if routed is not None and routed is not ctx.messages:
+        routed.append(tagged)
+
 
 # Track active streams for partial-save safety net
 _active_streams: Dict[str, dict] = {}
@@ -2241,7 +2251,10 @@ def setup_chat_routes(
             webhook_manager=webhook_manager,
             allow_tool_preprocessing=allow_tool_preprocessing,
             defer_context_shaping=foreground_policy.enabled,
+            persist_user_message=not is_internal_tool_request(request),
         )
+        if is_internal_tool_request(request):
+            _append_internal_chat_context(ctx, message)
 
         # Research injection
         research_blocked_by_policy = (
@@ -2695,6 +2708,8 @@ def setup_chat_routes(
             owner = effective_user(request)
             if tool_approval_id:
                 _reject_delegated_tool_approval(request)
+                from src.agent_runtime.authority import require_user_approval_request
+                require_user_approval_request(request)
                 pending_tool_approval = tool_approval_store.peek(tool_approval_id)
                 normalized_owner = str(owner or "").strip().casefold()
                 if (
@@ -2954,10 +2969,12 @@ def setup_chat_routes(
                 and pending_tool_approval.continuation_query
                 else None
             ),
-            persist_user_message=not tool_approval_continuation,
+            persist_user_message=not tool_approval_continuation and not is_internal_tool_request(request),
             interaction_mode=chat_mode,
             auto_escalated=auto_escalated,
         )
+        if is_internal_tool_request(request):
+            _append_internal_chat_context(ctx, message)
 
         _research_flags = {"do": do_research}  # Mutable container for generator scope
 
@@ -3402,6 +3419,24 @@ def setup_chat_routes(
                 "manage_documents", "create_document", "edit_document", "update_document",
             }.issubset(disabled_tools),
         }
+        # Capture permission state before schema selection/reconciliation.
+        # Only deterministic request intent supplies grants, never inventory.
+        _request_authority = request_authority_for_http(
+            request, message, owner=_user, session_id=session, workspace=workspace,
+            history=_turn_history, policy=tool_policy,
+            active_document=bool(active_doc),
+            image_attachment=any(str(a.get('mime') or '').startswith('image/')
+                                 for a in (ctx.preprocessed.attachment_meta or [])),
+            capabilities=({'search_browser'} if (
+                _explicit_browser_intent or _external_discovery_intent
+            ) else ()),
+        )
+        if exact_tool_approval is not None:
+            from src.agent_runtime.authority import RequestAuthority
+            _request_authority = (
+                exact_tool_approval.pending.request_authority
+                or RequestAuthority.empty(owner=_user, session_id=session, workspace=workspace)
+            ).restrict(tool_policy)
         _turn_contract = None
         # Image models execute directly, not through the text-agent inventory.
         # Keep the permission policy above, but do not apply routing omissions
@@ -3530,6 +3565,7 @@ def setup_chat_routes(
                 warm_tools=_warm_tools,
                 message=message, history=getattr(sess, "history", []) or [],
             )
+            _request_authority = _request_authority.restrict(_contract_policy)
             # Resolution already applies user, owner, and global policy. An
             # admitted tool must not later be rejected by the stale
             # pre-contract disabled snapshot during execution.
@@ -4497,6 +4533,7 @@ def setup_chat_routes(
                         cwd=_agent_turn_cwd(sess, client_runtime_context),
                         forced_tools=_forced_tools,
                         turn_contract=_turn_contract,
+                        request_authority=_request_authority,
                         uploaded_files=ctx.uploaded_files,
                         defer_context_shaping=_foreground_policy.enabled,
                         external_untrusted_context_seen=external_untrusted_context_seen,

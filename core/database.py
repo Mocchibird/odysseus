@@ -837,6 +837,7 @@ class ScheduledTask(TimestampMixin, Base):
     owner          = Column(String, nullable=True, index=True)
     name           = Column(String, nullable=False, default="Untitled Task")
     prompt         = Column(Text, nullable=True)              # LLM prompt (for task_type="llm")
+    request_authority_json = Column(Text, nullable=True)       # server-only admitted request snapshot
     task_type      = Column(String, default="llm")            # "llm" | "action"
     action         = Column(String, nullable=True)            # builtin action name (for task_type="action")
     schedule       = Column(String, nullable=True)            # "once", "daily", "weekly", "monthly"
@@ -2694,6 +2695,43 @@ def _migrate_add_notes_reminder_at():
             pass
 
 
+def _migrate_fork_seal_legacy_task_authority():
+    """FORK: seal scheduled tasks created before request authority existed.
+
+    Upstream (23rd sync, step 9c) runs a scheduled task only inside the
+    request authority sealed into scheduled_tasks.request_authority_json when
+    the task was saved. Rows from before that column have none, so their
+    built-in actions are refused and their agent runs get no tools; upstream
+    only re-seals a task when it is edited. Seal each legacy row the way a
+    direct save from the Tasks UI would (its prompt/action, its owner, no
+    parent cap), which keeps existing schedules working as they did before the
+    upgrade. Rows that already carry a snapshot are left alone.
+    """
+    log = logging.getLogger(__name__)
+    try:
+        from src.agent_runtime.authority import seal_task_authority
+    except Exception as e:  # pragma: no cover - import failure is logged, not fatal
+        log.warning(f"legacy task authority backfill skipped: {e}")
+        return
+    db = SessionLocal()
+    try:
+        rows = db.query(ScheduledTask).filter(ScheduledTask.request_authority_json.is_(None)).all()
+        for task in rows:
+            try:
+                task.request_authority_json = seal_task_authority(
+                    task.prompt, task.task_type, task.action, owner=task.owner)
+            except Exception as e:
+                log.warning(f"could not seal legacy task {task.id}: {e}")
+        if rows:
+            db.commit()
+            log.info(f"Migrated: sealed request authority for {len(rows)} legacy scheduled task(s)")
+    except Exception as e:
+        db.rollback()
+        log.warning(f"legacy task authority backfill failed: {e}")
+    finally:
+        db.close()
+
+
 # Bump this WHENEVER a new _migrate_* call is added to init_db() below. Once a
 # database's PRAGMA user_version reaches this number, init_db() skips the whole
 # (idempotent but not free) migration block on subsequent boots — on a mature
@@ -2728,7 +2766,10 @@ def _migrate_add_notes_reminder_at():
 # _migrate_add_memory_injection_enabled_column(),
 # _migrate_add_session_endpoint_id_column() and
 # _migrate_add_calendar_source_email_cols().
-SCHEMA_VERSION = 5
+# v6: upstream merge (cb5b8102, 23rd sync step 9c) added
+# _migrate_add_task_authority_column() (scheduled_tasks.request_authority_json).
+# The fork's _migrate_fork_seal_legacy_task_authority() backfills it once.
+SCHEMA_VERSION = 6
 
 
 def _get_user_version() -> int:
@@ -2773,6 +2814,7 @@ _REQUIRED_MIGRATED_COLUMNS = {
         "source_email_uid", "source_email_folder",
         "source_email_account_id", "source_email_message_id",
     ),
+    "scheduled_tasks": ("request_authority_json",),
 }
 
 
@@ -2815,6 +2857,15 @@ def _migrated_schema_is_complete() -> bool:
         )
         return False
     return True
+
+
+def _migrate_add_task_authority_column():
+    """Retain snapshots after legacy task-table rebuilds; support all DBs."""
+    from sqlalchemy import inspect
+    with engine.begin() as conn:
+        columns = {column["name"] for column in inspect(conn).get_columns("scheduled_tasks")}
+        if "request_authority_json" not in columns:
+            conn.execute(text("ALTER TABLE scheduled_tasks ADD COLUMN request_authority_json TEXT"))
 
 
 def init_db():
@@ -2903,6 +2954,8 @@ def init_db():
     _migrate_add_oauth_config()
     _migrate_add_email_oauth_columns()
     _migrate_add_task_automation_columns()
+    _migrate_add_task_authority_column()
+    _migrate_fork_seal_legacy_task_authority()
     _migrate_add_disabled_tools()
     _migrate_add_mcp_oauth_tokens_column()
     _migrate_add_task_v2_columns()

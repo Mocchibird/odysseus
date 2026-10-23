@@ -1388,6 +1388,17 @@ class TaskScheduler:
     async def _execute_action(self, task, run_id: str | None = None) -> tuple:
         """Execute a built-in action (no LLM needed)."""
         from src.builtin_actions import BUILTIN_ACTIONS
+        from src.agent_runtime.authority import (
+            bind_request_authority, restore_task_authority, task_operation,
+        )
+        authority = restore_task_authority(
+            getattr(task, "request_authority_json", None), task.prompt, task.task_type,
+            task.action, owner=task.owner)
+        from src.settings import get_setting
+        authority = authority.restrict(disabled_tools=get_setting("disabled_tools", []) or ())
+        operation = task_operation(task.task_type, task.action, task.prompt)
+        if operation is None or not authority.permits(operation):
+            return "Scheduled action has no matching server request authority.", False
 
         action_fn = BUILTIN_ACTIONS.get(task.action)
         if not action_fn:
@@ -1414,7 +1425,8 @@ class TaskScheduler:
             if getattr(task, "model", None):
                 kwargs["model"] = task.model
                 kwargs["endpoint_url"] = getattr(task, "endpoint_url", None)
-            result, success = await action_fn(**kwargs)
+            with bind_request_authority(authority):
+                result, success = await action_fn(**kwargs)
             if getattr(task, "model", None):
                 self._last_run_model = task.model
             return result, success
@@ -2022,6 +2034,7 @@ class TaskScheduler:
                               datetime_context_msg: dict | None = None) -> str:
         """Run the full agent loop with tool access, collecting the final text."""
         from src.agent_loop import stream_agent_loop
+        from src.agent_runtime.authority import restore_task_authority
 
         system_content = system_prompt or "You are a helpful assistant executing a scheduled task. Use available tools to complete the task thoroughly."
         user_content = override_user_message or task.prompt
@@ -2053,6 +2066,7 @@ class TaskScheduler:
         except Exception:
             pass
         full_text = ""
+        final_text_replaced = False
         tool_results = []
         approval_pause = None
 
@@ -2074,62 +2088,81 @@ class TaskScheduler:
             )[1:]
         except Exception:
             _task_fallbacks = []
-        async for event_str in stream_agent_loop(
-            endpoint_url=endpoint_url,
-            model=model,
-            messages=messages,
-            max_rounds=_task_max_rounds,
-            session_id=session_id,
-            owner=task.owner,
-            headers=headers,
-            disabled_tools=disabled_tools,
-            relevant_tools=relevant_tools,
-            fallbacks=_task_fallbacks,
-            workload="background",
-        ):
-            if event_str.startswith("data: ") and not event_str.startswith("data: [DONE]"):
-                try:
-                    data = json.loads(event_str[6:])
-                    # Capture text from all event types, not just delta
-                    if "delta" in data:
-                        if data.get("thinking"):
-                            continue
-                        full_text += data["delta"]
-                    elif data.get("type") == "tool_output":
-                        # Tool results — capture summary so we have SOMETHING even
-                        # if the model never produces a final text response
-                        tool_summary = data.get("stdout") or data.get("output") or data.get("result") or ""
-                        if isinstance(tool_summary, str) and tool_summary.strip():
-                            tool_results.append(f"[{data.get('tool', '?')}] {tool_summary[:500]}")
-                        approval = data.get("ask_user")
-                        if (
-                            isinstance(approval, dict)
-                            and approval.get("kind") == "tool_approval"
-                        ):
-                            approval_pause = {
-                                "tool": data.get("tool") or "tool",
-                                "approval_id": approval.get("approval_id"),
-                            }
-                            # Scheduled tasks have no interactive surface that
-                            # can safely resume a one-use grant. Retire the
-                            # record immediately instead of leaving it pending
-                            # and report an explicit manual-action boundary.
-                            try:
-                                from src.tool_approvals import tool_approval_store
-                                tool_approval_store.consume(
-                                    approval_pause["approval_id"],
-                                    decision="deny",
-                                    owner=task.owner,
-                                    session_id=session_id,
-                                )
-                            except Exception:
-                                logger.debug(
-                                    "Could not retire scheduled-task approval",
-                                    exc_info=True,
-                                )
-                            break
-                except (json.JSONDecodeError, KeyError):
-                    pass
+        # Close the stream in this task on every exit, including the
+        # approval-pause break, so the agent run's context state unwinds here.
+        request_authority = restore_task_authority(
+            getattr(task, "request_authority_json", None), task.prompt,
+            getattr(task, "task_type", "llm"), getattr(task, "action", None),
+            owner=task.owner, session_id=session_id)
+        async with contextlib.aclosing(stream_agent_loop(
+                endpoint_url=endpoint_url,
+                model=model,
+                messages=messages,
+                max_rounds=_task_max_rounds,
+                session_id=session_id,
+                owner=task.owner,
+                workspace=request_authority.workspace or None,
+                headers=headers,
+                disabled_tools=disabled_tools,
+                relevant_tools=relevant_tools,
+                fallbacks=_task_fallbacks,
+                workload="background",
+                request_authority=request_authority,
+        )) as agent_stream:
+            async for event_str in agent_stream:
+                if event_str.startswith("data: ") and not event_str.startswith("data: [DONE]"):
+                    try:
+                        data = json.loads(event_str[6:])
+                        # Capture text from all event types, not just delta
+                        if "delta" in data:
+                            if data.get("thinking"):
+                                continue
+                            if final_text_replaced:
+                                # A later answer supersedes the replacement,
+                                # as the completion gate treats it.
+                                full_text = ""
+                                final_text_replaced = False
+                            full_text += data["delta"]
+                        elif data.get("type") == "final_response":
+                            # The completion gate may present its sanitized
+                            # answer as one replacement instead of deltas.
+                            full_text = str(data.get("content") or "")
+                            final_text_replaced = True
+                        elif data.get("type") == "tool_output":
+                            # Tool results — capture summary so we have SOMETHING even
+                            # if the model never produces a final text response
+                            tool_summary = data.get("stdout") or data.get("output") or data.get("result") or ""
+                            if isinstance(tool_summary, str) and tool_summary.strip():
+                                tool_results.append(f"[{data.get('tool', '?')}] {tool_summary[:500]}")
+                            approval = data.get("ask_user")
+                            if (
+                                isinstance(approval, dict)
+                                and approval.get("kind") == "tool_approval"
+                            ):
+                                approval_pause = {
+                                    "tool": data.get("tool") or "tool",
+                                    "approval_id": approval.get("approval_id"),
+                                }
+                                # Scheduled tasks have no interactive surface that
+                                # can safely resume a one-use grant. Retire the
+                                # record immediately instead of leaving it pending
+                                # and report an explicit manual-action boundary.
+                                try:
+                                    from src.tool_approvals import tool_approval_store
+                                    tool_approval_store.consume(
+                                        approval_pause["approval_id"],
+                                        decision="deny",
+                                        owner=task.owner,
+                                        session_id=session_id,
+                                    )
+                                except Exception:
+                                    logger.debug(
+                                        "Could not retire scheduled-task approval",
+                                        exc_info=True,
+                                    )
+                                break
+                    except (json.JSONDecodeError, KeyError):
+                        pass
 
         if approval_pause is not None:
             return (
@@ -2172,6 +2205,14 @@ class TaskScheduler:
 
     async def _execute_research_task(self, task, db) -> str:
         """Execute a deep research task using DeepResearcher."""
+        from src.agent_runtime.authority import bind_request_authority, restore_task_authority, task_operation
+        from src.settings import get_setting
+        authority = restore_task_authority(
+            getattr(task, "request_authority_json", None), task.prompt, task.task_type,
+            getattr(task, "action", None), owner=task.owner)
+        authority = authority.restrict(disabled_tools=get_setting("disabled_tools", []) or ())
+        if not authority.permits(task_operation(task.task_type, getattr(task, "action", None), task.prompt)):
+            raise PermissionError("Scheduled research has no matching server request authority.")
         from core.database import Session as DbSession
         from src.deep_research import DeepResearcher
         from src.research_handler import RESEARCH_DATA_DIR, ResearchHandler
@@ -2243,7 +2284,8 @@ class TaskScheduler:
         )
 
         started_ts = time.time()
-        report = await researcher.research(task.prompt)
+        with bind_request_authority(authority):
+            report = await researcher.research(task.prompt)
         completed_ts = time.time()
         try:
             stats = researcher.get_stats() or {}
@@ -2670,6 +2712,7 @@ class TaskScheduler:
                 if (task.output_target or "session") == "session":
                     task.output_target = defs.get("output_target", "none")
             seeded = []
+            from src.agent_runtime.authority import seal_task_authority
             for action, defs in HOUSEKEEPING_DEFAULTS.items():
                 if action in existing_actions:
                     continue
@@ -2687,6 +2730,7 @@ class TaskScheduler:
                     name=defs["name"],
                     task_type="action",
                     action=action,
+                    request_authority_json=seal_task_authority(None, "action", action, owner=owner),
                     trigger_type=trigger_type,
                     trigger_event=defs.get("trigger_event"),
                     trigger_count=defs.get("trigger_count"),

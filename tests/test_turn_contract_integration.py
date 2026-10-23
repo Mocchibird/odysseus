@@ -4,6 +4,14 @@ import json
 from unittest.mock import AsyncMock, Mock
 
 import pytest
+from tests.runtime_evidence_helpers import server_authorized_executor
+
+
+@pytest.fixture(autouse=True)
+def standalone_dispatch_authority(monkeypatch):
+    from src import tool_execution
+    monkeypatch.setattr(tool_execution, "execute_tool_block",
+                        server_authorized_executor(tool_execution.execute_tool_block))
 
 from src.tool_policy import ToolPolicy
 from src.tool_schemas import FUNCTION_TOOL_SCHEMAS
@@ -62,17 +70,21 @@ async def test_actual_generator_reports_unavailable_before_inference(
         forced_tools={"web_search"}, relevant_tools={"web_search"},
         fallbacks=[("https://fallback.invalid", "unused-fallback", {})],
     )]
-    assert len(chunks) == 3
+    assert len(chunks) == 4
     assert json.loads(chunks[0].removeprefix("data: ")) == {
         "type": "turn_contract", **selected.audit(),
     }
-    failure = json.loads(chunks[1].removeprefix("data: "))
+    decision = json.loads(chunks[1].removeprefix("data: "))
+    assert decision["type"] == "completion_decision"
+    assert decision["data"]["status"] == "unverified"
+    assert decision["data"]["evidence_ids"] == []
+    failure = json.loads(chunks[2].removeprefix("data: "))
     assert set(failure) == {"delta"}
     assert "can’t perform" in failure["delta"]
     assert "unavailable" in failure["delta"]
     assert missing in failure["delta"]
     assert "haven’t substituted another tool" in failure["delta"]
-    assert chunks[2] == "data: [DONE]\n\n"
+    assert chunks[3] == "data: [DONE]\n\n"
 
 
 def test_unknown_contract_reaches_model_instead_of_forced_clarification():

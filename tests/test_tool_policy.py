@@ -17,6 +17,9 @@ from src.tool_policy import (
     web_search_enabled_for_turn,
 )
 from src.turn_contract import requested_capabilities
+from tests.runtime_evidence_helpers import server_authorized_executor
+
+execute_tool_block = server_authorized_executor(execute_tool_block)
 
 
 def _collect(gen):
@@ -1681,6 +1684,9 @@ def test_calendar_create_response_includes_persistent_event_link(monkeypatch):
 
     set_user_timezone("Asia/Tokyo", 540)
 
+    from tests.runtime_evidence_helpers import authoritative_executor
+
+    @authoritative_executor
     async def _fake_exec(block, *args, **kwargs):
         if '"list_calendars"' in (block.content or ""):
             return (

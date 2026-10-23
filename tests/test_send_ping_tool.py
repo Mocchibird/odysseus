@@ -7,12 +7,18 @@ from pathlib import Path
 from src import tool_implementations
 from src.agent_tools import TOOL_TAGS, ToolBlock
 import src.tool_execution as tool_execution
-from src.tool_execution import NO_TOOL_SECURITY_CONTEXT, execute_tool_block
+from src.tool_execution import NO_TOOL_SECURITY_CONTEXT, execute_tool_block as _execute_tool_block
+from tests.runtime_evidence_helpers import server_authorized_executor
 from src.tool_index import ALWAYS_AVAILABLE, ASSISTANT_ALWAYS_AVAILABLE, BUILTIN_TOOL_DESCRIPTIONS
 from src.tool_parsing import _TOOL_NAME_MAP
 from src.tool_security import is_public_blocked_tool, plan_mode_disabled_tools
 
 ROOT = Path(__file__).resolve().parents[1]
+
+# Standalone dispatcher call: give it the server grants upstream's own
+# dispatcher fixtures use (request authority is exercised in
+# tests/test_fork_request_authority.py).
+execute_tool_block = server_authorized_executor(_execute_tool_block)
 
 
 def test_send_ping_registered_everywhere():
