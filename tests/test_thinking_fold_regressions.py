@@ -60,9 +60,12 @@ def test_think_wrapper_closes_at_agent_round_boundaries():
     assert "_thinkOpen = false; // student bubble abandoned" in chat
 
 
-def test_background_resume_skips_reasoning_deltas():
+def test_background_resume_keeps_reasoning_out_of_the_answer_text():
+    # Upstream now replays reasoning deltas into a collapsed fold on resume
+    # (replayThinking) instead of the fork's old skip; either way they must not
+    # be concatenated into the answer text.
     chat = _read("static/js/chat.js")
-    assert "if (json.thinking) continue;" in chat
+    assert "if (json.thinking) replayThinking += json.delta;" in chat
 
 
 def test_compare_panes_fold_reasoning_deltas():
@@ -82,5 +85,7 @@ def test_agent_loop_persists_round_reasoning_for_reload():
     # _strip_think_blocks(), the documented linear-time equivalent of
     # _THINK_RE.sub("", ...) (upstream merge #13 swapped the helper in).
     idx = loop.index('"<think>" + round_reasoning.strip()')
-    after = loop[idx:idx + 2000]
+    after = loop[idx:]
+    # Upstream's 23rd-sync agent loop puts more code between the two, so look at
+    # everything after the persistence point rather than a fixed window.
     assert '_strip_think_blocks(cleaned_round)' in after

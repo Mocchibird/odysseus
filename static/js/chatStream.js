@@ -2,7 +2,7 @@
 // SSE event handlers extracted from chat.js handleChatSubmit
 // Handles: ui_control events, background stream management
 
-import uiModule from './ui.js';
+import uiModule from './ui.js?v=20260908weekhoverfix1';
 import Storage from './storage.js';
 import themeModule from './theme.js?v=397';
 import markdownModule from './markdown.js';
@@ -129,6 +129,7 @@ export function handleUIControl(uiData) {
             if (bg.effectColor && tm2.applyBgEffectColor) { tm2.applyBgEffectColor(bg.effectColor); opts.bgEffectColor = bg.effectColor; }
             if (bg.effectIntensity != null && tm2.applyBgEffectIntensity) { tm2.applyBgEffectIntensity(bg.effectIntensity); opts.bgEffectIntensity = bg.effectIntensity; }
             if (bg.effectSize != null && tm2.applyBgEffectSize) { tm2.applyBgEffectSize(bg.effectSize); opts.bgEffectSize = bg.effectSize; }
+            if (bg.effectSpeed != null && tm2.applyBgEffectSpeed) { tm2.applyBgEffectSpeed(bg.effectSpeed); opts.bgEffectSpeed = bg.effectSpeed; }
             if (bg.frosted != null && tm2.applyFrostedGlass) { tm2.applyFrostedGlass(bg.frosted); opts.frosted = bg.frosted; }
           }
           if (tm2.saveCustomTheme) tm2.saveCustomTheme(name, colors2, Object.keys(opts).length ? opts : undefined);
@@ -184,6 +185,13 @@ export function handleUIControl(uiData) {
           var fn = mod.openGallery || (mod.default && mod.default.openGallery);
           if (fn) fn();
         }).catch(function(){});
+      } else if (panel === 'calendar') {
+        import('./calendar.js?v=20260903weekscrollstable1').then(function(mod) {
+          var viewFn = mod.openCalendarView || (mod.default && mod.default.openCalendarView);
+          var fn = mod.openCalendar || (mod.default && mod.default.openCalendar);
+          if (viewFn && (uiData.view || uiData.target_date)) viewFn(uiData.view || 'month', uiData.target_date || '');
+          else if (fn) fn();
+        }).catch(function(){});
       } else if (panel === 'email') {
         import('./emailLibrary.js').then(function(mod) {
           var fn = mod.openEmailLibrary || (mod.default && mod.default.openEmailLibrary);
@@ -204,12 +212,29 @@ export function handleUIControl(uiData) {
           var fn = mod.openPanel || mod.openNotes || (mod.default && (mod.default.openPanel || mod.default.openNotes));
           if (fn) fn();
         }).catch(function(){});
+      } else if (panel === 'theme' || panel === 'themes') {
+        import('./theme.js?v=397').then(function(mod) {
+          var fn = mod.togglePopup || (mod.default && mod.default.togglePopup);
+          var modal = document.getElementById('theme-modal');
+          if (modal && modal.classList.contains('hidden') && fn) fn();
+          else if (!modal && fn) fn();
+          else if (modal) modal.classList.remove('hidden');
+        }).catch(function(){
+          var btn = document.getElementById('tool-theme-btn') || document.getElementById('rail-theme');
+          if (btn) btn.click();
+        });
       } else if (panel === 'memories' || panel === 'skills' || panel === 'settings') {
         // These live in the sidebar / settings drawer — most just need
         // an existing button click.
-        var ids = { memories: 'tool-memory-btn', skills: 'skills-btn', settings: 'open-settings-btn' };
+        var ids = { memories: 'tool-memory-btn', skills: 'tool-skills-btn', settings: 'open-settings-btn' };
         var btn = document.getElementById(ids[panel]);
-        if (btn) btn.click();
+        if (panel === 'settings') {
+          import('./settings.js?v=564').then(function(mod) {
+            var fn = mod.open || (mod.default && mod.default.open);
+            if (fn) fn();
+            else if (btn) btn.click();
+          }).catch(function(){ if (btn) btn.click(); });
+        } else if (btn) btn.click();
       }
 
     } else if (uiEvent === 'open_email_reply' || uiData.ui_event === 'open_email_reply') {
@@ -273,6 +298,14 @@ export function notifyStreamComplete(sessionId, query) {
  * Insert a clickable in-chat toast when a background stream finishes.
  */
 export function insertStreamDoneToast(sessionId, query) {
+  if (
+    sessionModule
+    && sessionModule.getCurrentSessionId
+    && sessionModule.getCurrentSessionId() !== sessionId
+  ) {
+    if (uiModule && uiModule.showToast) uiModule.showToast('Response ready in another chat', 4000);
+    return;
+  }
   var box = document.getElementById('chat-history');
   if (!box) return;
   var sessions = sessionModule ? sessionModule.getSessions() : [];

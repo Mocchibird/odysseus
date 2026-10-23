@@ -370,7 +370,8 @@ def test_prewarm_account_chooser_rejects_disabled_or_empty_authoritative_invento
 
     ensure_accounts = _function_source("_ensureEmailAccountsForPrewarm")
     assert "if (!accountId) return null;" in ensure_accounts
-    assert ensure_accounts.index("if (!accountId) return null;") < ensure_accounts.index("_publishActiveAccount();")
+    assert "state._libAccountId = accountId" not in ensure_accounts
+    assert "_publishActiveAccount();" not in ensure_accounts
 
 
 def test_prewarm_is_bounded_to_the_interactive_initial_page_size():
@@ -379,11 +380,7 @@ def test_prewarm_is_bounded_to_the_interactive_initial_page_size():
 
     assert "const _LIB_INITIAL_PAGE_SIZE = 100;" in text
     assert "limit: _LIB_INITIAL_PAGE_SIZE" in prewarm
-    # One interactive list fetch carries this bound. Upstream counts two because
-    # it also issues a `cached_only=1` pre-flight before the IMAP call; this fork
-    # does not carry that fast path, so the prewarm and the one real fetch must
-    # still agree on the bound.
-    assert text.count("limit=${_LIB_INITIAL_PAGE_SIZE}&offset=${offsetAtStart}") == 1
+    assert text.count("limit=${_LIB_INITIAL_PAGE_SIZE}&offset=${offsetAtStart}") == 2
     assert "limit: 100" not in prewarm
 
 

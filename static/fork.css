@@ -1242,3 +1242,23 @@ body.writer-open #model-picker-wrap { display: none; }
   /* 16px keeps iOS from zooming the surface on focus. */
   .writer-editor { font-size: 16px; padding: 20px 14px 40vh; }
 }
+
+/* Fork panel layout rules (moved from static/style.css during the 23rd upstream sync:
+   they only target fork-only panels, so they live with the other fork rules). */
+#health-modal .admin-card, #habits-modal .admin-card { margin-bottom: 0; }
+/* The fork panels lay buttons out in gap-spaced flex/grid rows next to inputs
+   and selects — the global `.modal-body button { margin-top: 6px }` drop made
+   every button sit ~3px below its row-centered siblings ("buttons not in
+   line"). Same reset the email search row uses. */
+#health-modal .modal-body button,
+#habits-modal .modal-body button,
+#books-modal .modal-body button,
+#pings-modal .modal-body button,
+#today-modal .modal-body button,
+#health-modal .modal-body .memory-search-input,
+#habits-modal .modal-body .memory-search-input,
+#books-modal .modal-body .memory-search-input,
+#pings-modal .modal-body .memory-search-input,
+#today-modal .modal-body .memory-search-input { margin-top: 0; }
+/* Rail unread badge on the bell */
+#rail-pings { position: relative; }

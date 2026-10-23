@@ -5,7 +5,7 @@
 
 import spinnerModule from './spinner.js';
 import sessionModule from './sessions.js';
-import { initEmailLibrary, openEmailLibrary, closeEmailLibrary, isOpen as isLibOpen } from './emailLibrary.js';
+import { initEmailLibrary, openEmailLibrary, closeEmailLibrary, isOpen as isLibOpen, prewarmEmailLibrary, prewarmUnreadEmails } from './emailLibrary.js?v=20260910replyactions1';
 import * as Modals from './modalManager.js';
 import { applyEdgeDock } from './modalSnap.js';
 import { buildReplyAllCc, extractEmail } from './emailLibrary/replyRecipients.js';
@@ -19,6 +19,7 @@ const _emailSetupHint = () => '<div style="margin-top:6px;opacity:0.72;font-size
 
 // SVG icons matching sessions.js dropdown style
 const _replyIcon = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 17 4 12 9 7"/><path d="M20 18v-2a4 4 0 0 0-4-4H4"/></svg>';
+const _spamIcon = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 2.9 1.8 17a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 2.9a2 2 0 0 0-3.4 0Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>';
 const _archiveIcon = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="5" rx="1"/><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"/><path d="M10 12h4"/></svg>';
 const _deleteIcon = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/></svg>';
 const _unreadIcon = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3" fill="currentColor"/></svg>';
@@ -49,7 +50,7 @@ function _withoutMyAddresses(raw, myAddresses) {
 function _openCalendarEventFromEmail(uid) {
   const target = String(uid || '').trim();
   if (!target) return;
-  import('./calendar.js').then(mod => {
+  import('./calendar.js?v=20260903weekscrollstable1').then(mod => {
     const open = mod.openCalendarTo || (mod.default && mod.default.openCalendarTo);
     if (open) open(target);
   }).catch(() => {});
@@ -83,6 +84,7 @@ function _emailTagGroupHtml(tags, em) {
     .filter(Boolean);
   if (!visible.length) return '';
   if (visible.length === 1) return `<span class="email-tags">${visible[0]}</span>`;
+  if (visible.length === 2) return `<span class="email-tags">${visible.join('')}</span>`;
   const extra = visible.slice(1).map(html => `<span class="email-tag-extra">${html}</span>`).join('');
   return `<span class="email-tags email-tags-collapsed">${visible[0]}${extra}<button type="button" class="email-tags-more" data-email-tags-more aria-expanded="false" title="Show all tags">+${visible.length - 1}<svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"></polyline></svg></button></span>`;
 }
@@ -112,19 +114,8 @@ function _cleanAiReplyText(text) {
   return t
     .replace(/<<<\s*(?:REPLY|SUMMARY|OUTPUT)\s*>>+/gi, '')
     .replace(/<<<\s*END\s*>>+/gi, '')
+    .replace(/<\/?\|(?:assistant|assistan|user|system|tool)\|>?|<\/\|end\|>?/gi, '')
     .trim();
-}
-
-function _shouldUseFastAiReply(data) {
-  const body = String(data?.body || data?.body_html || '');
-  const subject = String(data?.subject || '');
-  const atts = Array.isArray(data?.attachments) ? data.attachments : [];
-  if (atts.length > 0) return false;
-  const text = `${subject}\n${body}`.toLowerCase();
-  if (/\b(attach(?:ed|ment)?|pdf|document|contract|invoice|receipt|quote|estimate|proposal|question|questions|details|schedule|booking|reservation|meeting|calendar|availability|confirm|confirmation|review|sign|signature)\b/.test(text)) {
-    return false;
-  }
-  return body.length < 2500;
 }
 
 let _emails = [];
@@ -199,10 +190,12 @@ export function init(documentModule) {
       } catch (_) {}
       if (opts.compose) { _composeNew(); return; }
       if (opts.email) {
-        await _openEmail(opts.email, null, opts.emailData, opts.mode || 'reply', opts.noteHint || '', '', opts.mailboxContext || null);
+        return await _openEmail(opts.email, null, opts.emailData, opts.mode || 'reply', opts.noteHint || '', '', opts.mailboxContext || null);
       }
+      return false;
     },
   });
+  prewarmEmailLibrary({ delay: 1800 });
   _watchDocOpenToReDockEmail();
 }
 
@@ -232,6 +225,16 @@ function _bringEmailReplyDraftToFrontOnMobile() {
   });
   const docPane = document.getElementById('doc-editor-pane');
   if (docPane) docPane.style.setProperty('z-index', '10010', 'important');
+}
+
+function _focusMobileReplyBody() {
+  if (window.innerWidth > 768 || !_docModule?.focusEmailReplyBody) return;
+  // injectFreshDoc switches tabs on the next frame; wait for that render
+  // before focusing so the rich body exists and the caret lands in the reply,
+  // not in the previous document.
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    _docModule.focusEmailReplyBody();
+  }));
 }
 
 // When the document editor pane opens (body.doc-view turns on), make sure the
@@ -357,7 +360,11 @@ async function _refreshUnreadCount() {
     const maxUid = parseInt(data.max_uid || '0', 10) || 0;
 
     // Only show dot if there's a new email above the threshold
-    dot.style.display = maxUid > lastSeen ? '' : 'none';
+    const hasNewUnread = maxUid > lastSeen;
+    dot.style.display = hasNewUnread ? '' : 'none';
+    if (hasNewUnread && !isLibOpen()) {
+      prewarmUnreadEmails({ limit: Math.min(10, Math.max(1, unreadCount)), maxUid }).catch(() => {});
+    }
 
     // Color the dot by urgency tier. Cache the per-uid map so the per-row
     // renderer can reuse it without a second fetch.
@@ -414,22 +421,29 @@ export async function loadEmails(append = false) {
 
   try {
     const fromQS = _senderFilter ? `&from=${encodeURIComponent(_senderFilter)}` : '';
+    const applyListData = (data) => {
+      if (!append) _emails = [];
+      _emails.push(...(data.emails || []));
+      _total = data.total || 0;
+      if (_listSpinner) { _listSpinner.destroy(); _listSpinner = null; }
+      _renderList();
+      const unreadCount = _emails.filter(e => !e.is_read).length;
+      const dot = document.getElementById('email-unread-dot');
+      if (dot) dot.style.display = unreadCount > 0 ? '' : 'none';
+    };
+    if (!append && !_senderFilter) {
+      try {
+        const cachedRes = await fetch(`${API_BASE}/api/email/list?folder=${encodeURIComponent(_currentFolder)}&limit=50&offset=${_offset}&cached_only=1${_acct()}`);
+        const cachedData = await cachedRes.json();
+        if (!cachedData.error && (cachedData.emails || []).length) {
+          applyListData(cachedData);
+        }
+      } catch (_) {}
+    }
     const res = await fetch(`${API_BASE}/api/email/list?folder=${encodeURIComponent(_currentFolder)}&limit=50&offset=${_offset}${fromQS}${_acct()}`);
     const data = await res.json();
     if (data.error) throw new Error(data.error);
-
-    if (!append) _emails = [];
-    _emails.push(...(data.emails || []));
-    _total = data.total || 0;
-
-    // Remove spinner
-    if (_listSpinner) { _listSpinner.destroy(); _listSpinner = null; }
-
-    _renderList();
-
-    const unreadCount = _emails.filter(e => !e.is_read).length;
-    const dot = document.getElementById('email-unread-dot');
-    if (dot) dot.style.display = unreadCount > 0 ? '' : 'none';
+    applyListData(data);
   } catch (e) {
     console.error('Failed to load emails:', e);
     if (_listSpinner) { _listSpinner.destroy(); _listSpinner = null; }
@@ -472,8 +486,11 @@ export function sortedFolders(folders) {
   const others = [];
   for (const f of folders) {
     const role = roleOf(f);
-    if (role && !found.has(role)) found.set(role, f);
-    else others.push(f);
+    if (role) {
+      if (!found.has(role)) found.set(role, f);
+    } else {
+      others.push(f);
+    }
   }
   return { priority: roleOrder.map(role => found.get(role)).filter(Boolean), others };
 }
@@ -488,6 +505,7 @@ export function folderDisplayName(folder) {
   if (f.includes('junk')) return 'Junk';
   if (f.includes('trash') || f.includes('bin') || f.includes('deleted')) return 'Trash';
   if (f.includes('sent')) return 'Sent';
+  if (f.includes('starred') || f.includes('flagged')) return 'Starred';
   if (f.includes('draft')) return 'Drafts';
   return raw;
 }
@@ -774,7 +792,7 @@ async function _openEmail(em, itemEl, preloadedData = null, mode = 'reply', note
     openRequestSeq === _openEmailRequestSeq &&
     mailboxContextIsCurrent()
   );
-  const aiReplyMode = mode === 'ai-reply-fast' ? 'fast' : (mode === 'ai-reply-full' ? 'full' : '');
+  const aiReplyMode = mode === 'ai-reply-fast' ? 'fast' : '';
   const wantsAiReply = mode === 'ai-reply' || !!aiReplyMode;
   // Body pre-fill from the agent's open_email_reply tool call takes the
   // same insertion slot as an AI-suggested body — both land just before
@@ -808,6 +826,33 @@ async function _openEmail(em, itemEl, preloadedData = null, mode = 'reply', note
     if (!isCurrentOpen()) return;
     if (data.error) {
       console.error('Failed to read email:', data.error);
+      import('./ui.js?v=20260908weekhoverfix1').then(m => m.showError && m.showError('Could not load email: ' + data.error)).catch(() => {});
+      return;
+    }
+    // The list row is already populated from the durable email index. Some
+    // IMAP/read paths can return a partial object for long Outlook threads;
+    // never let that create a reply draft with blank To/Subject.
+    const _fallback = (primary, fallback) => {
+      const p = primary == null ? '' : String(primary).trim();
+      if (p) return primary;
+      return fallback == null ? '' : fallback;
+    };
+    data = {
+      ...em,
+      ...data,
+      uid: data.uid || em.uid,
+      subject: _fallback(data.subject, em.subject),
+      from_name: _fallback(data.from_name, em.from_name || em.from_address),
+      from_address: _fallback(data.from_address, em.from_address),
+      to: _fallback(data.to, em.to),
+      cc: _fallback(data.cc, em.cc),
+      date: _fallback(data.date, em.date),
+      message_id: _fallback(data.message_id, em.message_id),
+    };
+    // A Drafts mailbox item is already a composed message. Opening it should
+    // load that message into the composer, never create a reply to the draft.
+    if (/draft/i.test(String(folderAtStart || '')) && _docModule?.openEmailDraft) {
+      await _docModule.openEmailDraft(data);
       return;
     }
     if (wantsAiReply) {
@@ -815,10 +860,11 @@ async function _openEmail(em, itemEl, preloadedData = null, mode = 'reply', note
       if (data.cached_ai_reply && !noteHint && !activeReplyAccount) {
         aiSuggestedBody = _cleanAiReplyText(data.cached_ai_reply);
       } else {
-        let draftToastTimer = null;
-        draftToastTimer = setTimeout(() => {
-          import('./ui.js').then(m => m.showToast && m.showToast('Drafting AI reply', { duration: 3000, leadingIcon: 'spinner' })).catch(() => {});
-        }, 450);
+      import('./ui.js?v=20260908weekhoverfix1').then(m => m.showToast && m.showToast('Writing AI reply', {
+        duration: 8000,
+        leadingIcon: 'spinner',
+        aiReplyProgress: true,
+      })).catch(() => {});
         try {
           let currentModel = '';
           let currentSessionId = '';
@@ -839,12 +885,14 @@ async function _openEmail(em, itemEl, preloadedData = null, mode = 'reply', note
               uid: String(em.uid || ''),
               folder: folderAtStart,
               account_id: activeReplyAccount,
-              fast: aiReplyMode ? aiReplyMode === 'fast' : _shouldUseFastAiReply(data),
+              fast: true,
               user_hint: (noteHint || '').trim() || undefined,
             }),
           });
-          const result = await res.json();
-          if (draftToastTimer) clearTimeout(draftToastTimer);
+          const result = await res.json().catch(() => ({}));
+          if (!res.ok) {
+            throw new Error(result.error || `AI reply service returned HTTP ${res.status}`);
+          }
           if (!isCurrentOpen()) return;
           if (result.success && result.reply) {
             aiSuggestedBody = _cleanAiReplyText(result.reply);
@@ -854,14 +902,13 @@ async function _openEmail(em, itemEl, preloadedData = null, mode = 'reply', note
               ? 'AI returned empty response.'
               : _rawMsg;
             console.error('AI reply generation failed:', _msg);
-            import('./ui.js').then(m => m.showError && m.showError('AI reply failed: ' + _msg)).catch(() => {});
+            import('./ui.js?v=20260908weekhoverfix1').then(m => m.showError && m.showError('AI reply failed: ' + _msg)).catch(() => {});
             return;
           }
         } catch (e) {
-          if (draftToastTimer) clearTimeout(draftToastTimer);
           if (!isCurrentOpen()) return;
           console.error('AI reply generation failed:', e);
-          import('./ui.js').then(m => m.showError && m.showError('AI reply failed: ' + (e.message || e))).catch(() => {});
+          import('./ui.js?v=20260908weekhoverfix1').then(m => m.showError && m.showError('AI reply failed: ' + (e.message || e))).catch(() => {});
           return;
         }
       }
@@ -912,16 +959,29 @@ async function _openEmail(em, itemEl, preloadedData = null, mode = 'reply', note
     let _baseSubject = (data.subject || '').trim();
     if (subjectPrefix === 'Re: ' && /^re\s*:/i.test(_baseSubject)) subjectPrefix = '';
     else if (subjectPrefix === 'Fwd: ' && /^fwd?\s*:/i.test(_baseSubject)) subjectPrefix = '';
+    if (mode !== 'forward' && !String(toAddress || '').trim()) {
+      throw new Error('Cannot create reply: sender address is missing from this email.');
+    }
     let content = `To: ${toAddress}\nSubject: ${subjectPrefix}${_baseSubject}`;
     if (ccAddresses) content += `\nCc: ${ccAddresses}`;
     if (mode !== 'forward' && data.message_id) content += `\nIn-Reply-To: ${data.message_id}`;
     if (mode !== 'forward' && data.message_id) content += `\nReferences: ${data.references ? data.references + ' ' + data.message_id : data.message_id}`;
     content += `\nX-Source-UID: ${em.uid}`;
     content += `\nX-Source-Folder: ${folderAtStart}`;
-    if (data.attachments && data.attachments.length > 0) {
-      const attStr = data.attachments.map(a => `${a.index}:${a.filename}:${a.size}`).join('|');
+    const forwardedAttachments = mode === 'forward'
+      ? (data.attachments || []).filter(a => {
+          const name = String(a?.filename || '').toLowerCase();
+          const size = Number(a?.size) || 0;
+          if (!/\.(png|jpe?g|gif|bmp|svg|webp)$/i.test(name)) return true;
+          if (/^image\d{3,}\.(png|jpe?g|gif)$/i.test(name)) return false;
+          if (/^(signature|logo|sig|footer|banner)[-_\d]*\.(png|jpe?g|gif|svg)$/i.test(name)) return false;
+          return !(size > 0 && size < 30 * 1024);
+        })
+      : [];
+    if (forwardedAttachments.length > 0) {
+      const attStr = forwardedAttachments.map(a => `${a.index}:${a.filename}:${a.size}`).join('|');
       content += `\nX-Attachments: ${attStr}`;
-      if (mode === 'forward') content += `\nX-Forward-Attachments: 1`;
+      content += `\nX-Forward-Attachments: 1`;
     }
     content += '\n---\n';
 
@@ -974,16 +1034,21 @@ async function _openEmail(em, itemEl, preloadedData = null, mode = 'reply', note
       if (aiSuggestedBody) {
         content += `${aiSuggestedBody}\n\n`;
       } else {
-        content += '\n\n';
+        // Two real editable rows make the empty reply target easy to tap on
+        // mobile. Plain leading newlines are trimmed by the rich-email
+        // renderer, whereas empty paragraphs survive as editable blocks.
+        content += '<p><br></p><p><br></p>\n';
       }
       content += `${_replySeparator}\nOn ${niceDate}, ${data.from_name} <${data.from_address}> wrote:\n${quotedBody}`;
     }
 
+    let replyDraftOpened = false;
     if (_docModule) {
       // Agent-provided reply text should land in the email draft the user
-      // already has open. Otherwise mobile users see the source email while the
-      // agent silently creates a second draft elsewhere.
-      const reuseExisting = mode !== 'forward';
+      // already has open. Plain Reply clicks must create a fresh draft: reusing
+      // old source-UID drafts can reopen stale quote-only/malformed compose docs
+      // and block Send on long threads.
+      const reuseExisting = mode !== 'forward' && !!aiSuggestedBody;
       const existingDocId = (reuseExisting && _docModule.findEmailDocId)
         ? _docModule.findEmailDocId(em.uid, folderAtStart)
         : null;
@@ -1002,13 +1067,23 @@ async function _openEmail(em, itemEl, preloadedData = null, mode = 'reply', note
           if (!isCurrentOpen()) return;
         }
         _bringEmailReplyDraftToFrontOnMobile();
+        if (mode !== 'forward') _focusMobileReplyBody();
+        replyDraftOpened = true;
       } else {
         if (!isCurrentOpen()) return;
-        let activeSid = await _createEmailChat(data, { forceNew: true });
+        // A reply is another document in the chat the user is currently in.
+        // Creating an email-scoped session here made Reply unexpectedly switch
+        // chats and hid the rest of the conversation from the active context.
+        // The document module will add the new draft as the active tab, so the
+        // agent sees the reply draft when the user writes in it.
+        let activeSid = sessionModule?.getCurrentSessionId?.() || '';
+        if (!activeSid) {
+          activeSid = await _createEmailChat(data);
+        }
         if (!isCurrentOpen()) return;
         if (!activeSid) {
           console.error('reply: could not obtain a session_id');
-          import('./ui.js').then(m => m.showError && m.showError('Could not start a reply chat.')).catch(() => {});
+          import('./ui.js?v=20260908weekhoverfix1').then(m => m.showError && m.showError('Could not start a reply chat.')).catch(() => {});
           return;
         }
 
@@ -1042,7 +1117,7 @@ async function _openEmail(em, itemEl, preloadedData = null, mode = 'reply', note
           // import pattern the rest of this file uses. (Previously this
           // referenced a bare `uiModule`, throwing a ReferenceError that
           // the outer catch swallowed → reply silently did nothing.)
-          import('./ui.js').then(m => m.showError && m.showError('Failed to create reply draft (' + docRes.status + ')')).catch(() => {});
+          import('./ui.js?v=20260908weekhoverfix1').then(m => m.showError && m.showError('Failed to create reply draft (' + docRes.status + ')')).catch(() => {});
           return;
         }
         const doc = await docRes.json();
@@ -1063,9 +1138,12 @@ async function _openEmail(em, itemEl, preloadedData = null, mode = 'reply', note
             if (!isCurrentOpen()) return;
           }
           _bringEmailReplyDraftToFrontOnMobile();
+          if (mode !== 'forward') _focusMobileReplyBody();
+          replyDraftOpened = true;
         }
       }
     }
+    return replyDraftOpened;
   } catch (e) {
     if (!isCurrentOpen()) return;
     console.error('Failed to open email:', e);
@@ -1073,7 +1151,7 @@ async function _openEmail(em, itemEl, preloadedData = null, mode = 'reply', note
     // look like "nothing happened". Dynamic import — uiModule isn't a
     // static import in this file.
     const msg = e && e.message ? e.message : String(e);
-    import('./ui.js').then(m => m.showError && m.showError('Reply failed: ' + msg)).catch(() => {});
+    import('./ui.js?v=20260908weekhoverfix1').then(m => m.showError && m.showError('Reply failed: ' + msg)).catch(() => {});
   } finally {
     if (spinner) { spinner.destroy(); spinner.element.remove(); }
     if (itemEl) {
@@ -1092,6 +1170,7 @@ function _showEmailMenu(em, anchor, itemEl) {
   const actions = [
     { label: 'Open', icon: _replyIcon, action: () => _openEmail(em, itemEl) },
     { label: 'Remind to reply', icon: _bellIcon, submenu: 'remind' },
+    { label: 'Spam', icon: _spamIcon, action: () => _spamEmail(em) },
     { label: 'Archive', icon: _archiveIcon, action: () => _archiveEmail(em) },
     { label: 'Delete', icon: _deleteIcon, danger: true, action: () => _deleteEmail(em) },
   ];
@@ -1115,15 +1194,7 @@ function _showEmailMenu(em, anchor, itemEl) {
 
   anchor.appendChild(dropdown);
 
-  // The dropdown is appended INTO the anchor, so a click on the anchor (the
-  // menu trigger) must still count as "inside" — otherwise reopening would
-  // immediately self-close. bindMenuDismiss handles the deferred attach, the
-  // Escape stack, and idempotent teardown so this can't leak on any path.
-  const close = bindMenuDismiss(
-    dropdown,
-    () => { dropdown.remove(); },
-    (e) => !dropdown.contains(e.target) && !anchor.contains(e.target),
-  );
+  const close = bindMenuDismiss(dropdown, () => { dropdown.remove(); }, (ev) => !dropdown.contains(ev.target) && !anchor.contains(ev.target));
 }
 
 // ---- Reminder submenu (creates a Note with a reminder for this email) ----
@@ -1227,7 +1298,7 @@ async function _createReplyReminder(em, dueDate) {
       body: JSON.stringify(payload),
     });
     if (!res.ok) throw new Error('Failed');
-    const { showToast } = await import('./ui.js');
+    const { showToast } = await import('./ui.js?v=20260908weekhoverfix1');
     const fmt = dueDate.toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
     showToast(`Reminder set for ${fmt}`);
     // Request notification permission if needed
@@ -1235,7 +1306,7 @@ async function _createReplyReminder(em, dueDate) {
       try { Notification.requestPermission(); } catch {}
     }
   } catch (e) {
-    const { showError } = await import('./ui.js');
+    const { showError } = await import('./ui.js?v=20260908weekhoverfix1');
     showError('Failed to create reminder');
   }
 }
@@ -1250,9 +1321,25 @@ async function _archiveEmail(em) {
   }
 }
 
+async function _spamEmail(em) {
+  try {
+    const res = await fetch(`${API_BASE}/api/email/move/${em.uid}?folder=${encodeURIComponent(_currentFolder)}&dest=${encodeURIComponent('Junk')}${_acct()}`, { method: 'POST' });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.success === false) throw new Error(data.error || `HTTP ${res.status}`);
+    _emails = _emails.filter(e => e.uid !== em.uid);
+    _renderList();
+    const { showToast } = await import('./ui.js?v=20260908weekhoverfix1');
+    showToast('Moved to Spam');
+  } catch (e) {
+    console.error('Failed to mark as spam:', e);
+    const { showError } = await import('./ui.js?v=20260908weekhoverfix1');
+    showError('Failed to move email to Spam');
+  }
+}
+
 async function _deleteEmail(em) {
   const subject = em.subject || '(no subject)';
-  const { styledConfirm } = await import('./ui.js');
+  const { styledConfirm } = await import('./ui.js?v=20260908weekhoverfix1');
   const ok = await styledConfirm(`Delete "${subject}"?`, { confirmText: 'Delete', cancelText: 'Cancel', danger: true });
   if (!ok) return;
   const row = document.querySelector(`.email-item[data-uid="${CSS.escape(String(em.uid))}"]`);
@@ -1321,9 +1408,10 @@ async function _toggleDone(em, itemEl) {
   }
 }
 
-async function _createEmailChat(emailData) {
+async function _createEmailChat(emailData, opts = {}) {
   const subject = String(emailData?.subject || 'New Email').trim() || 'New Email';
   const title = subject === 'New Email' ? 'New Email' : `Email: ${subject.slice(0, 60)}`;
+  const forceNew = !!opts.forceNew;
   try {
     const currentSid = sessionModule.getCurrentSessionId?.() || '';
     const current = sessionModule.getSessions?.().find(s => s.id === currentSid);
@@ -1334,7 +1422,7 @@ async function _createEmailChat(emailData) {
       && Number(current.message_count || 0) === 0
       && current.folder !== 'Assistant'
       && current.folder !== 'Tasks';
-    if (currentIsBlank) {
+    if (!forceNew && currentIsBlank) {
       const meta = document.getElementById('current-meta');
       if (meta) meta.textContent = title;
       return current.id;
@@ -1385,25 +1473,31 @@ async function _composeNew() {
   // (doc shows for a frame, then slides up again). Mount once, at injectFreshDoc,
   // after the session + doc exist.
   try {
-    const sid = await _createEmailChat({ subject: 'New Email' });
+    let sid = await _createEmailChat({ subject: 'New Email' });
     if (!sid) {
       console.error('compose: could not obtain a session_id');
-      import('./ui.js').then(m => m.showError && m.showError('Could not start a new email (no session).')).catch(() => {});
+      import('./ui.js?v=20260908weekhoverfix1').then(m => m.showError && m.showError('Could not start a new email (no session).')).catch(() => {});
       return;
     }
-    const res = await fetch(`${API_BASE}/api/document`, {
+    const createComposeDoc = (sessionId) => fetch(`${API_BASE}/api/document`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        session_id: sid,
+        session_id: sessionId,
         title: 'New Email',
         content: 'To: \nSubject: \n---\n',
         language: 'email',
       }),
     });
+    let res = await createComposeDoc(sid);
+    if (res.status === 404) {
+      console.warn('[compose-debug] draft session rejected; retrying in a fresh email chat', sid);
+      sid = await _createEmailChat({ subject: 'New Email' }, { forceNew: true });
+      if (sid) res = await createComposeDoc(sid);
+    }
     if (!res.ok) {
       console.error('compose POST failed', res.status, await res.text().catch(() => ''));
-      import('./ui.js').then(m => m.showError && m.showError('Failed to create new email (' + res.status + ')')).catch(() => {});
+      import('./ui.js?v=20260908weekhoverfix1').then(m => m.showError && m.showError('Failed to create new email (' + res.status + ')')).catch(() => {});
       return;
     }
     const doc = await res.json();

@@ -17,7 +17,20 @@ from fastapi import APIRouter, HTTPException, Form, Query, Body, Request, Respon
 from pydantic import BaseModel
 from fastapi.responses import StreamingResponse
 from core.database import SessionLocal, ModelEndpoint, Session as DbSession
-from core.log_safety import redact_url as _redact_url_for_log
+try:
+    from core.log_safety import redact_url as _redact_url_for_log
+except ModuleNotFoundError:
+    def _redact_url_for_log(url: str) -> str:
+        try:
+            parsed = urlparse(url or "")
+            host = parsed.hostname or ""
+            if ":" in host:
+                host = f"[{host}]"
+            if parsed.port:
+                host = f"{host}:{parsed.port}"
+            return urlunparse((parsed.scheme, host, parsed.path, "", "", ""))
+        except Exception:
+            return "<endpoint>"
 from core.middleware import require_admin
 from src.constants import OLLAMA_DEFAULT_PORT, LOCAL_HOSTS, COOKBOOK_STATE_FILE
 from src.llm_core import _detect_provider, _host_match, ANTHROPIC_MODELS
@@ -455,11 +468,36 @@ def _truthy(value: str | None) -> bool:
 
 _ENDPOINT_KINDS = {"auto", "local", "api", "proxy"}
 _REFRESH_MODES = {"auto", "manual", "disabled"}
+_MODEL_TOOL_MODES = {"none", "compact", "full"}
 
 
 def _normalize_endpoint_kind(value: Any) -> str:
     kind = str(value or "auto").strip().lower()
     return kind if kind in _ENDPOINT_KINDS else "auto"
+
+
+def _normalize_model_tool_mode(value: Any) -> str:
+    mode = str(value or "").strip().lower()
+    return mode if mode in _MODEL_TOOL_MODES else ""
+
+
+def _model_tool_modes(ep: Any) -> Dict[str, str]:
+    raw = getattr(ep, "model_tool_modes", None)
+    if not raw:
+        return {}
+    try:
+        data = json.loads(raw) if isinstance(raw, str) else raw
+    except Exception:
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    modes: Dict[str, str] = {}
+    for key, value in data.items():
+        model_id = str(key or "").strip()
+        mode = _normalize_model_tool_mode(value)
+        if model_id and mode:
+            modes[model_id] = mode
+    return modes
 
 
 def _normalize_refresh_mode(value: Any, endpoint_kind: str = "auto") -> str:
@@ -1564,7 +1602,7 @@ def setup_model_routes(model_discovery):
 
         for ep in endpoints:
             base = _normalize_base(ep.base_url)
-            # Merge cached + pinned models, then filter out hidden ones
+            provider = _safe_detect_provider(base)
             ep_model_type = getattr(ep, "model_type", None) or "llm"
             # /api/models feeds the chat + agent model pickers and the chat
             # allow-list. A voice endpoint (stt/tts) exposes whisper/kokoro model
@@ -2004,6 +2042,7 @@ def setup_model_routes(model_discovery):
                     "ping_error": (ping or {}).get("error") if ping else None,
                     "model_type": getattr(r, "model_type", None) or "llm",
                     "supports_tools": getattr(r, "supports_tools", None),
+                    "model_tool_modes": _model_tool_modes(r),
                     "endpoint_kind": kind,
                     "category": _classify_endpoint(base, kind),
                     "model_refresh_mode": _endpoint_refresh_mode(r, kind),
@@ -2115,6 +2154,10 @@ def setup_model_routes(model_discovery):
                     changed = True
                 if refresh_timeout is not None:
                     existing.model_refresh_timeout = refresh_timeout
+                    changed = True
+                incoming_model_type = (model_type or "").strip() or "llm"
+                if incoming_model_type and (getattr(existing, "model_type", None) or "llm") != incoming_model_type:
+                    existing.model_type = incoming_model_type
                     changed = True
                 if api_key.strip() and not existing.api_key:
                     existing.api_key = api_key.strip()
@@ -2348,10 +2391,9 @@ def setup_model_routes(model_discovery):
                 raise HTTPException(404, "Endpoint not found")
             hidden = _hidden_model_ids(ep)
             all_models = _cached_model_ids(ep)
-            # Hoisted out of the `if refresh:` below: the picker call after that
-            # block needs both on every path, refresh or not.
             base = _normalize_base(ep.base_url)
             kind = _effective_endpoint_kind(ep, base)
+            picker_requires_pinning = _picker_requires_pinning(base, kind)
             if refresh:
                 category = _classify_endpoint(base, kind)
                 timeout = _manual_refresh_timeout(ep, category, refresh_timeout)
@@ -2372,7 +2414,7 @@ def setup_model_routes(model_discovery):
                     response.headers["X-Model-Refresh-Warning"] = "Model refresh failed or returned no models; kept cached models."
             _, pinned = _picker_models_for_endpoint(ep, base, kind)
             pinned_set = set(pinned)
-            picker_requires_pinning = _picker_requires_pinning(base, kind)
+            tool_modes = _model_tool_modes(ep)
             return [
                 {
                     "id": m,
@@ -2380,6 +2422,7 @@ def setup_model_routes(model_discovery):
                     "is_hidden": m in hidden,
                     "is_pinned": m in pinned_set,
                     "picker_requires_pinning": picker_requires_pinning,
+                    "tool_mode": tool_modes.get(m, ""),
                 }
                 for m in _merge_model_ids(all_models, pinned)
             ]
@@ -2430,11 +2473,31 @@ def setup_model_routes(model_discovery):
                     ep.hidden_models = None
                 else:
                     ep.pinned_models = json.dumps(pinned) if pinned else None
+            if "model_tool_modes" in body:
+                raw_modes = body.get("model_tool_modes")
+                if not isinstance(raw_modes, dict):
+                    raise HTTPException(400, "model_tool_modes must be an object")
+                modes = _model_tool_modes(ep)
+                for model_id, mode in raw_modes.items():
+                    model_id = str(model_id or "").strip()
+                    if not model_id:
+                        continue
+                    normalized = _normalize_model_tool_mode(mode)
+                    if normalized:
+                        modes[model_id] = normalized
+                    else:
+                        modes.pop(model_id, None)
+                ep.model_tool_modes = json.dumps(modes) if modes else None
             db.commit()
             _invalidate_models_cache()
             hidden_count = len(json.loads(ep.hidden_models)) if ep.hidden_models else 0
             pinned_count = len(json.loads(ep.pinned_models)) if ep.pinned_models else 0
-            return {"id": ep_id, "hidden_count": hidden_count, "pinned_count": pinned_count}
+            return {
+                "id": ep_id,
+                "hidden_count": hidden_count,
+                "pinned_count": pinned_count,
+                "model_tool_modes": _model_tool_modes(ep),
+            }
         finally:
             db.close()
 
@@ -2602,6 +2665,7 @@ def setup_model_routes(model_discovery):
                 "model_type": ep.model_type,
                 "base_url": ep.base_url,
                 "pinned_models": _normalize_model_ids(getattr(ep, "pinned_models", None)),
+                "model_tool_modes": _model_tool_modes(ep),
                 "endpoint_kind": getattr(ep, "endpoint_kind", None) or "auto",
                 "model_refresh_mode": getattr(ep, "model_refresh_mode", None) or "auto",
                 "model_refresh_interval": getattr(ep, "model_refresh_interval", None),

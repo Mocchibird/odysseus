@@ -58,6 +58,8 @@ def test_fill_does_not_clobber_user_edits():
     data_dir = _write_presets({
         "code_analyze": {"name": "Code Analyze", "temperature": 0.2,
                          "max_tokens": 8000, "system_prompt": "analyze"},
+        "brainstorm": {"name": "Brainstorm", "temperature": 0.9,
+                       "max_tokens": 4096, "system_prompt": "ideate"},
         "custom": edited_custom,
         "user_templates": [{"id": "t1", "name": "Tmpl"}],
     })

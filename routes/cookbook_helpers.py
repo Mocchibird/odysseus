@@ -462,14 +462,22 @@ def _cached_model_scan_script(model_dirs: list[str] | None = None, add_hf_cache:
         "        if sz == 0 and os.path.isdir(snap):",
         "            sz2, nf2, ic2 = snapshot_size()",
         "            sz, nf, ic = sz2, nf2, ic or ic2",
-        "        is_diffusion = False; gguf_files = []",
+        "        is_video = bool(re.search(r'(?i)(^|/)Lightricks/LTX-|(^|/)LTX[-_/]|video|text-to-video|image-to-video', rid))",
+        "        is_diffusion = is_video; is_adapter = bool(re.search(r'(?i)(lora|adapter|peft|qlora|control[-_]?lora|diffusion[-_]?lora)', rid)); gguf_files = []",
         "        if os.path.isdir(snap):",
         "            for sd in os.listdir(snap):",
         "                sf = os.path.join(snap, sd)",
         "                if not os.path.isdir(sf): continue",
         "                if os.path.exists(os.path.join(sf, 'model_index.json')): is_diffusion = True",
+        "                if os.path.exists(os.path.join(sf, 'adapter_config.json')) or os.path.exists(os.path.join(sf, 'adapter_model.safetensors')): is_adapter = True",
+        "                for _root, _dirs, _fns in safe_walk(sf):",
+        "                    for _fn in _fns:",
+        "                        _lfn = _fn.lower()",
+        "                        if _lfn.endswith('.safetensors') and re.search(r'(?i)(ltx|video|upscaler)', _lfn): is_video = True; is_diffusion = True",
+        "                        if _lfn in ('adapter_config.json','adapter_model.safetensors','pytorch_lora_weights.safetensors') or 'lora' in _lfn:",
+        "                            is_adapter = True",
         "                for f in collect_ggufs(sf): f['rel_path'] = sd + '/' + f['rel_path']; gguf_files.append(f)",
-        "        models.append({'repo_id':rid,'size_bytes':sz,'nb_files':nf,'has_incomplete':ic,'path':cache,'is_diffusion':is_diffusion,'is_gguf':bool(gguf_files),'gguf_files':gguf_files})",
+        "        models.append({'repo_id':rid,'size_bytes':sz,'nb_files':nf,'has_incomplete':ic,'path':cache,'is_diffusion':is_diffusion,'is_video':is_video,'is_adapter':is_adapter,'is_gguf':bool(gguf_files),'gguf_files':gguf_files})",
         "def hf_cache_paths():",
         "    candidates = []",
         "    def add(p):",
@@ -504,11 +512,12 @@ def _cached_model_scan_script(model_dirs: list[str] | None = None, add_hf_cache:
         "        fp = os.path.join(p, d)",
         "        if not os.path.isdir(fp) or os.path.islink(fp) or not safe_path(fp): continue",
         "        if d in seen: continue",
-        "        is_model = False; gguf_files = []",
+        "        is_model = False; is_adapter = bool(re.search(r'(?i)(lora|adapter|peft|qlora|control[-_]?lora|diffusion[-_]?lora)', d)); gguf_files = []",
         "        for root, dirs, fns in safe_walk(fp):",
         "            for fn in fns:",
         "                if fn.lower().endswith('.gguf'): is_model = True",
         "                elif fn == 'config.json' or fn.endswith('.safetensors') or fn.endswith('.bin'): is_model = True",
+        "                if fn in ('adapter_config.json','adapter_model.safetensors','pytorch_lora_weights.safetensors') or 'lora' in fn.lower(): is_adapter = True",
         "            if is_model: break",
         "        if not is_model: continue",
         "        gguf_files = collect_ggufs(fp)",
@@ -519,7 +528,7 @@ def _cached_model_scan_script(model_dirs: list[str] | None = None, add_hf_cache:
         "                try: nf += 1; sz += os.path.getsize(os.path.join(dp, fn))",
         "                except Exception: pass",
         "        is_diff = os.path.exists(os.path.join(fp, 'model_index.json'))",
-        "        models.append({'repo_id':d,'size_bytes':sz,'nb_files':nf,'has_incomplete':False,'path':p,'is_local_dir':True,'is_diffusion':is_diff,'is_gguf':bool(gguf_files),'gguf_files':gguf_files})",
+        "        models.append({'repo_id':d,'size_bytes':sz,'nb_files':nf,'has_incomplete':False,'path':p,'is_local_dir':True,'is_diffusion':is_diff,'is_adapter':is_adapter,'is_gguf':bool(gguf_files),'gguf_files':gguf_files})",
         "def parse_size(num, unit):",
         "    try: n = float(num)",
         "    except Exception: return 0",
@@ -1084,6 +1093,10 @@ class ServeRequest(BaseModel):
     hf_token: str | None = None
     gpus: str | None = None
     platform: str | None = None    # "linux", "termux", or "windows"
+    # Optional explicit image runtime adapter. "auto" preserves compatibility
+    # with older callers; catalog-backed launches can set this without relying
+    # on model-name heuristics in the generated runner.
+    runtime_adapter: str | None = None
 
 
 def _parse_serve_phase(snapshot: str, task_type: str = "serve") -> dict:
@@ -1358,6 +1371,11 @@ def _diagnose_serve_output(text: str) -> dict | None:
             [{"label": "install mlx-lm in Cookbook Dependencies", "op": "dependency", "package": "mlx-lm"}],
         ),
         (
+            r"OmniGen2Pipeline|module diffusers has no attribute .*Pipeline|custom_pipeline=.*failed",
+            "This image model uses a custom Diffusers pipeline that the launch environment does not know yet.",
+            [{"label": "update Diffusers image dependencies", "op": "dependency", "package": "diffusers transformers accelerate"}],
+        ),
+        (
             r"Unable to quantize model of type <class ['\"]mlx_lm\.models\.switch_layers\.QuantizedSwitchLinear['\"]>|QuantizedSwitchLinear",
             "MLX-LM tried to quantize an already-quantized DeepSeek switch layer.",
             [
@@ -1395,9 +1413,9 @@ def _diagnose_serve_output(text: str) -> dict | None:
             [{"label": "download a GGUF build of this model (repo name usually ends in -GGUF, file like Q4_K_M.gguf)", "op": "manual"}],
         ),
         (
-            r"No module named 'torch'|No module named torch|No module named 'diffusers'|No module named diffusers",
-            "Diffusion serving requires PyTorch and diffusers.",
-            [{"label": "install diffusers[torch] in Cookbook Dependencies", "op": "dependency", "package": "diffusers[torch]"}],
+            r"No module named 'torch'|No module named torch|No module named 'torchvision'|No module named torchvision|No module named 'diffusers'|No module named diffusers|No module named 'scipy'|No module named scipy|install scipy if you want to use beta sigmas|requires the Torchvision library",
+            "Diffusion serving requires PyTorch, Torchvision, Diffusers, Accelerate, and SciPy.",
+            [{"label": "install Diffusers image deps in Cookbook Dependencies", "op": "dependency", "package": "diffusers[torch] torchvision accelerate scipy python-multipart"}],
         ),
         (
             r"403 Forbidden|401 Unauthorized|Access to model.*is restricted|gated repo|not in the authorized list|awaiting a review",

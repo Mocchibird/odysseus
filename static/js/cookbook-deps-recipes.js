@@ -6,7 +6,7 @@
 // generic fallback for that backend.
 
 // Recipes carry two variants per entry:
-//   variants.pip    → install into the configured venv via uv/pip
+//   variants.pip    → install into the configured venv via pip/uv
 //   variants.docker → pull the official container image
 //
 // The renderer prepends a `source <venv>/bin/activate` for the pip variant
@@ -55,7 +55,33 @@ const _RECIPES = [
     label: 'Any MLX model',
     match: () => true,
     variants: {
-      pip:    { commands: ['uv pip install -U mlx-lm'] },
+      pip:    { commands: ['python -m pip install -U mlx-lm'] },
+    },
+  },
+
+  // ── Diffusers ────────────────────────────────────────────────────────
+  {
+    backend: 'diffusers',
+    label: 'Any Diffusers image model',
+    match: () => true,
+    variants: {
+      pip:    { commands: ['python -m pip install -U "diffusers[torch]" torchvision accelerate scipy python-multipart'] },
+    },
+  },
+  {
+    backend: 'krea_diffusers',
+    label: 'Latest Diffusers from Git',
+    match: () => true,
+    variants: {
+      pip:    { commands: ['python -m pip install -U git+https://github.com/huggingface/diffusers.git torchvision accelerate scipy python-multipart'] },
+    },
+  },
+  {
+    backend: 'sam_mask',
+    label: 'SAM object mask tools',
+    match: () => true,
+    variants: {
+      pip:    { commands: ['python -m pip install -U torch torchvision transformers accelerate pillow'] },
     },
   },
 
@@ -85,7 +111,7 @@ export function recipeCommands(recipe, variant) {
 // Backends we surface a recipe panel for. Other rows in the Dependencies
 // list keep the existing flat Install/Reinstall button without an expand
 // affordance.
-export const RECIPE_BACKENDS = new Set(['vllm', 'sglang', 'mlx_lm', 'llama_cpp']);
+export const RECIPE_BACKENDS = new Set(['vllm', 'sglang', 'mlx_lm', 'diffusers', 'krea_diffusers', 'sam_mask', 'llama_cpp']);
 
 // All recipe entries for a given backend, in catalog order. The first one
 // is the model-specific match (when present); the last is always the

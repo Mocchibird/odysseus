@@ -110,7 +110,7 @@ def test_terminal_paths_use_one_authoritative_rich_round_render():
         "// Render whatever was accumulated so far",
         "// Reset button state",
     )
-    assert "const _stoppedViewHolder = currentHolder;" in stop_path
+    assert "const _stoppedViewHolder = _terminalView?.holder || currentHolder;" in stop_path
     assert "_stoppedViewHolder.querySelector('.body').appendChild(stoppedIndicator);" in stop_path
 
     done_path = _between(
@@ -134,15 +134,37 @@ def test_terminal_paths_use_one_authoritative_rich_round_render():
     assert "processWithThinking" not in recovery_path
 
 
+def test_final_response_skips_duplicate_end_of_stream_render():
+    final_response_path = _between(
+        "if (json.type === 'final_response') {",
+        "if (json.delta) {",
+    )
+    assert "terminalFinalResponseRendered = true;" in final_response_path
+
+    post_loop = _between(
+        "// --- Final render (skip if stream was ever backgrounded or currently in background) ---",
+        "} // end if (!_isBgFinal)",
+    )
+    assert "if (!terminalFinalResponseRendered) _renderStream();" in post_loop
+    assert "const finalDisplay = terminalFinalResponseRendered ? '' : _streamDisplayText" in post_loop
+
+
+def test_only_rich_completed_turns_reload_saved_canonical_assistant_row():
+    assert "if (_canonicalTerminalSaved && _savedAssistantMessageId && !_pendingContinue)" not in _CHAT
+    assert "if (!_pendingContinue)" in _CHAT
+    assert "fall back to its latest" in _CHAT
+    assert ": [...history].reverse().find(msg => msg && msg.role === 'assistant');" in _CHAT
+    assert "const _needsCanonicalTurnRebuild" in _CHAT
+    assert "lastToolThread" in _CHAT
+    assert "_streamTurnMarker.remove();" in _CHAT
+
+
 def test_detach_synchronously_cancels_delayed_view_work():
-    # The canceller is published to a module-scope slot as soon as the streaming
-    # closure defines it, so detachCurrentStream() can reach it from its own scope.
-    assert "_foregroundCancelViewWork = _cancelLiveThinkingWork;" in _CHAT
+    registration = _between("_activeStreams.set(streamSessionId", "_syncForegroundStreamGlobals();")
+    assert "cancelViewWork: () => _cancelLiveThinkingWork()" in registration
 
     detach = _between("export function detachCurrentStream", "// _notifyStreamComplete")
-    cancel = "if (_foregroundCancelViewWork) _foregroundCancelViewWork();"
+    cancel = "if (active.cancelViewWork) active.cancelViewWork();"
     background = "_backgroundStreams.set(sessionId"
     assert cancel in detach
-    # Cancel BEFORE handing the stream to the background, or delayed rendering
-    # keeps painting into the bubble the user just left.
     assert detach.index(cancel) < detach.index(background)

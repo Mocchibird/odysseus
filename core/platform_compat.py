@@ -18,6 +18,7 @@ import ntpath
 import shutil
 import subprocess
 from pathlib import Path
+import sys
 from typing import List, Optional
 import platform
 

@@ -36,6 +36,7 @@ class NoteCreate(BaseModel):
     source: str = "user"
     session_id: Optional[str] = None
     image_url: Optional[str] = None
+    gallery_id: Optional[str] = None
     repeat: Optional[str] = "none"
     sort_order: Optional[int] = None
 
@@ -52,6 +53,7 @@ class NoteUpdate(BaseModel):
     due_date: Optional[str] = None
     reminder_at: Optional[str] = None
     image_url: Optional[str] = None
+    gallery_id: Optional[str] = None
     repeat: Optional[str] = None
     sort_order: Optional[int] = None
     agent_session_id: Optional[str] = None
@@ -92,6 +94,7 @@ def _note_to_dict(note: Note) -> Dict[str, Any]:
         "session_id": note.session_id,
         "sort_order": note.sort_order or 0,
         "image_url": note.image_url,
+        "gallery_id": getattr(note, "gallery_id", None),
         "repeat": note.repeat or "none",
         "ai_classification": ai_cls,
         "ai_content_hash": getattr(note, "ai_content_hash", None),
@@ -773,6 +776,7 @@ def setup_note_routes(task_scheduler=None, upload_handler=None):
                 source=body.source,
                 session_id=body.session_id,
                 image_url=body.image_url,
+                gallery_id=body.gallery_id,
                 repeat=body.repeat or "none",
                 sort_order=body.sort_order if body.sort_order is not None else 0,
             )
@@ -844,6 +848,8 @@ def setup_note_routes(task_scheduler=None, upload_handler=None):
                 note.reminder_at = body.reminder_at
             if body.image_url is not None:
                 note.image_url = body.image_url
+            if body.gallery_id is not None:
+                note.gallery_id = body.gallery_id
             if body.repeat is not None:
                 note.repeat = body.repeat
             if body.sort_order is not None:
@@ -950,7 +956,7 @@ def setup_note_routes(task_scheduler=None, upload_handler=None):
         Returns {synthesis, email_sent}.
         """
         # Gate against anonymous callers — LLM synthesis can burn tokens.
-        require_user(request)
+        user = require_user(request)
         body = await request.json()
         note_id = str(body.get("note_id") or "").strip()
         if not note_id:
@@ -958,6 +964,7 @@ def setup_note_routes(task_scheduler=None, upload_handler=None):
 
         caller = _owner(request)
         is_test = note_id.startswith("test-")
+        is_admin = _is_admin_or_single_user(request, user or caller)
         _override: dict = {}
         if is_test:
             # Any authenticated user may fire a TEST reminder to their OWN
@@ -971,10 +978,8 @@ def setup_note_routes(task_scheduler=None, upload_handler=None):
                 str(body.get("channel") or "").strip().lower() == "webhook"
                 or bool(body.get("webhook_integration_id"))
             )
-            if _wants_webhook:
-                _am = getattr(getattr(request.app, "state", None), "auth_manager", None)
-                if not (_am and _am.is_admin(caller)):
-                    raise HTTPException(403, "Webhook test reminders are admin-only.")
+            if _wants_webhook and not is_admin:
+                raise HTTPException(403, "Webhook test reminders are admin-only.")
             title = (body.get("title") or "Test Reminder").strip() or "Test Reminder"
             note_body = (body.get("body") or "").strip()
             # Optional overrides let the admin settings test button pass the

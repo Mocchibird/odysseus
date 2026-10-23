@@ -118,6 +118,8 @@ def test_secret_storage_key_created_with_safe_mode(tmp_path, monkeypatch):
 
 def test_docker_compose_binds_web_ui_to_loopback_by_default():
     compose = Path("docker-compose.yml").read_text(encoding="utf-8")
+    # FORK: the fork keeps host port 7000 (its reverse proxy targets it); the
+    # security property is the loopback APP_BIND default, unchanged.
     assert "${APP_BIND:-127.0.0.1}:${APP_PORT:-7000}:7000" in compose
     assert '"${APP_PORT:-7000}:7000"' not in compose
 

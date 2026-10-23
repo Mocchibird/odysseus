@@ -318,6 +318,7 @@ def _extract_reply(text: str) -> str:
     # Drop any stray/duplicate marker tokens, then strip think markup.
     t = _REPLY_OPEN_RE.sub("", t)
     t = _REPLY_CLOSE_RE.sub("", t)
+    t = _REPLY_ROLE_MARKER_RE.sub("", t)
     return _strip_think(t).strip()
 
 
@@ -929,10 +930,16 @@ def _init_scheduled_db():
             size INTEGER DEFAULT 0,
             flags TEXT DEFAULT '',
             has_attachments INTEGER DEFAULT 0,
+            attachment_names TEXT DEFAULT '',
             updated_at TEXT NOT NULL,
             PRIMARY KEY (owner, account_key, folder, uid)
         )
     """)
+    _message_index_cols = {
+        row[1] for row in conn.execute("PRAGMA table_info(email_message_index)").fetchall()
+    }
+    if "attachment_names" not in _message_index_cols:
+        conn.execute("ALTER TABLE email_message_index ADD COLUMN attachment_names TEXT DEFAULT ''")
     conn.execute("""
         CREATE INDEX IF NOT EXISTS ix_email_message_index_folder_date
         ON email_message_index(owner, account_key, folder, date_epoch DESC)
@@ -1200,13 +1207,23 @@ def _coerce_imap_timeout_seconds(raw: str | None) -> int:
 _IMAP_TIMEOUT_SECONDS = _coerce_imap_timeout_seconds(os.environ.get("ODYSSEUS_IMAP_TIMEOUT_SECONDS"))
 
 
-def _open_imap_connection(host: str, port: int, *, starttls: bool, timeout: int = _IMAP_TIMEOUT_SECONDS):
+def _open_imap_connection(
+    host: str,
+    port: int,
+    *,
+    starttls: bool,
+    timeout: int = _IMAP_TIMEOUT_SECONDS,
+    ssl_context=None,
+):
     """Open an IMAP connection using the configured security mode."""
     port = int(port or 993)
     if starttls:
         conn = imaplib.IMAP4(host, port, timeout=timeout)
         try:
-            conn.starttls()
+            if ssl_context:
+                conn.starttls(ssl_context=ssl_context)
+            else:
+                conn.starttls()
         except ssl.SSLCertVerificationError:
             # Local mail bridge (e.g. Proton Bridge) serves a self-signed cert.
             # Close the plain socket first (#3174); for a local-bridge host retry
@@ -1228,7 +1245,8 @@ def _open_imap_connection(host: str, port: int, *, starttls: bool, timeout: int 
                 pass
             raise
     elif port == 993:
-        conn = imaplib.IMAP4_SSL(host, port, timeout=timeout)
+        kwargs = {"ssl_context": ssl_context} if ssl_context else {}
+        conn = imaplib.IMAP4_SSL(host, port, timeout=timeout, **kwargs)
     else:
         conn = imaplib.IMAP4(host, port, timeout=timeout)
     try:
@@ -1715,16 +1733,15 @@ def _extract_text(msg):
         payload = msg.get_payload(decode=True)
         if payload:
             charset = msg.get_content_charset() or "utf-8"
-            decoded = payload.decode(charset, errors="replace")
-            # A non-multipart text/html message has no text/plain alternative to
-            # prefer, so strip its tags here the same way the multipart text/html
-            # fallback (above) does — otherwise the raw HTML source leaks into
-            # `body` and the reader renders it as literal `<html>...</html>` text.
+            text = payload.decode(charset, errors="replace")
             if msg.get_content_type() == "text/html":
-                decoded = re.sub(r"<br\s*/?>", "\n", decoded, flags=re.I)
-                decoded = re.sub(r"<[^>]+>", "", decoded)
-                decoded = html.unescape(decoded).strip()
-            return decoded
+                text = re.sub(r"<br\s*/?>", "\n", text, flags=re.I)
+                text = re.sub(r"</(?:p|div|li|tr|h[1-6])\s*>", "\n", text, flags=re.I)
+                text = re.sub(r"<[^>]+>", "", text)
+                text = html.unescape(text)
+                text = re.sub(r"[ \t]+\n", "\n", text)
+                text = re.sub(r"\n{3,}", "\n\n", text)
+            return text.strip()
     return ""
 
 
@@ -2055,6 +2072,9 @@ class SendEmailRequest(BaseModel):
     # answered after successful delivery so it leaves undone/reply-soon views.
     source_uid: Optional[str] = None
     source_folder: Optional[str] = None
+    # Exact IMAP draft to remove after successful delivery.
+    draft_uid: Optional[str] = None
+    draft_folder: Optional[str] = None
     # Internal marker for Odysseus-generated mail (e.g. reminder, scheduled).
     odysseus_kind: Optional[str] = None
     # If true, /send waits for SMTP + Sent append and returns the sent UID.

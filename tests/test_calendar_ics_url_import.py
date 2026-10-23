@@ -22,6 +22,7 @@ def _load_calendar_routes(monkeypatch):
     db.CalendarCal = MagicMock()
     db.CalendarEvent = MagicMock()
     db.CalendarDeletedEvent = MagicMock()
+    db.Note = MagicMock()
     monkeypatch.setitem(sys.modules, "core", core)
     monkeypatch.setitem(sys.modules, "core.database", db)
     return importlib.import_module("routes.calendar_routes")

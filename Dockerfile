@@ -22,7 +22,12 @@ ENV DEBIAN_FRONTEND=noninteractive \
 # downloads, and serves from Docker installs.
 # git/cmake are required when Cookbook builds llama.cpp on first llama.cpp
 # launch inside Docker.
-# nodejs/npm provide npx for the optional built-in Browser MCP server.
+# nodejs/npm provide npx for the built-in Browser MCP server.
+# chromium provides the actual browser binary used by that MCP server.
+# fontconfig + Noto CJK provide real fallback glyphs for multilingual pages;
+# Chromium otherwise renders Chinese/Japanese/Korean labels as empty boxes.
+# iproute2/iputils-ping/net-tools/dnsutils/nmap give Docker-hosted agents the
+# basic network inspection toolkit expected by local LAN/debugging tasks.
 # sqlite3/tzdata cover timezone-aware notes/calendar; ffmpeg/libopus/libsndfile
 # cover optional audio work (ffmpeg also transcodes mic webm->PCM for Azure STT).
 # gosu lets the entrypoint drop privileges cleanly so signals still reach
@@ -37,16 +42,29 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libsndfile1 \
     nodejs \
     npm \
+    chromium \
+    fontconfig \
+    fonts-noto-cjk \
     sqlite3 \
     tzdata \
     tmux \
     openssh-client \
+    iproute2 \
+    iputils-ping \
+    net-tools \
+    dnsutils \
+    nmap \
     gosu \
     libgl1 \
     libglib2.0-0t64 \
     libxcb1 \
     libmagic1 \
     && rm -rf /var/lib/apt/lists/*
+
+# Private browser automation wrapper used by the native `private_browser` tool.
+# Chromium is installed above, so agent-browser can drive the existing browser
+# binary without paying `npx` startup/install overhead on each tool call.
+RUN npm install -g agent-browser@0.35.0 --omit=dev --loglevel=error
 
 # libgl1/libglib2.0-0t64/libxcb1 are runtime shared libs (libGL.so.1,
 # libglib-2.0/libgthread, libxcb.so.1) that opencv-python (cv2) loads. The

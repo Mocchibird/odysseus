@@ -460,6 +460,9 @@ class TestClassifyEndpoint:
     def test_public_api(self):
         assert _classify_endpoint("https://api.openai.com/v1") == "api"
 
+    def test_openrouter_api(self):
+        assert _classify_endpoint("https://openrouter.ai/api/v1") == "api"
+
     def test_empty_string(self):
         assert _classify_endpoint("") == "api"
 
@@ -1029,6 +1032,44 @@ def test_patch_models_pinned_does_not_clobber_hidden(monkeypatch):
 
     assert json.loads(ep.hidden_models) == ["hide-me"]
     assert json.loads(ep.pinned_models) == ["deploy-1"]
+
+
+def test_patch_api_hidden_payload_converts_to_pinned(monkeypatch):
+    ep = _make_endpoint(
+        base_url="https://openrouter.ai/api/v1",
+        cached_models=json.dumps(["m1", "m2", "m3"]),
+        pinned_models=None,
+    )
+    db = _PinnedFakeDb([ep])
+    monkeypatch.setattr(model_routes, "SessionLocal", lambda: db)
+    monkeypatch.setattr(model_routes, "require_admin", lambda request: None)
+    endpoint = _get_route("/api/model-endpoints/{ep_id}/models", "PATCH")
+
+    result = asyncio.run(endpoint("ep1", _PinnedFakeRequest(body={"hidden": ["m2"]})))
+
+    assert result["pinned_count"] == 2
+    assert result["hidden_count"] == 0
+    assert json.loads(ep.pinned_models) == ["m1", "m3"]
+    assert ep.hidden_models is None
+
+
+def test_patch_api_hidden_empty_pins_all_cached_models(monkeypatch):
+    ep = _make_endpoint(
+        base_url="https://openrouter.ai/api/v1",
+        cached_models=json.dumps(["m1", "m2", "m3"]),
+        pinned_models=None,
+    )
+    db = _PinnedFakeDb([ep])
+    monkeypatch.setattr(model_routes, "SessionLocal", lambda: db)
+    monkeypatch.setattr(model_routes, "require_admin", lambda request: None)
+    endpoint = _get_route("/api/model-endpoints/{ep_id}/models", "PATCH")
+
+    result = asyncio.run(endpoint("ep1", _PinnedFakeRequest(body={"hidden": []})))
+
+    assert result["pinned_count"] == 3
+    assert result["hidden_count"] == 0
+    assert json.loads(ep.pinned_models) == ["m1", "m2", "m3"]
+    assert ep.hidden_models is None
 
 
 def test_get_models_returns_pinned_when_probe_empty(monkeypatch):
@@ -1727,11 +1768,12 @@ def test_api_models_scopes_api_token_to_token_owner(monkeypatch):
     assert admin_checks == ["alice"]
 
 
-def test_api_models_returns_cached_proxy_models_without_refresh_probe(monkeypatch):
+def test_api_models_returns_only_pinned_proxy_models_without_refresh_probe(monkeypatch):
     row = _route_ep(
         "proxy",
         "http://100.117.136.97:34521/v1",
-        cached_models=["cached-model"],
+        cached_models=["cached-model", "other-model"],
+        pinned_models=["cached-model"],
         endpoint_kind="proxy",
         api_key="fake-key",
         refresh_mode="manual",
@@ -1753,10 +1795,11 @@ def test_api_models_returns_cached_proxy_models_without_refresh_probe(monkeypatc
     result = _route_endpoint(router, "/api/models")(_route_request())
 
     assert result["items"][0]["models"] == ["cached-model"]
+    assert result["items"][0]["models_extra"] == []
     assert result["items"][0]["category"] == "api"
     assert result["items"][0]["endpoint_kind"] == "proxy"
     assert "offline" not in result["items"][0]
-    assert json.loads(row.cached_models) == ["cached-model"]
+    assert json.loads(row.cached_models) == ["cached-model", "other-model"]
 
 
 def test_api_models_openrouter_uses_pinned_models_not_hidden(monkeypatch):

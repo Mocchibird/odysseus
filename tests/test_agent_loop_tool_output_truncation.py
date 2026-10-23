@@ -12,6 +12,7 @@ retained. Small limits keep the original plain-suffix behaviour, which the
 limit=3 / limit=10 cases below still cover.
 """
 from src.tool_utils import _truncate, MAX_OUTPUT_CHARS
+from src.tool_execution import format_tool_result
 
 
 def test_short_output_unchanged():
@@ -47,3 +48,31 @@ def test_default_limit_matches_constant():
 
 def test_empty_string():
     assert _truncate("") == ""
+
+
+def test_external_bridge_result_is_bounded_before_model_replay():
+    text = "package output\n" * MAX_OUTPUT_CHARS
+
+    rendered = format_tool_result(
+        "bash: install dependencies",
+        {"output": text, "exit_code": 0},
+    )
+
+    assert len(rendered) < MAX_OUTPUT_CHARS + 100
+    # FORK: the fork's spill marker says what was dropped ("omitted") instead
+    # of upstream's "truncated" — same bound, different wording.
+    assert "omitted" in rendered
+
+
+def test_format_tool_result_does_not_serialize_image_payloads_as_json():
+    rendered = format_tool_result(
+        "read media",
+        {
+            "output": "frames extracted",
+            "exit_code": 0,
+            "images": [{"mimeType": "image/png", "data": "base64-frame-data"}],
+        },
+    )
+
+    assert "frames extracted" in rendered
+    assert "base64-frame-data" not in rendered

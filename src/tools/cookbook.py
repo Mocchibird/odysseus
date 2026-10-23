@@ -10,6 +10,7 @@ them does a function-local import to avoid a top-level circular dependency,
 matching the system-domain split.
 """
 import asyncio
+import contextlib
 import json
 import logging
 import re
@@ -31,6 +32,183 @@ def _validate_cookbook_ssh_target(remote_host: Any, ssh_port: Any = "") -> tuple
     remote = validate_remote_host(_string_arg(remote_host) or None) or ""
     sport = validate_ssh_port(_string_arg(ssh_port) or None) or ""
     return remote, sport
+
+
+def _cookbook_label_key(value: Any) -> str:
+    return re.sub(r"[^a-z0-9]+", "", str(value or "").lower())
+
+
+def _cookbook_is_exact_repo_id(value: Any) -> bool:
+    return bool(re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", str(value or "").strip()))
+
+
+_HF_OFFICIAL_AUTHOR_ALIASES: Dict[str, str] = {
+    "qwen": "Qwen",
+    "qwen2": "Qwen",
+    "qwen3": "Qwen",
+    "qwen4": "Qwen",
+    "deepseek": "deepseek-ai",
+    "deepseek-ai": "deepseek-ai",
+    "llama": "meta-llama",
+    "meta": "meta-llama",
+    "meta-llama": "meta-llama",
+    "mistral": "mistralai",
+    "mixtral": "mistralai",
+    "codestral": "mistralai",
+    "mistralai": "mistralai",
+    "gemma": "google",
+    "google": "google",
+    "phi": "microsoft",
+    "microsoft": "microsoft",
+    "nemotron": "nvidia",
+    "nvidia": "nvidia",
+    "gpt-oss": "openai",
+    "openai": "openai",
+    "kimi": "moonshotai",
+    "moonshot": "moonshotai",
+    "moonshotai": "moonshotai",
+    "stable-diffusion": "stabilityai",
+    "stability": "stabilityai",
+    "stabilityai": "stabilityai",
+    "falcon": "tiiuae",
+    "tii": "tiiuae",
+    "tiiuae": "tiiuae",
+    "granite": "ibm-granite",
+    "ibm": "ibm-granite",
+    "allenai": "allenai",
+    "olmo": "allenai",
+    "huggingfacetb": "HuggingFaceTB",
+    "smollm": "HuggingFaceTB",
+}
+
+
+_HF_SEARCH_STOPWORDS = {
+    "a", "an", "and", "are", "best", "by", "can", "find", "for", "from",
+    "hf", "hugging", "huggingface", "in", "is", "latest", "link", "me",
+    "model", "models", "new", "newest", "official", "on", "out", "recent",
+    "released", "search", "show", "the", "there", "to", "what", "with",
+}
+
+
+_HF_QUANT_TERMS = {
+    "awq", "gguf", "gptq", "exl2", "mlx", "fp8", "fp4", "int8", "int4",
+    "q8", "q6", "q5", "q4", "q3", "q2", "quant", "quantized", "quantization",
+    "4bit", "8bit",
+}
+
+
+def _hf_official_author_for_query(query: str) -> Optional[str]:
+    q = str(query or "").strip()
+    if _cookbook_is_exact_repo_id(q):
+        return q.split("/", 1)[0]
+    lowered = q.lower()
+    for alias, author in sorted(_HF_OFFICIAL_AUTHOR_ALIASES.items(), key=lambda item: len(item[0]), reverse=True):
+        if re.search(rf"(?<![a-z0-9]){re.escape(alias)}(?![a-z0-9])", lowered):
+            return author
+    return None
+
+
+def _hf_query_mentions_quant(query: str) -> bool:
+    lowered = str(query or "").lower()
+    return any(re.search(rf"(?<![a-z0-9]){re.escape(term)}(?![a-z0-9])", lowered) for term in _HF_QUANT_TERMS)
+
+
+def _hf_query_terms(query: str, author: str = "") -> List[str]:
+    lowered = str(query or "").lower()
+    author_bits = {author.lower()}
+    author_bits.update(k for k, v in _HF_OFFICIAL_AUTHOR_ALIASES.items() if v.lower() == author.lower())
+    terms: List[str] = []
+    for term in re.findall(r"[a-z0-9]+(?:\.[a-z0-9]+)?", lowered):
+        if term in _HF_SEARCH_STOPWORDS or term in author_bits:
+            continue
+        if term not in terms:
+            terms.append(term)
+    return terms
+
+
+def _hf_row_text(row: Dict[str, Any]) -> str:
+    parts = [
+        row.get("id"),
+        row.get("modelId"),
+        row.get("pipeline_tag"),
+        row.get("library_name"),
+        " ".join(str(t) for t in (row.get("tags") or []) if t),
+    ]
+    return " ".join(str(p or "") for p in parts).lower()
+
+
+def _hf_model_matches_terms(row: Dict[str, Any], terms: List[str]) -> bool:
+    if not terms:
+        return True
+    haystack = _hf_row_text(row)
+    return all(term in haystack for term in terms)
+
+
+def _hf_model_is_quant_variant(row: Dict[str, Any]) -> bool:
+    haystack = _hf_row_text(row)
+    return any(re.search(rf"(?<![a-z0-9]){re.escape(term)}(?![a-z0-9])", haystack) for term in _HF_QUANT_TERMS)
+
+
+def _hf_format_model_search_output(models: List[Dict[str, Any]], query: str, official_author: str = "") -> str:
+    scope = f" official {official_author} model(s)" if official_author else " model(s)"
+    lines = [f"Found {len(models)}{scope} for {query!r}:" if query else f"Found {len(models)}{scope}:"]
+    for m in models:
+        repo_id = str(m.get("id") or m.get("modelId") or "?")
+        bits = []
+        if m.get("pipeline_tag"):
+            bits.append(str(m["pipeline_tag"]))
+        if m.get("downloads") is not None:
+            bits.append(f"{m['downloads']} downloads")
+        if m.get("likes") is not None:
+            bits.append(f"{m['likes']} likes")
+        if m.get("lastModified"):
+            bits.append(f"updated {m['lastModified']}")
+        suffix = f" ({'; '.join(bits)})" if bits else ""
+        lines.append(f"- {repo_id}{suffix}\n  URL: https://huggingface.co/{repo_id}")
+    return "\n".join(lines)
+
+
+def _cookbook_match_saved_preset(query: str, presets: List[Any], host: str = "") -> Optional[Dict[str, Any]]:
+    """Resolve a user-facing model label to a saved serve preset.
+
+    The launch agent should be callable directly. If the model says
+    `repo_id="Qwen3.6-27B-AEON"` because the user used the short UI label, do
+    not force it through `list_serve_presets`; match the saved preset inside
+    the autopilot and let `do_serve_preset` reuse the known-good command.
+    """
+    q = _cookbook_label_key(query)
+    if not q:
+        return None
+    host = str(host or "")
+    exact_repo = _cookbook_is_exact_repo_id(query)
+    candidates: List[tuple[int, Dict[str, Any]]] = []
+    for p in presets or []:
+        if not isinstance(p, dict):
+            continue
+        name = str(p.get("name") or "")
+        model = str(p.get("model") or p.get("modelId") or "")
+        phost = str(p.get("host") or p.get("remoteHost") or "")
+        haystacks = [_cookbook_label_key(name), _cookbook_label_key(model)]
+        if exact_repo:
+            # If the user gave a real HF repo, only reuse a preset that names
+            # that exact repo/label. A substring match here is dangerous:
+            # cyankiwi/Qwen3.5-122B-A10B-AWQ-8bit must not launch the saved
+            # generic Qwen/Qwen3.5-122B-A10B preset.
+            if not any(h and q == h for h in haystacks):
+                continue
+        else:
+            if not any(h and (q == h or q in h or h in q) for h in haystacks):
+                continue
+        score = 10
+        if host and phost == host:
+            score += 20
+        if q in haystacks:
+            score += 10
+        candidates.append((score, p))
+    if not candidates:
+        return None
+    candidates.sort(key=lambda item: item[0], reverse=True)
+    return candidates[0][1]
 
 
 async def _cookbook_servers() -> Dict[str, Any]:
@@ -356,6 +534,139 @@ def _cookbook_apply_retry_suggestion(cmd: str, suggestion: Dict[str, Any]) -> st
             return re.sub(rf"(^|\s){re.escape(flag)}(?:\s+\S+)?", lambda m: (m.group(1) or " ") + repl, cmd).strip()
         return f"{cmd.rstrip()} {repl}"
     return cmd
+
+
+def _cookbook_engine_from_model_info(repo_id: str, info: Optional[Dict[str, Any]], host_meta: Optional[Dict[str, Any]] = None) -> str:
+    """Choose a conservative serve engine from repo metadata and target host.
+
+    This is intentionally heuristic: the model card / file list tells us the
+    official repo and likely format, while the actual serve command still goes
+    through Cookbook and is diagnosed/retried after launch.
+    """
+    rid = (repo_id or "").lower()
+    info = info or {}
+    host_meta = host_meta or {}
+    platform = (host_meta.get("platform") or "").lower()
+    tags = {str(t).lower() for t in (info.get("tags") or []) if t is not None}
+    siblings = [str(s).lower() for s in (info.get("siblings") or []) if s is not None]
+    files = " ".join(siblings)
+    is_image = (
+        "diffusers" in tags
+        or "text-to-image" in tags
+        or "image-to-image" in tags
+        or any(k in rid for k in ("qwen-image", "z-image", "flux", "stable-diffusion", "sdxl", "hidream", "boogu", "krea-2"))
+    )
+    is_mlx_image = is_image and ("mlx" in tags or "mlx" in rid or "mlx-community/" in rid)
+    if is_mlx_image:
+        return "mlx_image"
+    if is_image:
+        return "diffusers"
+    if "mlx" in tags or "mlx" in rid or "mlx-community/" in rid or platform in {"macos", "darwin"}:
+        return "mlx"
+    if "gguf" in tags or "gguf" in rid or ".gguf" in files:
+        return "llama.cpp"
+    if "sglang" in tags or "sglang" in rid:
+        return "sglang"
+    if any(q in rid or q in files or q in tags for q in ("awq", "fp8", "gptq", "bnb", "bitsandbytes")):
+        return "vllm"
+    return "vllm"
+
+
+def _cookbook_default_launch_cmd(repo_id: str, engine: str, *, port: int = 8000, info: Optional[Dict[str, Any]] = None) -> str:
+    """Build a simple first-attempt command for a selected engine."""
+    engine = (engine or "vllm").lower()
+    port = int(port or 8000)
+    if engine in {"mlx", "mlx-lm", "mlx_lm"}:
+        return f"python3 -m mlx_lm.server --model {repo_id} --host 0.0.0.0 --port {port}"
+    if engine in {"mlx_image", "mlx-image", "mflux"}:
+        return f"python3 scripts/mlx_image_server.py --model {repo_id} --host 0.0.0.0 --port {port}"
+    if engine in {"diffusers", "diffusion", "image"}:
+        return f"python3 scripts/diffusion_server.py --model {repo_id} --host 0.0.0.0 --port {port}"
+    if engine in {"sglang", "sgl"}:
+        return f"python3 -m sglang.launch_server --model-path {repo_id} --host 0.0.0.0 --port {port}"
+    if engine in {"llama.cpp", "llamacpp", "llama"}:
+        siblings = [str(s) for s in ((info or {}).get("siblings") or []) if str(s).lower().endswith(".gguf")]
+        if siblings:
+            # llama-server accepts HF repo + filename separately on recent builds.
+            return f"llama-server -hf {repo_id} -hfr {siblings[0]} --host 0.0.0.0 --port {port}"
+        return f"llama-server -hf {repo_id} --host 0.0.0.0 --port {port}"
+    return f"vllm serve {repo_id} --host 0.0.0.0 --port {port}"
+
+
+async def _cookbook_hf_model_info(repo_id: str) -> Dict[str, Any]:
+    """Fetch lightweight official Hugging Face metadata for launch planning.
+
+    Uses the public HF API directly so this works even when huggingface_hub is
+    not installed in Odysseus. Failures return a structured warning rather than
+    blocking launch; cached/private/offline models can still be served.
+    """
+    import httpx
+    from routes.cookbook_helpers import load_stored_hf_token
+
+    repo_id = (repo_id or "").strip().strip("/")
+    if not repo_id:
+        return {"error": "repo_id is required"}
+    headers: Dict[str, str] = {"Accept": "application/json"}
+    token = load_stored_hf_token()
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    url = f"https://huggingface.co/api/models/{repo_id}"
+    try:
+        async with httpx.AsyncClient(timeout=20, follow_redirects=True) as client:
+            resp = await client.get(url, headers=headers)
+        if resp.status_code >= 400:
+            return {
+                "repo_id": repo_id,
+                "url": f"https://huggingface.co/{repo_id}",
+                "error": f"HF metadata lookup returned HTTP {resp.status_code}",
+            }
+        data = resp.json() if resp.content else {}
+    except Exception as e:
+        return {
+            "repo_id": repo_id,
+            "url": f"https://huggingface.co/{repo_id}",
+            "error": f"HF metadata lookup failed: {e}",
+        }
+    siblings = []
+    for s in data.get("siblings") or []:
+        if isinstance(s, dict) and s.get("rfilename"):
+            siblings.append(s["rfilename"])
+    return {
+        "repo_id": repo_id,
+        "url": f"https://huggingface.co/{repo_id}",
+        "pipeline_tag": data.get("pipeline_tag") or "",
+        "library_name": data.get("library_name") or "",
+        "tags": data.get("tags") or [],
+        "sha": data.get("sha") or "",
+        "private": bool(data.get("private")),
+        "gated": data.get("gated"),
+        "siblings": siblings[:500],
+        "cardData": data.get("cardData") or {},
+    }
+
+
+def _cookbook_host_meta(host: str, servers: Dict[str, Any]) -> Dict[str, Any]:
+    for item in servers.get("hosts") or []:
+        if not isinstance(item, dict):
+            continue
+        if (item.get("host") or "") == (host or ""):
+            return item
+    return {}
+
+
+def _cookbook_find_task(tasks: List[Dict[str, Any]], session_id: str) -> Optional[Dict[str, Any]]:
+    for task in tasks or []:
+        if not isinstance(task, dict):
+            continue
+        if task.get("session_id") == session_id or task.get("sessionId") == session_id or task.get("id") == session_id:
+            return task
+    return None
+
+
+def _cookbook_phase(task: Optional[Dict[str, Any]]) -> str:
+    if not task:
+        return "unknown"
+    return str(task.get("phase") or task.get("status") or "unknown").lower()
 
 
 def _scan_running_model_processes() -> List[Dict[str, Any]]:
@@ -777,19 +1088,37 @@ async def _cookbook_kill_session(session_id: str, *, remote_host: str = "",
         target_label = session_id
 
     try:
-        async with httpx.AsyncClient(timeout=15) as client:
-            resp = await client.post(f"{_INTERNAL_BASE}/api/shell/exec",
-                                     json={"command": cmd}, headers=headers)
-        if resp.status_code >= 400:
-            return {
-                "error": f"shell/exec returned HTTP {resp.status_code}: {resp.text[:200]}",
-                "exit_code": 1,
-                "untrusted_content": True,
+        if remote:
+            async with httpx.AsyncClient(timeout=15) as client:
+                resp = await client.post(f"{_INTERNAL_BASE}/api/shell/exec",
+                                         json={"command": cmd}, headers=headers)
+            if resp.status_code >= 400:
+                return {
+                    "error": f"shell/exec returned HTTP {resp.status_code}: {resp.text[:200]}",
+                    "exit_code": 1,
+                    "untrusted_content": True,
+                }
+            try:
+                data = resp.json()
+            except Exception:
+                data = {}
+        else:
+            import asyncio
+            proc = await asyncio.create_subprocess_exec(
+                "tmux", "kill-session", "-t", session_id,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            try:
+                stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=5)
+            except asyncio.TimeoutError:
+                proc.kill()
+                stdout, stderr = await proc.communicate()
+            data = {
+                "stdout": stdout.decode("utf-8", errors="replace"),
+                "stderr": stderr.decode("utf-8", errors="replace"),
+                "exit_code": proc.returncode,
             }
-        try:
-            data = resp.json()
-        except Exception:
-            data = {}
         kill_failed = isinstance(data, dict) and data.get("exit_code") not in (None, 0)
         kill_err = ((data.get("stderr") or data.get("error") or "").strip() if isinstance(data, dict) else "")
         # "no server running" / "can't find session" means it was already
@@ -797,6 +1126,34 @@ async def _cookbook_kill_session(session_id: str, *, remote_host: str = "",
         already_gone = any(s in kill_err.lower() for s in ("no server running", "can't find session", "session not found"))
         if kill_failed and not already_gone:
             return {"error": f"Failed to {verb.lower()} {target_label}: {kill_err or 'kill-session returned non-zero'}", "exit_code": 1}
+
+        # Some model servers survive the tmux session's SIGHUP. For local
+        # tracked tasks only, terminate processes whose full command line
+        # exactly matches the command saved by the Cookbook launcher.
+        if not remote and isinstance(matched, dict):
+            import os
+            import signal
+            tracked_cmd = str((matched.get("payload") or {}).get("_cmd") or "").strip()
+            matched_pids: list[int] = []
+            if tracked_cmd:
+                for pid_name in os.listdir("/proc"):
+                    if not pid_name.isdigit() or int(pid_name) == os.getpid():
+                        continue
+                    try:
+                        raw = open(f"/proc/{pid_name}/cmdline", "rb").read()
+                        process_cmd = raw.replace(b"\x00", b" ").decode("utf-8", errors="replace").strip()
+                    except (OSError, PermissionError):
+                        continue
+                    if process_cmd == tracked_cmd:
+                        matched_pids.append(int(pid_name))
+                        with contextlib.suppress(ProcessLookupError, PermissionError):
+                            os.kill(int(pid_name), signal.SIGTERM)
+            if matched_pids:
+                await asyncio.sleep(0.5)
+                for pid in matched_pids:
+                    with contextlib.suppress(ProcessLookupError, PermissionError):
+                        os.kill(pid, 0)
+                        os.kill(pid, signal.SIGKILL)
 
         # Update state: mark stopped (so the UI + list reflect reality).
         if matched is not None:
@@ -1012,44 +1369,91 @@ async def do_cancel_download(content: str, owner: Optional[str] = None) -> Dict:
 
 
 async def do_search_hf_models(content: str, owner: Optional[str] = None) -> Dict:
-    """Search HuggingFace via the cookbook /api/cookbook/hf-latest endpoint."""
-    from src.tool_implementations import _internal_headers, _INTERNAL_BASE  # shared, lives in facade
+    """Search Hugging Face Hub models via the public HF API.
+
+    This intentionally does not use the cookbook's ``/hf-latest`` route:
+    that route is a VRAM/trending browser and ignores semantic search terms.
+    """
     import httpx
     try:
         args = _parse_tool_args(content)
     except ValueError:
         return {"error": "Invalid JSON arguments", "exit_code": 1}
-    query = args.get("query", "") or args.get("search", "")
-    limit = args.get("limit", 10)
-    params: Dict[str, str] = {}
-    if query:
+    query = _string_arg(args.get("query") or args.get("search") or args.get("q"))
+    try:
+        limit = max(1, min(int(args.get("limit") or 10), 25))
+    except Exception:
+        limit = 10
+    explicit_author = _string_arg(args.get("author") or args.get("owner") or args.get("namespace"))
+    official_only = bool(args.get("official_only") or args.get("official") or args.get("provider_only"))
+    if re.search(r"\bofficial\b|\blatest\b|\bnewest\b|\brecent\b", query, flags=re.I):
+        official_only = True
+    official_author = explicit_author or (_hf_official_author_for_query(query) if official_only else "")
+    wants_latest = bool(re.search(r"\blatest\b|\bnewest\b|\brecent\b|\breleased\b", query, flags=re.I))
+    wants_quant = bool(args.get("quantized") or args.get("quant") or _hf_query_mentions_quant(query))
+    exact_repo_query = _cookbook_is_exact_repo_id(query)
+    if wants_quant and not (args.get("official_only") or args.get("official") or explicit_author):
+        official_only = False
+        official_author = ""
+
+    params: Dict[str, str] = {
+        "limit": str(max(limit * 8, 50) if official_author else max(limit * 4, limit)),
+        "full": "false",
+        "sort": "lastModified" if wants_latest else "downloads",
+        "direction": "-1",
+    }
+    if official_author:
+        params["author"] = official_author
+    elif query:
         params["search"] = query
-    if limit:
-        params["limit"] = str(limit)
+    pipeline = _string_arg(args.get("pipeline") or args.get("filter"))
+    if pipeline:
+        params["filter"] = pipeline
+
     try:
         async with httpx.AsyncClient(timeout=30) as client:
-            resp = await client.get(f"{_INTERNAL_BASE}/api/cookbook/hf-latest",
-                                    params=params, headers=_internal_headers())
-            data = resp.json()
-        models = data.get("models") if isinstance(data, dict) else data
-        if not models:
-            return {"output": f"No models found for query: {query!r}", "exit_code": 0}
-        lines = [f"Found {len(models)} model(s) for {query!r}:" if query else f"{len(models)} model(s):"]
-        for m in models[:limit if isinstance(limit, int) else 10]:
-            if isinstance(m, dict):
-                name = m.get("repo_id") or m.get("modelId") or m.get("id") or "?"
-                dl = m.get("downloads")
-                size = m.get("size_gb") or m.get("needed_vram_gb")
-                bits = []
-                if size:
-                    bits.append(f"~{size}GB")
-                if dl:
-                    bits.append(f"{dl} downloads")
-                tail = f" ({', '.join(bits)})" if bits else ""
-                lines.append(f"- {name}{tail}")
+            if exact_repo_query:
+                resp = await client.get(f"https://huggingface.co/api/models/{query}")
             else:
-                lines.append(f"- {m}")
-        return {"output": "\n".join(lines), "models": models, "exit_code": 0}
+                resp = await client.get("https://huggingface.co/api/models", params=params)
+            if resp.status_code != 200:
+                return {"error": f"HF API HTTP {resp.status_code}: {resp.text[:300]}", "exit_code": 1}
+            data = resp.json()
+        if isinstance(data, dict) and (data.get("id") or data.get("modelId")):
+            models = [data]
+        else:
+            models = data if isinstance(data, list) else []
+        if official_author:
+            author_lc = official_author.lower()
+            terms = _hf_query_terms(query, official_author)
+            filtered = [
+                m for m in models if isinstance(m, dict)
+                and str(m.get("id") or m.get("modelId") or "").lower().startswith(f"{author_lc}/")
+                and _hf_model_matches_terms(m, terms)
+            ]
+            # For "latest official Qwen model", family/org is the only useful
+            # constraint. If local term filtering removes every result, show
+            # the official author's recent models rather than unrelated Hub hits.
+            models = filtered or [
+                m for m in models if isinstance(m, dict)
+                and str(m.get("id") or m.get("modelId") or "").lower().startswith(f"{author_lc}/")
+            ]
+            if not wants_quant and not exact_repo_query:
+                models = [m for m in models if not _hf_model_is_quant_variant(m)]
+        else:
+            models = [m for m in models if isinstance(m, dict)]
+            if not wants_quant:
+                models = [m for m in models if not _hf_model_is_quant_variant(m)]
+        models = models[:limit]
+        if not models:
+            scope = f" official author {official_author!r}" if official_author else ""
+            return {"output": f"No{scope} models found for query: {query!r}", "models": [], "exit_code": 0}
+        return {
+            "output": _hf_format_model_search_output(models, query, official_author),
+            "models": models,
+            "official_author": official_author or None,
+            "exit_code": 0,
+        }
     except Exception as e:
         return {"error": str(e), "exit_code": 1}
 
@@ -1084,12 +1488,29 @@ async def do_adopt_served_model(content: str, owner: Optional[str] = None) -> Di
     port = args.get("port") or 8000
     display_name = (args.get("name") or "").strip() or (model.split("/")[-1] if "/" in model else model)
     add_endpoint = args.get("add_endpoint", True)
+    dry_run = bool(args.get("dry_run", False))
 
     if not sess or not model:
         return {"error": "tmux_session and model are required", "exit_code": 1}
     # tmux_session comes from the model's tool args and lands in a shell string.
     if not _re.fullmatch(r"[a-zA-Z0-9_-]+", sess):
         return {"error": "Invalid tmux_session format", "exit_code": 1}
+
+    if dry_run:
+        return {
+            "output": (
+                f"Dry run: would verify tmux session {sess!r} on {host or 'local'}, "
+                f"register model {model!r} on port {int(port)}, and "
+                f"{'add' if add_endpoint else 'not add'} a chat endpoint. No state was changed."
+            ),
+            "dry_run": True,
+            "host": host,
+            "tmux_session": sess,
+            "model": model,
+            "port": int(port),
+            "add_endpoint": bool(add_endpoint),
+            "exit_code": 0,
+        }
 
     # Verify tmux session exists on the target host
     if host:
@@ -1294,6 +1715,7 @@ async def do_serve_preset(content: str, owner: Optional[str] = None) -> Dict:
     except ValueError:
         return {"error": "Invalid JSON arguments", "exit_code": 1}
     name = (args.get("name") or args.get("preset") or "").strip()
+    dry_run = bool(args.get("dry_run", False))
     if not name:
         return {"error": "name (preset name) is required. Call list_serve_presets to see what's available.", "exit_code": 1}
 
@@ -1327,6 +1749,20 @@ async def do_serve_preset(content: str, owner: Optional[str] = None) -> Dict:
     host = chosen.get("host") or chosen.get("remoteHost") or ""
     if not repo_id or not cmd:
         return {"error": f"Preset {chosen.get('name')!r} is missing model or cmd — can't launch.", "exit_code": 1}
+
+    if dry_run:
+        return {
+            "output": (
+                f"Dry run: would launch preset {chosen.get('name')!r}: {repo_id} "
+                f"on {host or 'local'} with command {cmd!r}. No server was started."
+            ),
+            "dry_run": True,
+            "preset": chosen.get("name") or name,
+            "model": repo_id,
+            "host": host,
+            "command": cmd,
+            "exit_code": 0,
+        }
 
     payload: Dict[str, Any] = {"repo_id": repo_id, "cmd": cmd}
     if host:
@@ -1383,6 +1819,7 @@ async def do_list_cached_models(content: str, owner: Optional[str] = None) -> Di
         return {"error": "Invalid JSON arguments", "exit_code": 1}
     raw_host = (args.get("host") or "").strip()
     headers = _internal_headers()
+    scan_errors = []
 
     async def _scan_one(host_label: str, host_val: str, ssh_port: str = "",
                         platform: str = "", model_dir: str = "") -> list:
@@ -1407,13 +1844,18 @@ async def do_list_cached_models(content: str, owner: Optional[str] = None) -> Di
             async with httpx.AsyncClient(timeout=60) as client:
                 resp = await client.get(f"{_INTERNAL_BASE}/api/model/cached",
                                         params=p, headers=headers)
+                resp.raise_for_status()
                 data = resp.json()
+                if isinstance(data, dict) and data.get('error'):
+                    raise ValueError('cache endpoint reported an error')
             ms = data.get("models", []) if isinstance(data, dict) else (data or [])
             for m in ms:
                 m["host"] = host_label or "local"
             return ms or []
         except Exception as e:
             logger.debug(f"list_cached_models scan({host_label}) failed: {e}")
+            status = getattr(getattr(e, 'response', None), 'status_code', None)
+            scan_errors.append({'host': host_label or 'local', 'reason': f'HTTP {status}' if status else type(e).__name__})
             return []
 
     # When the caller specifies a host explicitly, scan only that one (old behaviour).
@@ -1426,10 +1868,13 @@ async def do_list_cached_models(content: str, owner: Optional[str] = None) -> Di
         try:
             async with httpx.AsyncClient(timeout=10) as client:
                 st = await client.get(f"{_INTERNAL_BASE}/api/cookbook/state", headers=headers)
+                st.raise_for_status()
                 st_data = st.json() if st.headers.get("content-type", "").startswith("application/json") else {}
             servers = (st_data.get("env", {}) or {}).get("servers") or []
         except Exception as e:
             logger.debug(f"server list fetch failed: {e}")
+            status = getattr(getattr(e, 'response', None), 'status_code', None)
+            scan_errors.append({'host': 'server inventory', 'reason': f'HTTP {status}' if status else type(e).__name__})
             st_data = {}
 
         def _dirs_for(server_record: Dict[str, Any]) -> str:
@@ -1488,6 +1933,9 @@ async def do_list_cached_models(content: str, owner: Optional[str] = None) -> Di
                         continue
                     seen.add(key)
                     models.append(m)
+        if not models and scan_errors:
+            return {'error': 'Cache inventory could not be verified; one or more server scans failed.',
+                    'scan_errors': scan_errors, 'models': [], 'exit_code': 1}
         if not models:
             # Cache scans can miss models downloaded into the HF default cache
             # when the server has no explicit model_dir configured. Surface
@@ -1542,6 +1990,11 @@ async def do_list_cached_models(content: str, owner: Optional[str] = None) -> Di
                     kind = " [diffusion]" if m.get("is_diffusion") else ""
                     backend = f" ({m.get('backend')})" if m.get("backend") else ""
                     lines.append(f"- {name}{kind}{backend} — {sz}{inc}")
+        if scan_errors:
+            warning = 'Cache inventory is incomplete; failed scans: ' + ', '.join(
+                f"{item['host']} ({item['reason']})" for item in scan_errors)
+            return {'output': warning + '\n\n' + '\n'.join(lines), 'models': models,
+                    'error': warning, 'scan_errors': scan_errors, 'partial': True, 'exit_code': 1}
         return {"output": "\n".join(lines), "models": models, "exit_code": 0}
     except Exception as e:
         return {"error": str(e), "exit_code": 1}

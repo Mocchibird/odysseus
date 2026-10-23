@@ -2,13 +2,14 @@
 // This module handles all session-related operations
 
 import Storage from './storage.js';
-import uiModule, { autoResize, styledPrompt } from './ui.js';
+import uiModule, { autoResize, styledPrompt } from './ui.js?v=20260908weekhoverfix1';
 import chatRenderer from './chatRenderer.js';
-import markdownModule from './markdown.js';
 import { providerLogo } from './providers.js';
 import { initModelPicker, updateModelPicker } from './modelPicker.js';
 import themeModule from './theme.js?v=397';
 import spinnerModule from './spinner.js';
+import { actionMenuRank, orderActionMenuItems, SELECT_MENU_ICON } from './actionMenuOrder.js';
+import { registerEscapeLayer, bindMenuDismiss } from './escMenuStack.js';
 
 const API_BASE = window.location.origin;
 
@@ -17,6 +18,7 @@ let currentSessionId = null;
 let _sessionNavToken = 0;
 let _skipAutoSelect = false;
 let _suppressNextSessionLoading = false;
+let _rootFreshChatApplied = false;
 const HISTORY_DISPLAY_CHAR_LIMIT = 160000;
 const HISTORY_DISPLAY_TAIL_CHARS = 20000;
 const HISTORY_PAGE_LIMIT_MOBILE = 8;
@@ -27,114 +29,82 @@ const FOLDER_MAX_VISIBLE = 5;
 let _showAllSessions = false;
 let _expandedFolders = {};  // folderName -> true if "show more" clicked
 let _sortMode = Storage.get('odysseus-session-sort') || 'active'; // default to last active
-
-// ---- Virtualized history state (selectSession) ----
-// Only the last HISTORY_VISIBLE_TURNS entries render eagerly on session
-// switch; the rest stay in _histAll until "Show earlier messages" (or an
-// index-sensitive operation via ensureFullHistoryRendered) materializes them.
-const HISTORY_VISIBLE_TURNS = 30;
-const HISTORY_CHUNK = 50;
-let _histAll = [];
-let _histRenderedFrom = 0;   // index into _histAll of the first RENDERED entry
-let _histModelName = null;
-
-// Render entries [from, to) of a fetched history into #chat-history via the
-// normal addMessage path — extracted verbatim from the old selectSession loop
-// so per-message behavior (continue-bubble filtering, doc-edit rewrite,
-// multimodal text extraction) is unchanged.
-function _renderHistorySlice(history, from, to, modelName) {
-  for (let i = from; i < to; i++) {
-    const msg = history[i];
-    try {
-      const meta = msg.metadata ? { ...msg.metadata, _fromHistory: true } : null;
-      let displayContent;
-      if (typeof msg.content === 'string') {
-        displayContent = msg.content;
-      } else if (Array.isArray(msg.content)) {
-        // Multimodal (image/audio attachments): extract text parts, skip binary
-        displayContent = msg.content.filter(p => p.type === 'text').map(p => p.text).join('\n').trim();
-      } else {
-        displayContent = '';
-      }
-      // Clean up doc selection context for display
-      if (msg.role === 'user') {
-        // Hide "Continue where you left off" bubbles
-        if (displayContent.trim() === 'Continue where you left off' || displayContent.trim().startsWith('Your message was cut off.') || displayContent.trim().startsWith('Your previous response was interrupted.') || displayContent.includes('[Instruction: Rewrite') || displayContent.includes('[Instruction: Explain')) continue;
-        const docEditMatch = displayContent.match(/^In the document, edit this specific text \((lines? [\d-]+)\):\n```\n([\s\S]*?)\n```\n\nInstruction: ([\s\S]*)$/);
-        if (docEditMatch) {
-          displayContent = `[Doc edit: ${docEditMatch[1]}] ${docEditMatch[3]}`;
-        }
-      }
-      window.chatModule.addMessage(msg.role, markdownModule.renderContent(displayContent), modelName, meta);
-    } catch (e) {
-      console.warn('Failed to render history message:', e, msg);
-    }
-  }
-}
-
-// Centered "Show earlier messages (N)" control inserted as the FIRST child of
-// #chat-history. Wrapped in a div so it can never match the '.msg' selectors
-// that map DOM position to server history indexes.
-function _buildEarlierButton() {
-  const wrap = document.createElement('div');
-  wrap.id = 'chat-earlier-wrap';
-  wrap.style.cssText = 'display:flex;justify-content:center;padding:6px 0;';
-  const btn = document.createElement('button');
-  btn.type = 'button';
-  btn.id = 'chat-show-earlier';
-  btn.className = 'memory-toolbar-btn';
-  btn.textContent = `Show earlier messages (${_histRenderedFrom})`;
-  btn.addEventListener('click', () => _renderEarlierChunk(HISTORY_CHUNK));
-  wrap.appendChild(btn);
-  return wrap;
-}
-
-// Materialize the next `count` older entries ABOVE the current view, keeping
-// the viewport anchored. addMessage appends to #chat-history (possibly several
-// nodes per entry), so the freshly appended nodes are moved up in order to sit
-// right after the button wrap.
-function _renderEarlierChunk(count) {
-  const box = document.getElementById('chat-history');
-  const wrap = document.getElementById('chat-earlier-wrap');
-  if (!box || _histRenderedFrom <= 0) return;
-  const from = Math.max(0, _histRenderedFrom - count);
-  const anchor = wrap ? wrap.nextSibling : box.firstChild;
-  const prevH = box.scrollHeight;
-  const prevTop = box.scrollTop;
-  const startLen = box.children.length;
-  box.classList.add('no-animate');
-  _renderHistorySlice(_histAll, from, _histRenderedFrom, _histModelName);
-  const appended = Array.from(box.children).slice(startLen);
-  for (const n of appended) box.insertBefore(n, anchor);
-  box.scrollTop = prevTop + (box.scrollHeight - prevH);
-  box.classList.remove('no-animate');
-  _histRenderedFrom = from;
-  if (_histRenderedFrom === 0) {
-    if (wrap) wrap.remove();
-  } else {
-    const btn = document.getElementById('chat-show-earlier');
-    if (btn) btn.textContent = `Show earlier messages (${_histRenderedFrom})`;
-  }
-  if (window.hljs) {
-    document.querySelectorAll('pre code:not(.hljs)').forEach(block => {
-      window.hljs.highlightElement(block);
-    });
-  }
-}
-
-// Force-render everything that is still virtualized. MUST be awaited before
-// any operation that maps a bubble's DOM position among '.msg' nodes to a
-// server history index (edit/resend/regenerate/fork/delete in chat.js) —
-// with older turns unrendered those indexes would be skewed by the hidden
-// prefix and truncate/fork the wrong rows.
-async function ensureFullHistoryRendered() {
-  if (_histRenderedFrom > 0) _renderEarlierChunk(Number.MAX_SAFE_INTEGER);
-}
+const DATE_SECTION_COLLAPSE_KEY = 'ody-session-date-section-collapsed';
 let _autoCreateInProgress = false; // guard against recursive auto-create
 const _INCOGNITO_SESSIONS_KEY = 'ody-incognito-sessions'; // sessionStorage key for incognito session IDs
 const _isMac = /Mac|iPhone|iPad/.test(navigator.platform);
 const _mod = _isMac ? '⌘' : 'Ctrl';
 let _historyPager = null;
+const _serverStreamChecksInFlight = new Set();
+const _serverStreamAbsentUntil = new Map();
+const SERVER_STREAM_ABSENT_TTL_MS = 30000;
+
+function _shouldPreserveStartupComposer(msgInput) {
+  if (!msgInput || !msgInput.value) return false;
+  if (window.__odysseusComposerUserEdited) return true;
+  return !!document.getElementById('app-loader') && document.activeElement === msgInput;
+}
+
+function _clearComposerUnlessStartupTyped(msgInput) {
+  if (!msgInput) return;
+  if (_shouldPreserveStartupComposer(msgInput)) {
+    msgInput.disabled = false;
+    autoResize(msgInput);
+    return;
+  }
+  msgInput.value = '';
+}
+
+function _forceExitIncognitoUi() {
+  const chk = document.getElementById('incognito-toggle');
+  const wasIncognito = !!(chk && chk.checked);
+  if (chk) chk.checked = false;
+
+  const indicator = document.getElementById('incognito-indicator');
+  if (indicator) indicator.style.display = 'none';
+
+  const btn = document.getElementById('incognito-btn');
+  if (btn) {
+    btn.classList.remove('active');
+    btn.title = 'Enable Nobody mode — no memory or skill injection, no history saved';
+    btn.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg><span class="incognito-label">Nobody</span>';
+  }
+
+  const welcomeName = document.querySelector('.welcome-name');
+  if (welcomeName && welcomeName.dataset.originalHtml) {
+    welcomeName.innerHTML = welcomeName.dataset.originalHtml;
+    delete welcomeName.dataset.originalHtml;
+  }
+
+  const welcomeSub = document.getElementById('welcome-sub');
+  if (welcomeSub && welcomeSub.dataset.originalText) {
+    welcomeSub.textContent = welcomeSub.dataset.originalText;
+    delete welcomeSub.dataset.originalText;
+    welcomeSub.style.display = '';
+  }
+
+  const tip = document.getElementById('welcome-tip');
+  if (tip && Object.prototype.hasOwnProperty.call(tip.dataset, 'originalTip')) {
+    tip.textContent = tip.dataset.originalTip;
+    delete tip.dataset.originalTip;
+    tip.classList.remove('nobody-session-note');
+    tip.style.opacity = '';
+    tip.style.marginTop = '';
+  }
+
+  if (wasIncognito) {
+    const toggleState = Storage.getJSON(Storage.KEYS.TOGGLES, {}) || {};
+    const restoreMode = toggleState.nobody_prev_mode || toggleState.mode || 'agent';
+    delete toggleState.nobody_prev_mode;
+    ['web_agent', 'bash_agent', 'web_chat', 'bash_chat'].forEach(k => {
+      if (toggleState[k] === false) delete toggleState[k];
+    });
+    Storage.setJSON(Storage.KEYS.TOGGLES, toggleState);
+    if (typeof window.__odysseusSetChatMode === 'function') {
+      window.__odysseusSetChatMode(restoreMode === 'chat' ? 'chat' : 'agent');
+    }
+  }
+}
 
 function _paintSessionLoading(chatHistory, label = 'Loading chat') {
   if (!chatHistory) return;
@@ -289,10 +259,10 @@ function _installHistoryPager(id, pageInfo, modelName) {
     handler: null,
   };
 
-  const loadOlder = async () => {
+  const loadOlder = async ({ force = false } = {}) => {
     if (!_historyPager || _historyPager.loading || _historyPager.done) return;
     if (_historyPager.sessionId !== currentSessionId) return;
-    if (box.scrollTop > 90) return;
+    if (!force && box.scrollTop > 90) return;
 
     const nextOffset = Math.max(0, _historyPager.offset - _historyPager.limit);
     const nextLimit = _historyPager.offset - nextOffset;
@@ -334,7 +304,29 @@ function _installHistoryPager(id, pageInfo, modelName) {
   _historyPager.handler = () => {
     if (box.scrollTop <= 90) loadOlder();
   };
+  _historyPager.loadOlder = loadOlder;
   box.addEventListener('scroll', _historyPager.handler, { passive: true });
+}
+
+// FORK: index-sensitive operations in chat.js (edit / resend / regenerate /
+// fork / delete) map a bubble's DOM position among '.msg' nodes to a server
+// history index (the truncate keep_count). With paged history only the newest
+// page is in the DOM, so that index would be short by every unloaded older turn
+// and truncate the WRONG rows (data loss). Await this first: it pulls every
+// remaining older page through the pager so DOM position == history index.
+export async function ensureFullHistoryRendered() {
+  for (let guard = 0; guard < 1000 && _historyPager && !_historyPager.done; guard++) {
+    if (_historyPager.loading) { await new Promise(r => setTimeout(r, 30)); continue; }
+    const before = _historyPager.offset;
+    await _historyPager.loadOlder?.({ force: true });
+    if (!_historyPager || _historyPager.loading) continue;
+    if (_historyPager.offset === before && !_historyPager.done) break;   // fetch failed: stop, don't spin
+  }
+  // Pages still missing means the DOM index is still wrong — abort the caller's
+  // edit/truncate rather than send a keep_count that would drop real history.
+  if (_historyPager && !_historyPager.done) {
+    throw new Error('Could not load the full chat history; nothing was changed. Try again.');
+  }
 }
 
 function _getIncognitoIds() {
@@ -361,8 +353,41 @@ async function _cleanupIncognitoSessions() {
 // Research indicator tracking
 const _researchingSessions = new Set();
 const _streamingSessions = new Set();   // Background chat streams (not polled against research API)
-const _completedSessions = new Set();   // Sessions with completed background streams
+const _COMPLETED_SESSIONS_KEY = 'odysseus-completed-chat-sessions-v1';
+const _completedSessions = new Set((() => {
+  try {
+    const ids = JSON.parse(localStorage.getItem(_COMPLETED_SESSIONS_KEY) || '[]');
+    return Array.isArray(ids) ? ids.map(String) : [];
+  } catch (_) { return []; }
+})());
 let _researchPollTimer = null;
+
+function _persistCompletedSessions() {
+  try { localStorage.setItem(_COMPLETED_SESSIONS_KEY, JSON.stringify([..._completedSessions])); } catch (_) {}
+}
+
+function _renderSessionRunState(state, isRunning) {
+  if (!state) return;
+  if (state._whirlpool) {
+    state._whirlpool.destroy();
+    state._whirlpool = null;
+  }
+  state.replaceChildren();
+  state.classList.toggle('is-working', isRunning);
+  state.classList.toggle('is-done', !isRunning);
+  if (isRunning) {
+    const whirlpool = spinnerModule.createWhirlpool(12);
+    whirlpool.element.classList.add('session-run-whirlpool');
+    state.appendChild(whirlpool.element);
+    state._whirlpool = whirlpool;
+    state.title = 'Agent is working';
+    state.setAttribute('aria-label', 'Agent is working');
+  } else {
+    state.textContent = 'Done';
+    state.title = 'Agent finished while you were away';
+    state.setAttribute('aria-label', 'Agent finished while you were away');
+  }
+}
 
 // Session list keyboard navigation state
 let _sessionListFocused = false;
@@ -462,6 +487,32 @@ async function moveToFolder(sessionId, folderName) {
   renderSessionList();
 }
 
+// Let a chat be dropped directly on a folder/tag. The existing menu action is
+// still available, but drag-and-drop is faster when organizing several chats.
+function wireFolderDropTarget(header, folderName) {
+  header.addEventListener('dragover', (e) => {
+    const types = Array.from(e.dataTransfer?.types || []);
+    if (!types.includes('application/x-odysseus-session')) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    header.classList.add('drag-over');
+  });
+  header.addEventListener('dragleave', (e) => {
+    if (!header.contains(e.relatedTarget)) header.classList.remove('drag-over');
+  });
+  header.addEventListener('drop', async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    header.classList.remove('drag-over');
+    const sessionId = e.dataTransfer.getData('application/x-odysseus-session');
+    if (!sessionId) return;
+    const session = sessions.find(s => String(s.id) === String(sessionId));
+    if (!session || (session.folder || '') === (folderName || '')) return;
+    await moveToFolder(sessionId, folderName);
+    uiModule.showToast(folderName ? `Moved to ${folderName}` : 'Removed from folder');
+  });
+}
+
 /** Build the "Move to folder" submenu for a session dropdown. */
 function buildFolderSubmenu(sessionId, currentFolder, dropdown) {
   const folders = getFolderNames();
@@ -534,6 +585,11 @@ function buildFolderSubmenu(sessionId, currentFolder, dropdown) {
     if (sub.style.display === 'block') {
       sub.style.display = 'none';
     } else {
+      sub._escapeUnregister?.();
+      sub._escapeUnregister = registerEscapeLayer(
+        () => { sub.style.display = 'none'; },
+        () => sub.isConnected && sub.style.display === 'block',
+      );
       const rect = moveItem.getBoundingClientRect();
       const isMobile = window.innerWidth <= 768;
       sub.style.top = '-9999px';
@@ -578,6 +634,9 @@ function buildFolderSubmenu(sessionId, currentFolder, dropdown) {
 function createSessionItem(s) {
   const div = document.createElement('div');
   div.className = 'list-item session-item';
+  // Native desktop drag moves a chat onto a folder/tag. The dedicated handle
+  // continues to control manual ordering in Rearrange mode.
+  div.draggable = true;
   div.setAttribute('role', 'option');
   div.setAttribute('tabindex', '-1');
   div.setAttribute('data-session-id', s.id);
@@ -647,6 +706,20 @@ function createSessionItem(s) {
   }
   div.appendChild(icon);
 
+  div.addEventListener('dragstart', (e) => {
+    if (document.body.classList.contains('rearrange-mode')) {
+      e.preventDefault();
+      return;
+    }
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('application/x-odysseus-session', s.id);
+    div.classList.add('dragging-to-folder');
+  });
+  div.addEventListener('dragend', () => {
+    div.classList.remove('dragging-to-folder');
+    document.querySelectorAll('.session-folder-header.drag-over').forEach(h => h.classList.remove('drag-over'));
+  });
+
   const span = document.createElement('span');
   span.className = 'grow';
   let chatTitle = s.name || '';
@@ -697,11 +770,77 @@ function createSessionItem(s) {
   // On mobile, suppress click if user was scrolling (touchmove detected)
   // Long press on mobile shows context menu
   let _touchMoved = false;
+  let _touchStartX = 0;
+  let _touchStartY = 0;
   let _longPressTimer = null;
   let _longPressed = false;
+  let _folderDragPointer = null;
+  let _folderDragMoved = false;
+  let _folderDragTarget = null;
+
+  // Pointer-based fallback for moving chats onto folder/tag headers. Native
+  // HTML5 drag events are unreliable when the sidebar also handles scrolling
+  // and row clicks, especially in Firefox.
+  const _clearFolderDragTarget = () => {
+    if (_folderDragTarget) _folderDragTarget.classList.remove('drag-over');
+    _folderDragTarget = null;
+  };
+  const _finishFolderPointerDrag = async (e) => {
+    if (!_folderDragPointer || e.pointerId !== _folderDragPointer) return;
+    const target = _folderDragTarget;
+    const moved = _folderDragMoved;
+    _folderDragPointer = null;
+    _folderDragMoved = false;
+    _clearFolderDragTarget();
+    document.removeEventListener('pointermove', _moveFolderPointer);
+    document.removeEventListener('pointerup', _finishFolderPointerDrag);
+    document.removeEventListener('pointercancel', _finishFolderPointerDrag);
+    if (!moved || !target) return;
+    const folderName = target.dataset.folderName || '';
+    if ((s.folder || '') === folderName) return;
+    await moveToFolder(s.id, folderName);
+    uiModule.showToast(folderName ? `Moved to ${folderName}` : 'Removed from folder');
+  };
+  const _moveFolderPointer = (e) => {
+    if (!_folderDragPointer || e.pointerId !== _folderDragPointer) return;
+    const dx = e.clientX - _folderDragStartX;
+    const dy = e.clientY - _folderDragStartY;
+    if (!_folderDragMoved && Math.hypot(dx, dy) < 10) return;
+    _folderDragMoved = true;
+    e.preventDefault();
+    const under = document.elementFromPoint(e.clientX, e.clientY);
+    const target = under?.closest('.session-folder-header');
+    if (target && document.getElementById('session-list')?.contains(target)) {
+      if (_folderDragTarget !== target) {
+        _clearFolderDragTarget();
+        _folderDragTarget = target;
+      }
+      target.classList.add('drag-over');
+    } else {
+      _clearFolderDragTarget();
+    }
+  };
+  let _folderDragStartX = 0;
+  let _folderDragStartY = 0;
+  div.addEventListener('pointerdown', (e) => {
+    if (e.pointerType === 'touch' || e.target.closest('button, input, select, a, .item-drag-handle')) return;
+    if (document.body.classList.contains('rearrange-mode')) return;
+    _folderDragPointer = e.pointerId;
+    _folderDragMoved = false;
+    _folderDragStartX = e.clientX;
+    _folderDragStartY = e.clientY;
+    document.addEventListener('pointermove', _moveFolderPointer, { passive: false });
+    document.addEventListener('pointerup', _finishFolderPointerDrag);
+    document.addEventListener('pointercancel', _finishFolderPointerDrag);
+  });
   div.addEventListener('touchstart', (e) => {
     _touchMoved = false;
     _longPressed = false;
+    const touch = e.touches && e.touches[0];
+    if (touch) {
+      _touchStartX = touch.clientX;
+      _touchStartY = touch.clientY;
+    }
     if (window.innerWidth > 768) return;
     _longPressTimer = setTimeout(() => {
       _longPressed = true;
@@ -719,21 +858,32 @@ function createSessionItem(s) {
         dd.style.right = 'auto';
         dd.style.display = 'block';
         dd.style.zIndex = '1000';
+        dd._escapeUnregister?.();
+        dd._escapeUnregister = registerEscapeLayer(
+          () => { dd.style.display = 'none'; },
+          () => dd.isConnected && dd.style.display === 'block',
+        );
         // Clamp to viewport
         requestAnimationFrame(() => {
           const mr = dd.getBoundingClientRect();
           if (mr.bottom > window.innerHeight - 8) dd.style.top = (rect.top - mr.height - 4) + 'px';
           if (mr.right > window.innerWidth - 8) { dd.style.left = 'auto'; dd.style.right = '8px'; }
         });
-        // Dismissal (tap-away + Escape) is handled by the shared global
+        // Tap-away dismissal is handled by the shared global
         // _initDropdownDismiss listener for .session-dropdown-menu (same as the
-        // desktop menu-button path); a per-open listener here would only
-        // self-remove on an outside click and orphan itself on an item tap.
+        // desktop menu-button path) and Escape by the layer registered above;
+        // a per-open listener here would only self-remove on an outside click
+        // and orphan itself on an item tap.
       }
     }, 500);
   }, { passive: true });
-  div.addEventListener('touchmove', () => {
-    _touchMoved = true;
+  div.addEventListener('touchmove', (e) => {
+    const touch = e.touches && e.touches[0];
+    // Browsers can emit a tiny touchmove during an ordinary tap. Only treat
+    // a meaningful displacement as scrolling so taps still open the chat.
+    if (touch && (Math.abs(touch.clientX - _touchStartX) > 8 || Math.abs(touch.clientY - _touchStartY) > 8)) {
+      _touchMoved = true;
+    }
     if (_longPressTimer) { clearTimeout(_longPressTimer); _longPressTimer = null; }
   }, { passive: true });
   div.addEventListener('touchend', () => {
@@ -849,7 +999,7 @@ function createSessionItem(s) {
   if (!isOpenClaw) {
     const selectMoreItem = document.createElement('div');
     selectMoreItem.className = 'dropdown-item-compact';
-    selectMoreItem.innerHTML = _icon('<span style="font-size:16px;line-height:1;">●</span>') + '<span>Select</span>';
+    selectMoreItem.innerHTML = _icon(SELECT_MENU_ICON) + '<span>Select</span>';
     selectMoreItem.addEventListener('click', (e) => {
       e.stopPropagation();
       dropdown.style.display = 'none';
@@ -891,6 +1041,19 @@ function createSessionItem(s) {
   });
   dropdown.appendChild(cancelItem);
 
+  // Normalize common actions after all conditional items have been created.
+  // Product-specific session actions retain their authored order.
+  _sep.remove();
+  const orderedSessionItems = orderActionMenuItems(
+    Array.from(dropdown.children).map(node => ({
+      node,
+      label: node.querySelector(':scope > span:not(.dropdown-icon):not(.dropdown-shortcut)')?.textContent || node.textContent,
+    })),
+  );
+  orderedSessionItems.forEach(item => dropdown.appendChild(item.node));
+  const archiveBoundary = orderedSessionItems.find(item => actionMenuRank(item) >= 700);
+  if (archiveBoundary) dropdown.insertBefore(_sep, archiveBoundary.node);
+
   // Add event listeners
   menuBtn.addEventListener('click', (e) => {
     e.stopPropagation();
@@ -902,6 +1065,7 @@ function createSessionItem(s) {
     if (dropdown.style.display === 'block') {
       dropdown.style.display = 'none';
     } else {
+      registerDropdownEscape();
       // Position the dropdown using viewport coords
       const rect = menuBtn.getBoundingClientRect();
       dropdown.style.left = '';
@@ -911,10 +1075,10 @@ function createSessionItem(s) {
       dropdown.style.display = 'block';
       const ddRect = dropdown.getBoundingClientRect();
       // Flip above if not enough room below
-      if (rect.bottom + 2 + ddRect.height > window.innerHeight) {
-        dropdown.style.top = Math.max(2, rect.top - ddRect.height - 2) + 'px';
+      if (rect.bottom + 4 + ddRect.height > window.innerHeight) {
+        dropdown.style.top = Math.max(4, rect.top - ddRect.height - 4) + 'px';
       } else {
-        dropdown.style.top = rect.bottom + 2 + 'px';
+        dropdown.style.top = rect.bottom + 4 + 'px';
       }
     }
   });
@@ -976,7 +1140,7 @@ function createSessionItem(s) {
     _skipAutoSelect = true;
     // Clean up persistent chat mapping
     try {
-      const pm = await import('./presets.js');
+      const pm = await import('./presets.js?v=20260908personaname1');
       if (pm.removePersistentChat) pm.removePersistentChat(s.id);
     } catch (e) {}
     // On mobile, close sidebar if we deleted the active session so user sees welcome screen
@@ -1024,6 +1188,14 @@ function createSessionItem(s) {
     e.stopPropagation();
   });
 
+  const registerDropdownEscape = () => {
+    dropdown._escapeUnregister?.();
+    dropdown._escapeUnregister = registerEscapeLayer(
+      () => { dropdown.style.display = 'none'; },
+      () => dropdown.isConnected && dropdown.style.display === 'block',
+    );
+  };
+
   div.appendChild(span);
 
   // Apply processing/completed state to the star dot
@@ -1042,6 +1214,13 @@ function createSessionItem(s) {
         div.classList.add('stream-complete');
       }
     }
+  }
+
+  if (_isProcessing || _isDone) {
+    const state = document.createElement('span');
+    state.className = 'session-run-state ' + (_isProcessing ? 'is-working' : 'is-done');
+    _renderSessionRunState(state, _isProcessing);
+    div.appendChild(state);
   }
 
   div.appendChild(menuBtn);
@@ -1077,21 +1256,68 @@ function _sessionBucketDate(s) {
   return s.last_message_at || s.updated_at || s.created_at || '';
 }
 
+function _loadDateSectionCollapseState() {
+  const raw = Storage.getJSON(DATE_SECTION_COLLAPSE_KEY, {});
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+  return raw;
+}
+
+function _saveDateSectionCollapseState(state) {
+  Storage.setJSON(DATE_SECTION_COLLAPSE_KEY, state && typeof state === 'object' ? state : {});
+}
+
+function _dateSectionKey(kind, label) {
+  return `${kind || 'session'}:${label || 'Older'}`;
+}
+
+function _isDateSectionCollapsed(kind, label) {
+  return _loadDateSectionCollapseState()[_dateSectionKey(kind, label)] === true;
+}
+
+function _toggleDateSection(kind, label) {
+  const state = _loadDateSectionCollapseState();
+  const key = _dateSectionKey(kind, label);
+  state[key] = state[key] !== true;
+  _saveDateSectionCollapseState(state);
+  renderSessionList();
+}
+
 function _createDateSectionHeader(label, kind = 'session') {
   const el = document.createElement('div');
   el.className = `date-section-header ${kind}-date-section-header`;
   el.textContent = label;
+  const collapsed = _isDateSectionCollapsed(kind, label);
+  if (collapsed) el.classList.add('collapsed');
+  el.dataset.dateSectionKind = kind;
+  el.dataset.dateSectionLabel = label;
+  el.tabIndex = 0;
+  el.setAttribute('role', 'button');
+  el.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+  el.title = collapsed ? `Show ${label}` : `Hide ${label}`;
+  el.addEventListener('click', (e) => {
+    e.stopPropagation();
+    _toggleDateSection(kind, label);
+  });
+  el.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    e.preventDefault();
+    e.stopPropagation();
+    _toggleDateSection(kind, label);
+  });
   return el;
 }
 
 function _appendSessionItemsWithDateHeaders(frag, items) {
   let lastLabel = null;
+  let collapsed = false;
   for (const s of items) {
     const label = _dateBucketLabel(_sessionBucketDate(s));
     if (label !== lastLabel) {
       frag.appendChild(_createDateSectionHeader(label, 'session'));
+      collapsed = _isDateSectionCollapsed('session', label);
       lastLabel = label;
     }
+    if (collapsed) continue;
     frag.appendChild(createSessionItem(s));
   }
 }
@@ -1099,9 +1325,16 @@ function _appendSessionItemsWithDateHeaders(frag, items) {
 function _appendFavoriteSessionItems(frag, items) {
   if (!items.length) return;
   frag.appendChild(_createDateSectionHeader('Favorites', 'session'));
+  if (_isDateSectionCollapsed('session', 'Favorites')) return;
   for (const s of items) {
     frag.appendChild(createSessionItem(s));
   }
+}
+
+function _isUnsavedCompareSession(s) {
+  const name = String((s && s.name) || '').trim();
+  const folder = String((s && s.folder) || '').trim();
+  return name.startsWith('[CMP] ') && !folder.startsWith('Compare:');
 }
 
 let _renderRAF = null;
@@ -1118,7 +1351,7 @@ function _renderSessionListImpl() {
 
   // Get saved order from localStorage
   const savedOrder = Storage.get('session-order');
-  let orderedSessions = sessions.filter(s => !s.archived && s.folder !== 'Assistant' && !_isIncognitoSession(s.id) && (s.name || '').trim() !== 'Nobody' && (s.name || '').trim() !== 'Incognito');
+  let orderedSessions = sessions.filter(s => !s.archived && s.folder !== 'Assistant' && !_isUnsavedCompareSession(s) && !_isIncognitoSession(s.id) && (s.name || '').trim() !== 'Nobody' && (s.name || '').trim() !== 'Incognito');
 
   if (savedOrder) {
     try {
@@ -1171,8 +1404,6 @@ function _renderSessionListImpl() {
 
     const limit = _showAllSessions ? allFlat.length : SIDEBAR_MAX_VISIBLE;
     const visible = allFlat.slice(0, limit);
-    const activeIdx = allFlat.findIndex(s => s.id === currentSessionId);
-    if (!_showAllSessions && activeIdx >= limit) visible.push(allFlat[activeIdx]);
 
     const visibleFavorites = visible.filter(s => s.is_important);
     const visibleRegular = visible.filter(s => !s.is_important);
@@ -1183,7 +1414,7 @@ function _renderSessionListImpl() {
       const remaining = allFlat.length - SIDEBAR_MAX_VISIBLE;
       const toggleBtn = document.createElement('button');
       toggleBtn.className = 'session-show-more-btn';
-      toggleBtn.textContent = _showAllSessions ? 'Show less' : `Show ${remaining} more`;
+      toggleBtn.textContent = _showAllSessions ? 'Show less' : 'Show all';
       toggleBtn.addEventListener('click', (e) => {
         e.stopPropagation();
         _showAllSessions = !_showAllSessions;
@@ -1285,6 +1516,7 @@ function _renderSessionListImpl() {
       await loadSessions();
     });
     header.appendChild(deleteBtn);
+    wireFolderDropTarget(header, folderName);
 
     let _folderTouchMoved = false;
     header.addEventListener('touchstart', () => { _folderTouchMoved = false; }, { passive: true });
@@ -1324,21 +1556,13 @@ function _renderSessionListImpl() {
       const folderLimit = folderExpanded ? folderSessions.length : FOLDER_MAX_VISIBLE;
       const visibleFolder = folderSessions.slice(0, folderLimit);
 
-      // Always include active session even if beyond limit
-      const activeInFolder = folderSessions.findIndex(s => s.id === currentSessionId);
-      if (!folderExpanded && activeInFolder >= folderLimit) {
-        visibleFolder.push(folderSessions[activeInFolder]);
-      }
-
-      visibleFolder.forEach(s => {
-        content.appendChild(createSessionItem(s));
-      });
+      _appendSessionItemsWithDateHeaders(content, visibleFolder);
 
       if (folderSessions.length > FOLDER_MAX_VISIBLE) {
         const rem = folderSessions.length - FOLDER_MAX_VISIBLE;
         const moreBtn = document.createElement('button');
         moreBtn.className = 'session-show-more-btn';
-        moreBtn.textContent = folderExpanded ? 'Show less' : `Show ${rem} more`;
+        moreBtn.textContent = folderExpanded ? 'Show less' : 'Show all';
         moreBtn.addEventListener('click', (e) => {
           e.stopPropagation();
           _expandedFolders[folderName] = !folderExpanded;
@@ -1355,14 +1579,8 @@ function _renderSessionListImpl() {
 
   // Render unfiled sessions below folders (capped unless expanded)
   const hasFolders = orderedFolderNames.length > 0;
-  const activeInUnfiled = unfiled.findIndex(s => s.id === currentSessionId);
   const limit = _showAllSessions ? unfiled.length : SIDEBAR_MAX_VISIBLE;
   const visibleUnfiled = unfiled.slice(0, limit);
-
-  // If active session is beyond the limit, include it
-  if (!_showAllSessions && activeInUnfiled >= limit) {
-    visibleUnfiled.push(unfiled[activeInUnfiled]);
-  }
 
   // Wrap in "Unsorted" folder if real folders exist
   let unfiledTarget = _frag;
@@ -1410,6 +1628,7 @@ function _renderSessionListImpl() {
       await loadSessions();
     });
     unsortedHeader.appendChild(deleteBtn);
+    wireFolderDropTarget(unsortedHeader, '');
 
     unsortedHeader.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -1432,9 +1651,7 @@ function _renderSessionListImpl() {
   }
 
   if (unfiledTarget) {
-    visibleUnfiled.forEach(s => {
-      unfiledTarget.appendChild(createSessionItem(s));
-    });
+    _appendSessionItemsWithDateHeaders(unfiledTarget, visibleUnfiled);
   }
 
   // "Show more" / "Show less" toggle
@@ -1442,7 +1659,7 @@ function _renderSessionListImpl() {
     const remaining = unfiled.length - SIDEBAR_MAX_VISIBLE;
     const toggleBtn = document.createElement('button');
     toggleBtn.className = 'session-show-more-btn';
-    toggleBtn.textContent = _showAllSessions ? 'Show less' : `Show ${remaining} more`;
+    toggleBtn.textContent = _showAllSessions ? 'Show less' : 'Show all';
     toggleBtn.addEventListener('click', (e) => {
       e.stopPropagation();
       _showAllSessions = !_showAllSessions;
@@ -1744,24 +1961,31 @@ export async function loadSessions() {
     renderSessionList();
 
     const sessionsSection = uiModule.el('sessions-section');
-    if (sessions.length === 0) {
+    const visibleSessions = sessions.filter(s => !s.archived && !_isUnsavedCompareSession(s));
+    if (visibleSessions.length === 0) {
       sessionsSection.classList.add('hidden');
     } else {
       sessionsSection.classList.remove('hidden');
     }
 
-    const activeSessions = sessions.filter(s => !s.archived);
+    const activeSessions = sessions.filter(s => !s.archived && !_isUnsavedCompareSession(s));
     // "Transient" sessions = the singleton Assistant chat + any task-output
     // session. Treat them as not-restorable so coming back to the app lands
     // on the user's last actual conversation, not whichever check-in task
     // most recently appended a message.
-    const _isTransient = (s) => !!s && (s.folder === 'Assistant' || s.folder === 'Tasks');
+    const _isTransient = (s) => !!s && (s.folder === 'Assistant' || s.folder === 'Tasks' || _isUnsavedCompareSession(s));
     const _realSessions = activeSessions.filter(s => !_isTransient(s));
     let hashId = window.location.hash.replace('#', '');
     if (/^(document|note|image|email|event|task|skill|research)-/.test(hashId) || /^open=notes&note=/.test(hashId)) {
       hashId = '';
     }
-    let savedId = Storage.get('lastSessionId');
+    const _isFirstLoad = !sessionStorage.getItem('ody-session-active');
+    const _freshRootLoad = !_rootFreshChatApplied && !hashId && !currentSessionId && !_pendingChat;
+    if (_freshRootLoad) {
+      _rootFreshChatApplied = true;
+      Storage.remove('lastSessionId');
+    }
+    let savedId = _freshRootLoad ? null : Storage.get('lastSessionId');
     // If the persisted lastSessionId points to a transient session (legacy
     // state from before the persistence-guard was added), drop it.
     if (savedId) {
@@ -1786,13 +2010,13 @@ export async function loadSessions() {
     } else if (currentSessionId) {
       // Session was just created but may not be in the list yet — keep it
       targetId = currentSessionId;
-    } else if (savedId && activeSessions.some(s => s.id === savedId)) {
+    } else if (!_freshRootLoad && savedId && activeSessions.some(s => s.id === savedId)) {
       targetId = savedId;
-    } else if (!_skipAutoSelect && _realSessions.length > 0) {
+    } else if (!_freshRootLoad && !_skipAutoSelect && _realSessions.length > 0) {
       // Most-recent NON-transient session — skip Assistant / Tasks so the
       // auto-firing assistant doesn't become the apparent default chat.
       targetId = _realSessions[0].id;
-    } else if (!_skipAutoSelect && activeSessions.length > 0) {
+    } else if (!_freshRootLoad && !_skipAutoSelect && activeSessions.length > 0) {
       // Only transient sessions exist (brand-new account) — fall through to
       // the original behaviour so we don't leave the user with nothing.
       targetId = activeSessions[0].id;
@@ -1808,31 +2032,15 @@ export async function loadSessions() {
     // picker would still show the old model's name from cached state). See
     // the targetId resolution above (hash → currentSession → lastSessionId →
     // most-recent).
-    const _isFirstLoad = !sessionStorage.getItem('ody-session-active');
-    if (_isFirstLoad) {
-      sessionStorage.setItem('ody-session-active', '1');
-      if (!targetId) {
-        try {
-          const dcRes = await fetch(`${API_BASE}/api/default-chat`);
-          const dc = await dcRes.json();
-          if (dc.endpoint_url && dc.model) {
-            // Check if there's already an empty session with this model we can reuse
-            const emptyDefault = activeSessions.find(s =>
-              s.model === dc.model && s.message_count === 0
-            );
-            if (emptyDefault) {
-              targetId = emptyDefault.id;
-            } else {
-              await createDirectChat(dc.endpoint_url, dc.model, dc.endpoint_id);
-              // On mobile, hide sidebar so user lands directly in chat
-              if (window.innerWidth < 768) {
-                const sb = document.getElementById('sidebar');
-                if (sb) sb.classList.add('hidden');
-              }
-              return; // createDirectChat handles selectSession internally
-            }
-          }
-        } catch (_) { /* no default model configured */ }
+    if (_isFirstLoad) sessionStorage.setItem('ody-session-active', '1');
+    if ((_isFirstLoad || _freshRootLoad) && !targetId) {
+      // Land on a visually fresh chat without creating hidden pending session
+      // state. The send path can create the default-backed session when the
+      // user actually submits. Pre-creating here races with opening an existing
+      // chat and was causing sends to jump into brand-new chats.
+      if (window.innerWidth < 768) {
+        const sb = document.getElementById('sidebar');
+        if (sb) sb.classList.add('hidden');
       }
     }
 
@@ -1864,10 +2072,9 @@ export async function loadSessions() {
       if (activeSessions.length === 0 && !_autoCreateInProgress) {
         _autoCreateInProgress = true;
         try {
-          const dcRes = await fetch(`${API_BASE}/api/default-chat`);
-          const dc = await dcRes.json();
-          if (dc.endpoint_url && dc.model) {
-            await createDirectChat(dc.endpoint_url, dc.model, dc.endpoint_id);
+          const dc = await _getPreferredDefaultChat();
+          if (dc && dc.endpoint_url && dc.model) {
+              await createDirectChat(dc.endpoint_url, dc.model, dc.endpoint_id, { source: 'default' });
           }
         } catch (_) { /* no default model — that's fine, user can /setup */ }
         _autoCreateInProgress = false;
@@ -1891,9 +2098,18 @@ export async function selectSession(id, { keepSidebar = false, showLoading = tru
     window.compareModule.deactivate(true);
     return; // deactivate does a page reload
   }
+  let navToken = 0;
   try {
-    const navToken = ++_sessionNavToken;
+    navToken = ++_sessionNavToken;
+    window.__odysseusSessionRenderPendingId = id;
     const prevSessionId = currentSessionId;
+    // Selecting a real persisted chat cancels any deferred "New Chat" model
+    // pick. Otherwise the next send can materialize that pending chat instead
+    // of posting into the session the user just opened.
+    if (_pendingChat) {
+      _pendingChat = null;
+      _pendingMaterializePromise = null;
+    }
     _clearHistoryPager();
     // Re-archive peeked session when navigating away
     _checkPeekCleanup(id);
@@ -1902,6 +2118,7 @@ export async function selectSession(id, { keepSidebar = false, showLoading = tru
       try { window.documentModule.clearSelection(); } catch {}
     }
     currentSessionId = id;
+    try { window.__odysseusLastSelectedSessionId = id; } catch (_) {}
     // Identify Assistant / task-output sessions so we don't "trap" the user
     // there on return. Skipped from both `lastSessionId` persistence and the
     // URL hash — the user complained that coming back to Odysseus kept
@@ -1916,9 +2133,10 @@ export async function selectSession(id, { keepSidebar = false, showLoading = tru
         history.replaceState(null, '', '#' + id);
       }
     }
+    _forceExitIncognitoUi();
     // Restore character preset for persistent chats
     try {
-      const presetsModule = window.presetsModule || (await import('./presets.js')).default;
+      const presetsModule = window.presetsModule || (await import('./presets.js?v=20260908personaname1')).default;
       if (presetsModule && presetsModule.onSessionSwitch) presetsModule.onSessionSwitch(id);
     } catch (e) {}
     const meta = sessions.find(s => s.id === id);
@@ -1953,8 +2171,11 @@ export async function selectSession(id, { keepSidebar = false, showLoading = tru
     }
     const msgInput = document.getElementById('message');
     if (msgInput) {
-      msgInput.disabled = false;
-      msgInput.value = '';
+      _clearComposerUnlessStartupTyped(msgInput);
+      // Do not accept a send while the authoritative history fetch can still
+      // repaint this pane. A fast first send used to append optimistically and
+      // then disappear when the in-flight session render cleared the DOM.
+      msgInput.disabled = true;
       msgInput.style.height = '';
       msgInput.style.overflow = '';
       autoResize(msgInput);
@@ -1986,6 +2207,7 @@ export async function selectSession(id, { keepSidebar = false, showLoading = tru
     }
     // Update model picker visibility
     updateModelPicker();
+    if (window.refreshChatContextHeader) window.refreshChatContextHeader('select-session');
 
     // Refresh session cost badge for the newly selected session
     if (chatRenderer.updateSessionCostUI) chatRenderer.updateSessionCostUI();
@@ -2074,11 +2296,6 @@ export async function selectSession(id, { keepSidebar = false, showLoading = tru
       if (navToken !== _sessionNavToken || currentSessionId !== id) return;
       chatHistory.innerHTML = '';
     }
-    // Drop any virtualized remainder from the PREVIOUS session — the new
-    // session repopulates it below (or leaves it empty for OC/empty sessions).
-    _histAll = [];
-    _histRenderedFrom = 0;
-    _histModelName = null;
 
     // Suppress per-message entrance animations during bulk history render
     if (chatHistory) chatHistory.classList.add('no-animate');
@@ -2091,20 +2308,12 @@ export async function selectSession(id, { keepSidebar = false, showLoading = tru
          <p>Messages will be routed through your OpenClaw agent. The agent has access to tools, memory, and skills configured in your OpenClaw workspace.</p>`,
         'OpenClaw');
     } else if (msgHistory.length) {
-      // Virtualized history: render only the most recent window eagerly —
-      // long sessions (hundreds of turns) were costing seconds of main-thread
-      // markdown+DOM work on EVERY session switch. Older turns render on
-      // demand via the "Show earlier messages" button (_renderEarlierChunk),
-      // and any index-sensitive operation (edit/resend/regenerate/fork/delete
-      // map DOM position → server history index) first forces a full render
-      // through ensureFullHistoryRendered() so keep_count semantics are
-      // byte-for-byte identical to the old render-everything path.
-      _histAll = msgHistory;
-      _histModelName = modelName;
-      _histRenderedFrom = Math.max(0, msgHistory.length - HISTORY_VISIBLE_TURNS);
-      _renderHistorySlice(msgHistory, _histRenderedFrom, msgHistory.length, modelName);
-      if (_histRenderedFrom > 0 && chatHistory) {
-        chatHistory.insertBefore(_buildEarlierButton(), chatHistory.firstChild);
+      for (const msg of msgHistory) {
+        try {
+          _renderHistoryMessage(msg, modelName);
+        } catch (e) {
+          console.warn('Failed to render history message:', e, msg);
+        }
       }
     } else {
       if (window.chatModule && window.chatModule.showWelcomeScreen) window.chatModule.showWelcomeScreen();
@@ -2201,6 +2410,12 @@ export async function selectSession(id, { keepSidebar = false, showLoading = tru
     }
     uiModule.showError('Failed to load session: ' + error.message);
   } finally {
+    if (navToken === _sessionNavToken && currentSessionId === id) {
+      const msgInput = document.getElementById('message');
+      if (msgInput) msgInput.disabled = false;
+      window.__odysseusSessionRenderPendingId = '';
+      window.__odysseusSessionReadyId = id;
+    }
     // Memory warmup must not block chat switching. The memories panel can load
     // on demand; this is only a delayed cache refresh when the foreground chat
     // is idle.
@@ -2226,10 +2441,36 @@ export async function selectSession(id, { keepSidebar = false, showLoading = tru
 
 // Pending session — stored locally until the first message is sent
 let _pendingChat = null; // { url, modelId, endpointId }
+let _pendingMaterializePromise = null;
+
+async function _getPreferredDefaultChat() {
+  let dc = null;
+  try {
+    dc = window.__odysseusDefaultChat || null;
+  } catch (_) {}
+  if (!dc || !dc.endpoint_url || !dc.model) {
+    try {
+      dc = JSON.parse(localStorage.getItem('odysseus-default-chat-cache') || 'null');
+    } catch (_) {}
+  }
+  if (dc && dc.endpoint_url && dc.model) return dc;
+  try {
+    const dcRes = await fetch(`${API_BASE}/api/default-chat`);
+    dc = await dcRes.json();
+    if (dc && dc.endpoint_url && dc.model) {
+      try {
+        window.__odysseusDefaultChat = dc;
+        localStorage.setItem('odysseus-default-chat-cache', JSON.stringify(dc));
+      } catch (_) {}
+      return dc;
+    }
+  } catch (_) {}
+  return null;
+}
 
 async function _applyDefaultPersonaForPendingChat() {
   try {
-    const mod = await import('./presets.js');
+    const mod = await import('./presets.js?v=20260908personaname1');
     const applyDefault = mod.applyDefaultPersonaForNewChat || mod.default?.applyDefaultPersonaForNewChat;
     if (typeof applyDefault === 'function') await applyDefault();
   } catch (e) {
@@ -2237,8 +2478,24 @@ async function _applyDefaultPersonaForPendingChat() {
   }
 }
 
-export async function createDirectChat(url, modelId, endpointId) {
-  _sessionNavToken++;
+export async function createDirectChat(url, modelId, endpointId, opts = {}) {
+  const incomingSource = opts.source || 'manual';
+  // An open document stays open across a new chat unless the caller decides
+  // otherwise: it auto-attaches to the fresh session via active_doc_id on the
+  // next send (chat_routes rebinds the doc's session_id server-side).
+  const keepDocument = opts.keepDocument !== undefined
+    ? !!opts.keepDocument
+    : !!(window.documentModule?.isPanelOpen?.() && window.documentModule.getCurrentDocId?.());
+  if (
+    _pendingChat &&
+    _pendingChat.modelId &&
+    _pendingChat.source === 'manual' &&
+    incomingSource !== 'manual'
+  ) {
+    updateModelPicker();
+    return;
+  }
+  const navToken = ++_sessionNavToken;
   // Detach any active stream so it doesn't interfere with the new chat
   if (window.chatModule && window.chatModule.detachCurrentStream) {
     window.chatModule.detachCurrentStream(currentSessionId);
@@ -2251,32 +2508,30 @@ export async function createDirectChat(url, modelId, endpointId) {
   }
 
   // Don't hit the API — just store the model info and prepare the UI
-  _pendingChat = { url, modelId, endpointId };
+  _pendingChat = { url, modelId, endpointId, source: incomingSource };
+  _pendingMaterializePromise = null;
   _skipAutoSelect = true;
   _suppressNextSessionLoading = true;
   currentSessionId = null;
+  try { window.__odysseusLastSelectedSessionId = ''; } catch (_) {}
   Storage.remove('lastSessionId');
   history.replaceState(null, '', window.location.pathname);
   document.querySelectorAll('.list-item.active-session, .session-item.active').forEach(el => {
     el.classList.remove('active-session', 'active');
   });
 
-  // Keep an open document OPEN across a new chat — it auto-attaches to the
-  // fresh session via active_doc_id on the next send (chat_routes rebinds the
-  // doc's session_id server-side). Only reset the doc chrome when no doc is
-  // staying open, so the indicator doesn't go stale under a still-mounted editor.
-  const _docStaysOpen = window.documentModule
-    && window.documentModule.isPanelOpen()
-    && window.documentModule.getCurrentDocId();
-  if (!_docStaysOpen) {
-    const docBtn = document.getElementById('overflow-doc-btn');
-    if (docBtn) {
-      docBtn.classList.remove('active', 'has-docs');
-      docBtn.style.display = ''; // show in overflow menu again
-    }
-    const docInd = document.getElementById('doc-indicator-btn');
-    if (docInd) docInd.classList.remove('visible', 'active');
+  // Close document panel unless the New Chat flow explicitly carries the
+  // current document into the new session.
+  if (!keepDocument && window.documentModule && window.documentModule.isPanelOpen()) {
+    window.documentModule.closePanel();
   }
+  const docBtn = document.getElementById('overflow-doc-btn');
+  if (docBtn) {
+    if (!keepDocument) docBtn.classList.remove('active', 'has-docs');
+    docBtn.style.display = ''; // show in overflow menu again
+  }
+  const docInd = document.getElementById('doc-indicator-btn');
+  if (docInd && !keepDocument) docInd.classList.remove('visible', 'active');
 
   // Clear chat area and show welcome
   const box = document.getElementById('chat-history');
@@ -2286,9 +2541,13 @@ export async function createDirectChat(url, modelId, endpointId) {
   }
 
   await _applyDefaultPersonaForPendingChat();
+  // The persona lookup awaits; if the user opened another chat meanwhile, do
+  // not stamp "New Chat" / re-enable the composer over that session's render.
+  if (navToken !== _sessionNavToken) return;
 
   // Update model picker to show the pending model
   updateModelPicker();
+  if (window.refreshChatContextHeader) window.refreshChatContextHeader('new-chat');
 
   // Update current-meta header
   const metaEl = document.getElementById('current-meta');
@@ -2298,84 +2557,112 @@ export async function createDirectChat(url, modelId, endpointId) {
 
   // Enable input
   const msgInput = document.getElementById('message');
-  if (msgInput) { msgInput.disabled = false; msgInput.value = ''; msgInput.focus(); }
+  if (msgInput) {
+    msgInput.disabled = false;
+    _clearComposerUnlessStartupTyped(msgInput);
+    msgInput.focus();
+  }
 }
 
 /** Actually create the session in the DB. Called on first message send. */
 export async function materializePendingSession() {
+  if (_pendingMaterializePromise) return _pendingMaterializePromise;
   const pending = _pendingChat;
   if (!pending) return false;
-  _pendingChat = null;
 
+  const materializePromise = (async () => {
+
+    const incognitoChk = document.getElementById('incognito-toggle');
+    const isIncognito = incognitoChk && incognitoChk.checked;
+    const base = (pending.modelId || 'model').split('/').pop();
+    const name = isIncognito ? 'Nobody' : `${base} ${new Date().toLocaleTimeString()}`;
+
+    const fd = new FormData();
+    fd.append('name', name);
+    fd.append('endpoint_url', pending.url || '');
+    fd.append('model', pending.modelId || '');
+    if (pending.url && pending.modelId) {
+      fd.append('skip_validation', 'true');
+    }
+    if (pending.endpointId) {
+      fd.append('endpoint_id', pending.endpointId);
+    }
+
+    let res;
+    try {
+      res = await fetch(`${API_BASE}/api/session`, { method: 'POST', body: fd });
+    } catch (e) {
+      uiModule.showError('Failed to reach backend: ' + e);
+      return false;
+    }
+
+    let payload;
+    try {
+      payload = await res.json();
+    } catch {
+      payload = { detail: await res.text() };
+    }
+
+    if (!res.ok) {
+      uiModule.showError(`Session create failed (${res.status}) ${payload.detail || JSON.stringify(payload)}`);
+      return false;
+    }
+
+    // The user may have opened an existing chat while this deferred default
+    // session was being created. Do not let a stale response steal
+    // currentSessionId and make the next send land in a brand-new chat.
+    if (_pendingChat !== pending) {
+      if (payload.id) {
+        fetch(`${API_BASE}/api/session/${encodeURIComponent(payload.id)}`, { method: 'DELETE' }).catch(() => {});
+      }
+      return false;
+    }
+
+    if (isIncognito && payload.id) {
+      _markIncognito(payload.id);
+    }
+
+    // Clear any leftover document text selection from the previous session
+    if (window.documentModule?.clearSelection) {
+      try { window.documentModule.clearSelection(); } catch {}
+    }
+    _pendingChat = null;
+    currentSessionId = payload.id;
+    if (!isIncognito) {
+      Storage.set('lastSessionId', payload.id);
+      history.replaceState(null, '', '#' + payload.id);
+    }
+
+    // Reload the sidebar in the background. Awaiting this used to block the first
+    // prompt in a new/pending chat behind startup fetches and slow /api/sessions
+    // calls, so the user's message could sit for 20s+ before streaming began.
+    _suppressNextSessionLoading = true;
+    if (window.refreshChatContextHeader) window.refreshChatContextHeader('materialize-session');
+    loadSessions().catch(() => {});
+    return true;
+  })();
+  _pendingMaterializePromise = materializePromise;
+
+  try {
+    return await materializePromise;
+  } finally {
+    if (_pendingMaterializePromise === materializePromise) {
+      _pendingMaterializePromise = null;
+    }
+  }
+}
+
+export function preMaterializePendingSession() {
+  if (!_pendingChat || _pendingMaterializePromise) return;
   const incognitoChk = document.getElementById('incognito-toggle');
-  const isIncognito = incognitoChk && incognitoChk.checked;
-  const base = (pending.modelId || 'model').split('/').pop();
-  const name = isIncognito ? 'Nobody' : `${base} ${new Date().toLocaleTimeString()}`;
-
-  const fd = new FormData();
-  fd.append('name', name);
-  fd.append('endpoint_url', pending.url || '');
-  fd.append('model', pending.modelId || '');
-  if (pending.url && pending.modelId) {
-    fd.append('skip_validation', 'true');
-  }
-  if (pending.endpointId) {
-    fd.append('endpoint_id', pending.endpointId);
-  }
-
-  let res;
-  try {
-    res = await fetch(`${API_BASE}/api/session`, { method: 'POST', body: fd });
-  } catch (e) {
-    uiModule.showError('Failed to reach backend: ' + e);
-    return false;
-  }
-
-  let payload;
-  try {
-    payload = await res.json();
-  } catch {
-    payload = { detail: await res.text() };
-  }
-
-  // Ours: bail out before the success path below if the create actually failed.
-  if (!res.ok) {
-    uiModule.showError(`Session create failed (${res.status}) ${payload.detail || JSON.stringify(payload)}`);
-    return false;
-  }
-
-  // Upstream (#5872): adopt the new session and restore the URL hash write.
-  // Re-indented to this fork's 2-space context — upstream's copy sits inside a
-  // `materializePromise` async wrapper that this fork does not have.
-  // Clear any leftover document text selection from the previous session
-  if (window.documentModule?.clearSelection) {
-    try { window.documentModule.clearSelection(); } catch {}
-  }
-  _pendingChat = null;
-  currentSessionId = payload.id;
-  if (!isIncognito) {
-    Storage.set('lastSessionId', payload.id);
-    history.replaceState(null, '', '#' + payload.id);
-  }
-
-  if (isIncognito && payload.id) {
-    _markIncognito(payload.id);
-  }
-
-  // Clear any leftover document text selection from the previous session
-  if (window.documentModule?.clearSelection) {
-    try { window.documentModule.clearSelection(); } catch {}
-  }
-  currentSessionId = payload.id;
-  Storage.set('lastSessionId', payload.id);
-  history.replaceState(null, '', '#' + payload.id);
-
-  // Reload the sidebar in the background. Awaiting this used to block the first
-  // prompt in a new/pending chat behind startup fetches and slow /api/sessions
-  // calls, so the user's message could sit for 20s+ before streaming began.
-  _suppressNextSessionLoading = true;
-  loadSessions().catch(() => {});
-  return true;
+  if (incognitoChk && incognitoChk.checked) return;
+  setTimeout(() => {
+    const chk = document.getElementById('incognito-toggle');
+    if (chk && chk.checked) return;
+    if (_pendingChat && !_pendingMaterializePromise) {
+      materializePendingSession().catch(() => {});
+    }
+  }, 250);
 }
 
 export function hasPendingChat() { return !!_pendingChat; }
@@ -2385,6 +2672,10 @@ export function getCurrentSessionId() {
   return currentSessionId;
 }
 
+export function isCurrentSessionIncognito() {
+  return !!(currentSessionId && _isIncognitoSession(currentSessionId));
+}
+
 export function getSessions() {
   return sessions;
 }
@@ -2392,9 +2683,8 @@ export function getSessions() {
 export function getCurrentModel() {
   const sess = sessions.find(x => x.id === currentSessionId);
   if (sess && sess.model) return sess.model;
-  // Pending session not yet materialized — read from model picker label
-  const label = document.getElementById('model-picker-label');
-  return label ? label.textContent.trim() : null;
+  if (_pendingChat && _pendingChat.modelId) return _pendingChat.modelId;
+  return null;
 }
 
 /** Endpoint URL serving the current (or pending) session's model. Used to
@@ -2409,6 +2699,7 @@ export function getCurrentEndpointUrl() {
 export function setCurrentSessionId(id) {
   _sessionNavToken++;
   currentSessionId = id;
+  try { window.__odysseusLastSelectedSessionId = id || ''; } catch (_) {}
   if (!id) {
     _suppressNextSessionLoading = true;
     Storage.remove('lastSessionId');
@@ -2417,6 +2708,41 @@ export function setCurrentSessionId(id) {
       el.classList.remove('active-session', 'active');
     });
   }
+}
+
+export async function deleteCurrentSessionFromTopMenu() {
+  const sid = currentSessionId;
+  if (!sid) {
+    uiModule.showToast('No chat to delete');
+    return false;
+  }
+  const session = sessions.find(s => String(s.id) === String(sid));
+  if (session?.is_important) {
+    uiModule.showToast('Unfavorite before deleting');
+    return false;
+  }
+  if (!await uiModule.styledConfirm('Delete this session?', { confirmText: 'Delete', danger: true })) {
+    return false;
+  }
+  if (window.chatModule && window.chatModule.abortCurrentRequest) {
+    window.chatModule.abortCurrentRequest();
+  }
+  _deselectCurrentSession(sid);
+  _removeSessionFromLocalState(sid);
+  _skipAutoSelect = true;
+  try {
+    const pm = await import('./presets.js?v=20260908personaname1');
+    if (pm.removePersistentChat) pm.removePersistentChat(sid);
+  } catch (e) {}
+  try {
+    const res = await fetch(`${API_BASE}/api/session/${sid}`, { method: 'DELETE' });
+    if (!res.ok) throw new Error('Failed');
+    uiModule.showToast('Session deleted');
+  } catch (e) {
+    uiModule.showError('Failed to delete session');
+  }
+  await loadSessions();
+  return true;
 }
 
 // Session list keyboard navigation: arrows to move, Delete to delete
@@ -2526,6 +2852,26 @@ function _updateResearchDots() {
     star.classList.toggle('notify', isCompleted);
     if (listItem) listItem.classList.toggle('stream-complete', isCompleted);
 
+    if (listItem) {
+      let state = listItem.querySelector('.session-run-state');
+      if (isRunning || isCompleted) {
+        if (!state) {
+          state = document.createElement('span');
+          state.className = 'session-run-state';
+          const menu = listItem.querySelector('.session-menu-btn');
+          listItem.insertBefore(state, menu || null);
+        }
+        const alreadyRunning = state.classList.contains('is-working') && !!state._whirlpool;
+        const alreadyDone = state.classList.contains('is-done') && state.textContent === 'Done';
+        if ((isRunning && !alreadyRunning) || (isCompleted && !alreadyDone)) {
+          _renderSessionRunState(state, isRunning);
+        }
+      } else if (state) {
+        if (state._whirlpool) state._whirlpool.destroy();
+        state.remove();
+      }
+    }
+
     if (isRunning || isCompleted) {
       star.style.opacity = '1';
     } else {
@@ -2577,6 +2923,7 @@ export function clearResearching(sessionId) {
 }
 
 export function markStreaming(sessionId) {
+  _serverStreamAbsentUntil.delete(sessionId);
   _streamingSessions.add(sessionId);
   _updateResearchDots();
   _updateRailNotifs();
@@ -2599,16 +2946,18 @@ function _clearRunningState(sessionId) {
   }
 }
 
-export function markStreamComplete(sessionId) {
+export function markStreamComplete(sessionId, { force = false } = {}) {
   _researchingSessions.delete(sessionId);
   _streamingSessions.delete(sessionId);
-  // Don't pulse if user is already viewing this session — they can see the response
-  if (currentSessionId === sessionId) {
+  // A selected chat can still be away in a hidden tab. In that case completion
+  // must remain visible in the sidebar when the user returns.
+  if (!force && currentSessionId === sessionId && document.visibilityState === 'visible') {
     _updateResearchDots();
     _updateRailNotifs();
     return;
   }
   _completedSessions.add(sessionId);
+  _persistCompletedSessions();
   _updateResearchDots();
   _updateRailNotifs();
   // Show notification dot on Chats section if collapsed
@@ -2661,6 +3010,9 @@ function _updateRailNotifs() {
  * and poll until done, then reload the session.
  */
 async function _checkServerStream(sessionId) {
+  if (!sessionId || _serverStreamChecksInFlight.has(sessionId)) return;
+  if ((_serverStreamAbsentUntil.get(sessionId) || 0) > Date.now()) return;
+  _serverStreamChecksInFlight.add(sessionId);
   try {
     // Skip if research is running — it has its own progress UI
     if (_researchingSessions.has(sessionId)) return;
@@ -2670,14 +3022,19 @@ async function _checkServerStream(sessionId) {
 
     const res = await fetch(`${API_BASE}/api/chat/stream_status/${sessionId}`);
     if (!res.ok) {
+      if (res.status === 404) {
+        _serverStreamAbsentUntil.set(sessionId, Date.now() + SERVER_STREAM_ABSENT_TTL_MS);
+      }
       _clearRunningState(sessionId);
       return; // 404 = no active stream
     }
     const info = await res.json();
     if (info.status !== 'streaming') {
+      _serverStreamAbsentUntil.set(sessionId, Date.now() + SERVER_STREAM_ABSENT_TTL_MS);
       _clearRunningState(sessionId);
       return;
     }
+    _serverStreamAbsentUntil.delete(sessionId);
 
     // Skip if this is a research stream — research has its own progress UI
     if (info.mode === 'research' || info.is_research) return;
@@ -2744,11 +3101,14 @@ async function _checkServerStream(sessionId) {
     }, 1500);
   } catch (_) {
     // No stream active — nothing to do
+  } finally {
+    _serverStreamChecksInFlight.delete(sessionId);
   }
 }
 
 export function clearStreamComplete(sessionId) {
   _completedSessions.delete(sessionId);
+  _persistCompletedSessions();
   // Direct DOM cleanup in case _updateResearchDots misses it
   var item = document.querySelector(`.list-item[data-session-id="${sessionId}"]`);
   if (item) item.classList.remove('stream-complete');
@@ -2793,13 +3153,6 @@ function _initDropdownDismiss() {
       }
     }).observe(_sb, { attributes: true, attributeFilter: ['class'] });
   }
-  document.addEventListener('keydown', (e) => {
-    if (e.key !== 'Escape') return;
-    // Esc must dismiss both the parent dropdown AND the Move-to-folder
-    // submenu in one keypress — previously only the dropdown closed and
-    // the submenu was left orphaned on screen.
-    document.querySelectorAll('.session-dropdown-menu, .session-folder-submenu').forEach(d => d.style.display = 'none');
-  });
 }
 
 // ──────────────────────────────────────────────
@@ -2837,14 +3190,18 @@ function _showDropdown(anchorEl, items) {
   dd.style.top = '-9999px';
   dd.style.display = 'block';
   const ddRect = dd.getBoundingClientRect();
-  if (rect.bottom + 2 + ddRect.height > window.innerHeight) {
-    dd.style.top = Math.max(2, rect.top - ddRect.height - 2) + 'px';
+  if (rect.bottom + 4 + ddRect.height > window.innerHeight) {
+    dd.style.top = Math.max(4, rect.top - ddRect.height - 4) + 'px';
   } else {
-    dd.style.top = (rect.bottom + 2) + 'px';
+    dd.style.top = (rect.bottom + 4) + 'px';
   }
 
-  function close() { dd.remove(); }
-  // Existing _initDropdownDismiss handles click-away + Escape for .session-dropdown-menu
+  const close = () => {
+    unregister();
+    unregister = () => {};
+    dd.remove();
+  };
+  let unregister = bindMenuDismiss(dd, close, e => dd.contains(e.target) || e.target === anchorEl);
   return close;
 }
 
@@ -3245,6 +3602,8 @@ export function openLibrary(defaultTab) {
   document.getElementById('lib-select-btn').addEventListener('click', () => {
     _lib.selectMode = !_lib.selectMode;
     _lib.selected.clear();
+    document.getElementById('lib-select-btn').classList.toggle('active', _lib.selectMode);
+    document.getElementById('lib-select-btn').textContent = _lib.selectMode ? 'Cancel' : 'Select';
     document.getElementById('lib-bulk-bar').classList.toggle('hidden', !_lib.selectMode);
     _renderLibGrid();
   });
@@ -3269,6 +3628,8 @@ export function openLibrary(defaultTab) {
     }
     _lib.selected.clear();
     _lib.selectMode = false;
+    document.getElementById('lib-select-btn').classList.remove('active');
+    document.getElementById('lib-select-btn').textContent = 'Select';
     document.getElementById('lib-bulk-bar').classList.add('hidden');
     await loadSessions();
     _renderLibGrid();
@@ -3286,6 +3647,8 @@ export function openLibrary(defaultTab) {
     }
     _lib.selected.clear();
     _lib.selectMode = false;
+    document.getElementById('lib-select-btn').classList.remove('active');
+    document.getElementById('lib-select-btn').textContent = 'Select';
     document.getElementById('lib-bulk-bar').classList.add('hidden');
     await loadSessions();
     _renderLibGrid();
@@ -3629,9 +3992,11 @@ const sessionModule = {
   selectSession,
   createDirectChat,
   materializePendingSession,
+  preMaterializePendingSession,
   hasPendingChat,
   getPendingChat,
   getCurrentSessionId,
+  ensureFullHistoryRendered,
   getSessions,
   getCurrentModel,
   getCurrentEndpointUrl,
@@ -3651,7 +4016,7 @@ const sessionModule = {
   setSessionHasDocs,
   getSortMode,
   setSortMode,
-  ensureFullHistoryRendered
+  deleteCurrentSessionFromTopMenu
 };
 
 // Cross-device freshness: when the tab regains focus, refetch the session list

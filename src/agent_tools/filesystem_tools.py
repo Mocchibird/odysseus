@@ -5,7 +5,8 @@ import re
 import difflib
 import shutil
 import time
-from typing import Optional, Dict, Any
+import tempfile
+from typing import Optional, Dict, Any, Tuple, List
 
 from src.constants import MAX_READ_CHARS, MAX_DIFF_LINES
 
@@ -18,6 +19,9 @@ _CODENAV_MAX_HITS = 200
 _CODENAV_MAX_LINE = 400
 _GREP_TIMEOUT_SECONDS = 20
 _GREP_STDERR_PREFIX = 20_000
+_STRUCTURED_DOCUMENT_SUFFIXES = frozenset({
+    ".doc", ".docx", ".epub", ".pdf", ".pptx", ".xls", ".xlsx",
+})
 
 
 def _glob_to_regex(pat: str) -> "re.Pattern":
@@ -70,6 +74,8 @@ def _python_grep_worker(payload: dict, output_queue) -> None:
         sensitive = {name.casefold() for name in payload["sensitive_names"]}
         max_hits = payload["max_hits"]
         hits = 0
+        # Do not present unreadable files or directories as an empty result.
+        scan_errors: list = []
 
         def within(path: str, root: str) -> bool:
             try:
@@ -103,7 +109,7 @@ def _python_grep_worker(payload: dict, output_queue) -> None:
             else:
                 def walk_files():
                     for directory, dirnames, filenames in os.walk(
-                        target, followlinks=False
+                        target, followlinks=False, onerror=scan_errors.append
                     ):
                         dirnames[:] = [
                             name
@@ -140,10 +146,18 @@ def _python_grep_worker(payload: dict, output_queue) -> None:
                                 hits += 1
                                 if hits >= max_hits:
                                     break
-                except (UnicodeDecodeError, OSError):
+                except UnicodeDecodeError:
                     continue
+                except OSError as error:
+                    scan_errors.append(error)
                 if hits >= max_hits:
                     break
+        if scan_errors:
+            output_queue.put((
+                "error",
+                "grep: search incomplete; one or more files or directories could not be read",
+            ))
+            return
         output_queue.put(("done",))
     except BaseException as exc:
         try:
@@ -185,25 +199,33 @@ class EditFileTool:
         try:
             args = json.loads(content) if content.strip().startswith("{") else {}
         except (json.JSONDecodeError, TypeError):
-            args = {}
-        raw_path = (args.get("path") or "").strip()
-        old = args.get("old_string", "")
-        new = args.get("new_string", "")
-        replace_all = bool(args.get("replace_all", False))
+            return {"error": "edit_file: expected valid JSON arguments", "exit_code": 1}
+        if not isinstance(args, dict):
+            return {"error": "edit_file: expected a JSON object", "exit_code": 1}
+        raw_path_value = args.get("path")
+        raw_path = raw_path_value.strip() if isinstance(raw_path_value, str) else ""
+        old = args.get("old_string")
+        new = args.get("new_string")
+        replace_all = args.get("replace_all", False)
         if not raw_path:
             return {"error": "edit_file: path required", "exit_code": 1}
+        if not isinstance(old, str) or not old:
+            return {"error": "edit_file: old_string required (use write_file to create a file)", "exit_code": 1}
+        if not isinstance(new, str):
+            return {"error": "edit_file: new_string required", "exit_code": 1}
+        if not isinstance(replace_all, bool):
+            return {"error": "edit_file: replace_all must be a boolean", "exit_code": 1}
         try:
             path = _resolve_tool_path(raw_path)
         except ValueError as e:
             return {"error": f"edit_file: {e}", "exit_code": 1}
-        if old == "":
-            return {"error": "edit_file: old_string required (use write_file to create a file)", "exit_code": 1}
         if old == new:
             return {"error": "edit_file: old_string and new_string are identical", "exit_code": 1}
 
         def _apply():
             """Helper function that performs the actual string replacement and file writing logic."""
-            with open(path, "r", encoding="utf-8") as f:
+            # Exact replacement must not normalize unrelated CRLF/CR newlines.
+            with open(path, "r", encoding="utf-8", newline="") as f:
                 original = f.read()
             count = original.count(old)
             if count == 0:
@@ -211,7 +233,7 @@ class EditFileTool:
             if count > 1 and not replace_all:
                 return original, None, f"not_unique:{count}"
             updated = original.replace(old, new) if replace_all else original.replace(old, new, 1)
-            with open(path, "w", encoding="utf-8") as f:
+            with open(path, "w", encoding="utf-8", newline="") as f:
                 f.write(updated)
             return original, updated, "ok"
 
@@ -247,17 +269,36 @@ class ReadFileTool:
         if _stripped.startswith("{"):
             try:
                 _a = json.loads(_stripped)
-                raw_path = str(_a.get("path", "")).strip()
+                if not isinstance(_a, dict):
+                    return {"error": "read_file: expected a JSON object", "exit_code": 1}
+                raw_path_value = _a.get("path")
+                raw_path = raw_path_value.strip() if isinstance(raw_path_value, str) else ""
                 offset = int(_a.get("offset") or 0)
                 limit = int(_a.get("limit") or 0)
             except (json.JSONDecodeError, TypeError, ValueError):
-                pass
+                return {"error": "read_file: expected valid JSON arguments", "exit_code": 1}
+        if not raw_path:
+            return {"error": "read_file: path required", "exit_code": 1}
         try:
             path = _resolve_tool_path(raw_path)
         except ValueError as e:
             return {"error": f"read_file: {e}", "exit_code": 1}
         try:
             def _read():
+                if os.path.splitext(path)[1].lower() in _STRUCTURED_DOCUMENT_SUFFIXES:
+                    from src.document_processor import extract_local_document
+
+                    extracted = extract_local_document(
+                        path,
+                        display_name=os.path.basename(path),
+                        analyze_embedded_images=False,
+                    )
+                    if offset > 0 or limit > 0:
+                        lines = extracted.splitlines(keepends=True)
+                        start = max(offset, 1) - 1
+                        stop = start + limit if limit > 0 else None
+                        return "".join(lines[start:stop])[:MAX_READ_CHARS]
+                    return extracted[:MAX_READ_CHARS + 1]
                 if offset > 0 or limit > 0:
                     start = max(offset, 1)
                     out, n, budget = [], 0, MAX_READ_CHARS
@@ -305,11 +346,18 @@ class WriteFileTool:
         if _stripped.startswith("{"):
             try:
                 _a = json.loads(_stripped)
-                if isinstance(_a, dict) and "path" in _a:
-                    raw_path = str(_a.get("path", "")).strip()
-                    body = str(_a.get("content", ""))
+                if not isinstance(_a, dict):
+                    return {"error": "write_file: expected a JSON object", "exit_code": 1}
+                raw_path_value = _a.get("path")
+                body_value = _a.get("content")
+                raw_path = raw_path_value.strip() if isinstance(raw_path_value, str) else ""
+                if not isinstance(body_value, str):
+                    return {"error": "write_file: content required", "exit_code": 1}
+                body = body_value
             except (json.JSONDecodeError, TypeError, ValueError):
-                pass
+                return {"error": "write_file: expected valid JSON arguments", "exit_code": 1}
+        if not raw_path:
+            return {"error": "write_file: path required", "exit_code": 1}
         from src.tool_execution import app_store_write_guard
         try:
             path = _resolve_tool_path(raw_path)
@@ -325,6 +373,38 @@ class WriteFileTool:
         _guard = app_store_write_guard(path)
         if _guard:
             return {"error": f"write_file: {_guard}", "exit_code": 1}
+        # A frequent multimodal artifact failure is writing SVG markup to a
+        # path whose extension promises a raster image. The file exists, so
+        # ordinary artifact checks pass, but image judges cannot decode it.
+        # Reject the mismatch with an actionable native-tool recovery path:
+        # save the SVG with an .svg suffix, then use inspect_media to render
+        # it to the requested PNG/JPEG path.
+        image_suffixes = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"}
+        body_probe = body.lstrip().casefold()
+        if os.path.splitext(path)[1].casefold() in image_suffixes and (
+            body_probe.startswith("<svg")
+            or (body_probe.startswith("<?xml") and "<svg" in body_probe[:2000])
+        ):
+            return {
+                "error": (
+                    f"write_file: {path} contains SVG markup but has a raster "
+                    "image extension. Write the SVG to a .svg path first, "
+                    "then call inspect_media with that SVG as path and this "
+                    "path as output_path to render a real raster image."
+                ),
+                "exit_code": 1,
+                "artifact_format_error": True,
+            }
+        if not body:
+            return {
+                "error": (
+                    f"write_file: {path}: content required; refusing to create an "
+                    "empty file. Call write_file again with the exact filename and "
+                    "non-empty content. If you need a directory, create it from "
+                    "bash/python instead."
+                ),
+                "exit_code": 1,
+            }
         try:
             def _write():
                 old = ""
@@ -350,9 +430,251 @@ class WriteFileTool:
             result["diff"] = diff
         return result
 
+class ApplyPatchTool:
+    async def execute(self, content: str, ctx: dict) -> dict:
+        """Apply a small Codex-style patch using exact context matching.
+
+        This is deliberately stricter than git-apply: if an update hunk's old
+        text is not found exactly once, the whole patch is rejected before any
+        file is changed. That keeps agent edits reviewable and avoids fuzzy
+        corruption when the model patches stale context.
+        """
+        from src.tool_execution import _resolve_tool_path, app_store_write_guard
+
+        patch_text = content or ""
+        stripped = patch_text.strip()
+        if stripped.startswith("{"):
+            try:
+                args = json.loads(stripped)
+                if isinstance(args, dict):
+                    patch_text = str(args.get("patch_text") or args.get("patchText") or args.get("patch") or "")
+            except (json.JSONDecodeError, TypeError):
+                pass
+        if not patch_text.strip():
+            return {"error": "apply_patch: patch_text required", "exit_code": 1}
+
+        try:
+            ops = _parse_agent_patch(patch_text)
+            if not ops:
+                return {"error": "apply_patch: no file operations found", "exit_code": 1}
+            prepared = []
+            for op in ops:
+                path = _resolve_tool_path(op["path"])
+                # FORK: same app-owned-store guard as write_file, so a patch
+                # cannot raw-write into a store that write_file refuses.
+                _guard = app_store_write_guard(path)
+                if _guard:
+                    return {"error": f"apply_patch: {_guard}", "exit_code": 1}
+                kind = op["kind"]
+                if kind == "add":
+                    if os.path.exists(path):
+                        return {"error": f"apply_patch: {op['path']}: already exists", "exit_code": 1}
+                    old = ""
+                    new = op["content"]
+                elif kind == "delete":
+                    if not os.path.isfile(path):
+                        return {"error": f"apply_patch: {op['path']}: not found", "exit_code": 1}
+                    with open(path, "r", encoding="utf-8") as f:
+                        old = f.read()
+                    new = ""
+                else:
+                    if not os.path.isfile(path):
+                        return {"error": f"apply_patch: {op['path']}: not found", "exit_code": 1}
+                    with open(path, "r", encoding="utf-8") as f:
+                        old = f.read()
+                    new = _apply_patch_hunks(old, op["hunks"], op["path"])
+                prepared.append((kind, path, old, new))
+
+            staged: list[tuple[str, str]] = []
+            backups: list[tuple[str, str | None]] = []
+            try:
+                for kind, path, _old, new in prepared:
+                    if kind == "delete":
+                        continue
+                    directory = os.path.dirname(path) or "."
+                    os.makedirs(directory, exist_ok=True)
+                    fd, temp_path = tempfile.mkstemp(
+                        prefix=f".{os.path.basename(path)}.odysseus-",
+                        dir=directory,
+                    )
+                    try:
+                        with os.fdopen(fd, "w", encoding="utf-8", newline="") as handle:
+                            handle.write(new)
+                            handle.flush()
+                            os.fsync(handle.fileno())
+                        if os.path.exists(path):
+                            shutil.copymode(path, temp_path)
+                    except BaseException:
+                        try:
+                            os.unlink(temp_path)
+                        except OSError:
+                            pass
+                        raise
+                    staged.append((path, temp_path))
+
+                for _kind, path, _old, _new in prepared:
+                    if os.path.exists(path):
+                        directory = os.path.dirname(path) or "."
+                        fd, backup_path = tempfile.mkstemp(
+                            prefix=f".{os.path.basename(path)}.odysseus-backup-",
+                            dir=directory,
+                        )
+                        os.close(fd)
+                        os.unlink(backup_path)
+                        os.replace(path, backup_path)
+                        backups.append((path, backup_path))
+                    else:
+                        backups.append((path, None))
+
+                staged_by_path = dict(staged)
+                for kind, path, _old, _new in prepared:
+                    if kind != "delete":
+                        os.replace(staged_by_path[path], path)
+                staged.clear()
+            except BaseException:
+                for path, backup_path in reversed(backups):
+                    try:
+                        if os.path.exists(path):
+                            os.unlink(path)
+                        if backup_path and os.path.exists(backup_path):
+                            os.replace(backup_path, path)
+                    except OSError:
+                        pass
+                raise
+            finally:
+                for _path, temp_path in staged:
+                    try:
+                        os.unlink(temp_path)
+                    except OSError:
+                        pass
+                for _path, backup_path in backups:
+                    if backup_path:
+                        try:
+                            os.unlink(backup_path)
+                        except OSError:
+                            pass
+
+            diffs = []
+            for _kind, path, old, new in prepared:
+                diff = _unified_diff(old, new, path)
+                if diff:
+                    diffs.append(diff)
+        except (ValueError, UnicodeDecodeError, PermissionError, OSError) as e:
+            return {"error": f"apply_patch: {e}", "exit_code": 1}
+
+        added = sum(int(d.get("added") or 0) for d in diffs)
+        removed = sum(int(d.get("removed") or 0) for d in diffs)
+        text_parts = [d.get("text", "") for d in diffs if d.get("text")]
+        diff_text = "\n".join(text_parts)
+        if len(diff_text.splitlines()) > MAX_DIFF_LINES:
+            diff_text = "\n".join(diff_text.splitlines()[:MAX_DIFF_LINES]) + f"\n... diff truncated at {MAX_DIFF_LINES} lines"
+        result = {
+            "output": f"Applied patch ({len(prepared)} file{'s' if len(prepared) != 1 else ''}, +{added}/-{removed})",
+            "exit_code": 0,
+        }
+        if diffs:
+            result["diff"] = {
+                "text": diff_text,
+                "added": added,
+                "removed": removed,
+                "new_file": any(d.get("new_file") for d in diffs),
+                "file": "patch",
+            }
+        return result
+
+def _parse_agent_patch(patch_text: str) -> List[Dict[str, Any]]:
+    lines = patch_text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    while lines and not lines[0].strip():
+        lines.pop(0)
+    while lines and not lines[-1].strip():
+        lines.pop()
+    if not lines or lines[0].strip() != "*** Begin Patch":
+        raise ValueError("patch must start with *** Begin Patch")
+    if lines[-1].strip() != "*** End Patch":
+        raise ValueError("patch must end with *** End Patch")
+
+    ops: List[Dict[str, Any]] = []
+    i = 1
+    while i < len(lines) - 1:
+        line = lines[i]
+        if not line:
+            i += 1
+            continue
+        if line.startswith("*** Add File: "):
+            path = line[len("*** Add File: "):].strip()
+            body = []
+            i += 1
+            while i < len(lines) - 1 and not lines[i].startswith("*** "):
+                if not lines[i].startswith("+"):
+                    raise ValueError(f"add file {path}: every content line must start with +")
+                body.append(lines[i][1:])
+                i += 1
+            ops.append({"kind": "add", "path": path, "content": "\n".join(body) + ("\n" if body else "")})
+            continue
+        if line.startswith("*** Delete File: "):
+            path = line[len("*** Delete File: "):].strip()
+            ops.append({"kind": "delete", "path": path})
+            i += 1
+            continue
+        if line.startswith("*** Update File: "):
+            path = line[len("*** Update File: "):].strip()
+            hunks = []
+            current = []
+            i += 1
+            if i < len(lines) - 1 and lines[i].startswith("*** Move to: "):
+                raise ValueError("move operations are not supported")
+            while i < len(lines) - 1 and not lines[i].startswith("*** "):
+                if lines[i].startswith("@@"):
+                    if current:
+                        hunks.append(current)
+                        current = []
+                elif lines[i].startswith((" ", "-", "+")):
+                    current.append(lines[i])
+                elif lines[i] == "":
+                    current.append(" ")
+                else:
+                    raise ValueError(f"update file {path}: invalid patch line {lines[i]!r}")
+                i += 1
+            if current:
+                hunks.append(current)
+            if not hunks:
+                raise ValueError(f"update file {path}: no hunks")
+            ops.append({"kind": "update", "path": path, "hunks": hunks})
+            continue
+        raise ValueError(f"unexpected patch line: {line!r}")
+    return ops
+
+def _apply_patch_hunks(original: str, hunks: List[List[str]], label: str) -> str:
+    updated = original
+    for idx, hunk in enumerate(hunks, 1):
+        old_lines = []
+        new_lines = []
+        for line in hunk:
+            prefix, body = line[:1], line[1:]
+            if prefix in (" ", "-"):
+                old_lines.append(body)
+            if prefix in (" ", "+"):
+                new_lines.append(body)
+        old_text = "\n".join(old_lines)
+        new_text = "\n".join(new_lines)
+        if old_text and old_text in updated:
+            occurrences = updated.count(old_text)
+            if occurrences != 1:
+                raise ValueError(f"{label}: hunk {idx} context matched {occurrences} times")
+            updated = updated.replace(old_text, new_text, 1)
+        elif old_text + "\n" in updated:
+            occurrences = updated.count(old_text + "\n")
+            if occurrences != 1:
+                raise ValueError(f"{label}: hunk {idx} context matched {occurrences} times")
+            updated = updated.replace(old_text + "\n", new_text + "\n", 1)
+        else:
+            raise ValueError(f"{label}: hunk {idx} context not found")
+    return updated
+
 class LsTool:
     async def execute(self, content: str, ctx: dict) -> dict:
         from src.tool_execution import (
+            _display_tool_path,
             _is_denied_tool_path,
             _resolve_search_root,
             _truncate,
@@ -391,7 +713,7 @@ class LsTool:
             except (PermissionError, OSError) as _e:
                 return None, f"ls: {_e}"
             rows.sort(key=lambda r: (not r[0], r[1].lower()))
-            lines = [f"{root}:"]
+            lines = [f"{_display_tool_path(root)}:"]
             for is_dir, name, size in rows[:_CODENAV_MAX_HITS]:
                 lines.append(f"  {name}/" if is_dir else f"  {name}  ({size} B)")
             if len(rows) > _CODENAV_MAX_HITS:
@@ -410,6 +732,7 @@ class GlobTool:
         from src.tool_execution import (
             _SENSITIVE_BASENAMES,
             _can_traverse_tool_path,
+            _display_tool_path,
             _is_denied_tool_path,
             _resolve_tool_path,
             _resolve_search_root,
@@ -506,8 +829,8 @@ class GlobTool:
         if err:
             return {"error": err, "exit_code": 1}
         if not paths:
-            return {"output": f"No files matching {pattern!r} under {root}", "exit_code": 0}
-        out = "\n".join(paths)
+            return {"output": f"No files matching {pattern!r} under {_display_tool_path(root)}", "exit_code": 0}
+        out = "\n".join(_display_tool_path(path) for path in paths)
         if len(paths) >= _CODENAV_MAX_HITS:
             out += f"\n... [capped at {_CODENAV_MAX_HITS} files]"
         return {"output": _truncate(out), "exit_code": 0}
@@ -518,6 +841,7 @@ class GrepTool:
             _SENSITIVE_BASENAMES,
             _SENSITIVE_FILE_PATTERNS,
             _agent_readable_data_subdirs,
+            _display_tool_path,
             _is_denied_tool_path,
             _is_sensitive_path,
             _path_within,
@@ -556,6 +880,8 @@ class GrepTool:
 
             from src.constants import DATA_DIR
 
+            if not os.path.exists(root):
+                return None, f"grep: search target not found: {_display_tool_path(root)}"
             rg = shutil.which("rg")
             real_root = os.path.realpath(root)
             data_dir = os.path.realpath(DATA_DIR)
@@ -855,8 +1181,13 @@ class GrepTool:
         if err:
             return {"error": err, "exit_code": 1}
         if not lines:
-            return {"output": f"No matches for {pattern!r} under {root}", "exit_code": 0}
-        out = "\n".join(ln[:_CODENAV_MAX_LINE] for ln in lines)
+            return {"output": f"No matches for {pattern!r} under {_display_tool_path(root)}", "exit_code": 0}
+        physical_root = os.path.realpath(root)
+        display_root = _display_tool_path(physical_root)
+        out = "\n".join(
+            (display_root + ln[len(physical_root):] if ln.startswith(physical_root) else ln)[:_CODENAV_MAX_LINE]
+            for ln in lines
+        )
         if len(lines) >= max_hits:
             out += f"\n... [capped at {max_hits} matches]"
         return {"output": _truncate(out), "exit_code": 0}
@@ -869,7 +1200,7 @@ class GetWorkspaceTool:
         ws = get_active_workspace()
         if ws:
             return {
-                "output": f"{ws}\n(File tools are confined to this folder; the shell starts "
+                "output": "/workspace\n(File tools are confined to this folder; the shell starts "
                           f"here but is not sandboxed and can reach outside it.)",
                 "exit_code": 0,
             }

@@ -15,12 +15,6 @@ def test_inline_image_attachments_expose_cid_metadata_source():
     assert '"is_inline": "inline" in cd.lower() or bool(content_id)' in source
 
 
-def test_email_reader_rewrites_cid_images_before_sanitizing():
-    source = (ROOT / "static" / "js" / "emailLibrary.js").read_text()
-
-    assert "function _rewriteInlineEmailImages" in source
-    assert "att.content_id" in source
-    assert "att.content_location" in source
-    assert "/api/email/attachment/" in source
-    assert "_sanitizeHtml(_rewriteInlineEmailImages(data.body_html, data))" in source
-    assert "querySelectorAll('[srcset]')" in source
+# The reader-side cid: rewrite (_rewriteInlineEmailImages) was retired in the
+# 23rd upstream sync: upstream now renders inline images as placeholders that
+# load on demand (per-account "view inline images" setting), which supersedes it.

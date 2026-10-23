@@ -1574,20 +1574,89 @@ def setup_gallery_routes() -> APIRouter:
             except httpx.TimeoutException:
                 raise HTTPException(504, "OpenAI inpaint timed out (120s)")
 
-        # Self-hosted diffusion server path
+        # Self-hosted diffusion server path. Newer Odysseus image
+        # wrappers expose the OpenAI-compatible /v1/images/edits
+        # multipart route even when they are local/self-hosted. Older
+        # diffusion_server.py exposes /v1/images/inpaint as JSON. Try the
+        # OpenAI-compatible local route first, then fall back.
         try:
             # Forward chosen_model so the diffusion server can route if it ever
             # supports multiple models per process. Harmless if ignored.
             if chosen_model:
                 body["model"] = chosen_model
-            async with httpx.AsyncClient(timeout=120) as client:
+            async with httpx.AsyncClient(timeout=240) as client:
+                try:
+                    import base64, io
+                    from PIL import Image
+
+                    img_bytes = base64.b64decode(body["image"])
+                    mask_bytes = base64.b64decode(body["mask"])
+                    # Normalize both inputs to PNG bytes. Local MLX and
+                    # Diffusers wrappers expect white mask pixels to mean
+                    # "edit this region", which matches the editor's mask.
+                    source_png = Image.open(io.BytesIO(img_bytes)).convert("RGBA")
+                    mask_png = Image.open(io.BytesIO(mask_bytes)).convert("L")
+                    src_buf = io.BytesIO()
+                    source_png.save(src_buf, format="PNG")
+                    mask_buf = io.BytesIO()
+                    mask_png.save(mask_buf, format="PNG")
+                    files = {
+                        "image": ("source.png", src_buf.getvalue(), "image/png"),
+                        "mask": ("mask.png", mask_buf.getvalue(), "image/png"),
+                    }
+                    data = {
+                        "model": chosen_model or body.get("model") or "",
+                        "prompt": body.get("prompt", ""),
+                        "size": f"{int(body.get('width') or source_png.width)}x{int(body.get('height') or source_png.height)}",
+                        "n": "1",
+                    }
+                    r = await client.post(_join_checked_gallery_endpoint(base, "/images/edits"), data=data, files=files)
+                    if r.status_code == 200:
+                        result = r.json()
+                        if isinstance(result, dict) and result.get("data"):
+                            item = result["data"][0]
+                            if item.get("b64_json"):
+                                return {"image": item["b64_json"]}
+                            if item.get("url"):
+                                raw_b64 = await _fetch_result_image_b64(item["url"])
+                                if raw_b64:
+                                    return {"image": raw_b64}
+                        if isinstance(result, dict) and result.get("image"):
+                            return {"image": result["image"]}
+                        raise HTTPException(502, "Image edit endpoint returned no image")
+                    if r.status_code not in (404, 405):
+                        logger.warning("inpaint_proxy self-hosted edits: status %s", r.status_code)
+                        detail = "Image edit request failed"
+                        try:
+                            err = r.json()
+                            detail = err.get("detail") or err.get("error") or detail
+                        except Exception:
+                            pass
+                        # A plain SD/SDXL checkpoint often exposes
+                        # generation only at /images/edits.
+                        # That does not mean the endpoint cannot inpaint:
+                        # Odysseus diffusion_server.py has a dedicated
+                        # /images/inpaint route that can derive/fallback to
+                        # inpaint, img2img crop+composite, or txt2img
+                        # crop+composite. Fall through to that route instead
+                        # of surfacing "does not support image edits".
+                        if r.status_code == 400 and "does not support image edits" in str(detail).lower():
+                            logger.info("inpaint_proxy self-hosted edits unsupported; falling back to /images/inpaint")
+                        else:
+                            raise HTTPException(r.status_code, detail)
+                except HTTPException:
+                    raise
+                except Exception:
+                    logger.exception("inpaint_proxy: failed to prepare self-hosted edit request")
+                    raise HTTPException(400, "Failed to prepare inpaint request")
+
                 r = await client.post(_join_checked_gallery_endpoint(base, "/images/inpaint"), json=body)
                 if r.status_code != 200:
                     logger.error("inpaint_proxy diffusion: status %s", r.status_code)
                     raise HTTPException(r.status_code, "Inpaint request failed")
                 return r.json()
         except httpx.TimeoutException:
-            raise HTTPException(504, "Inpaint request timed out (120s)")
+            raise HTTPException(504, "Inpaint request timed out (240s)")
         except HTTPException:
             raise
         except Exception:

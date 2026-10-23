@@ -77,10 +77,11 @@ class PresetManager:
             "name": "Iris",
             "character_name": "Iris",
             "temperature": 0.9,
-            "max_tokens": 0,
+            "max_tokens": 32768,
             "system_prompt": IRIS_SYSTEM_PROMPT,
             "inject_prefix": "",
             "inject_suffix": "",
+            "thinking_mode": "",
             "enabled": True,
         }
     }
@@ -114,7 +115,7 @@ class PresetManager:
                     custom["enabled"] = False
                     custom["system_prompt"] = ""
                     custom["temperature"] = 1.0
-                    custom["max_tokens"] = 0
+                    custom["max_tokens"] = self.DEFAULT_PRESETS["custom"]["max_tokens"]
                     custom.setdefault("inject_prefix", "")
                     custom.setdefault("inject_suffix", "")
                     changed = True
@@ -195,8 +196,27 @@ class PresetManager:
         enabled: bool = True,
         inject_prefix: str = "",
         inject_suffix: str = "",
+        persona_memory: str = "",
+        persona_memory_schema: str = "general",
+        thinking_mode: str = "",
+        show_persona_name: bool = True,
     ) -> bool:
         """Update the custom preset"""
+        persona_memory_schema = persona_memory_schema if persona_memory_schema in {"general", "health"} else "general"
+        current = self.presets.get("custom") if isinstance(self.presets, dict) else {}
+        current_name = ""
+        if isinstance(current, dict):
+            current_name = current.get("character_name") or current.get("name") or ""
+        if not persona_memory and enabled and name:
+            if current_name == name and isinstance(current, dict):
+                persona_memory = current.get("persona_memory", "") or ""
+                persona_memory_schema = current.get("persona_memory_schema", persona_memory_schema) or persona_memory_schema
+            else:
+                for template in self.get_user_templates():
+                    if isinstance(template, dict) and template.get("name") == name:
+                        persona_memory = template.get("persona_memory", "") or ""
+                        persona_memory_schema = template.get("persona_memory_schema", persona_memory_schema) or persona_memory_schema
+                        break
         self.presets["custom"] = {
             "name": name or "Custom",
             "character_name": name,
@@ -205,7 +225,11 @@ class PresetManager:
             "system_prompt": system_prompt,
             "inject_prefix": inject_prefix,
             "inject_suffix": inject_suffix,
+            "thinking_mode": thinking_mode if thinking_mode in {"on", "off"} else "",
+            "show_persona_name": bool(show_persona_name),
             "enabled": enabled,
+            "persona_memory": persona_memory if enabled and name else "",
+            "persona_memory_schema": persona_memory_schema if enabled and name else "general",
         }
         return self.save(self.presets)
     
@@ -234,6 +258,30 @@ class PresetManager:
         templates = self.presets.get("user_templates", [])
         self.presets["user_templates"] = [t for t in templates if t.get("id") != template_id]
         return self.save(self.presets)
+
+    def update_persona_memory(self, name: str, memory: str) -> bool:
+        """Persist auto-maintained continuity notes for a saved/active persona."""
+        name = (name or "").strip()
+        memory = (memory or "").strip()
+        if not name:
+            return False
+
+        changed = False
+        custom = self.presets.get("custom")
+        if isinstance(custom, dict) and custom.get("character_name") == name:
+            if custom.get("persona_memory", "") != memory:
+                custom["persona_memory"] = memory
+                changed = True
+
+        templates = self.presets.get("user_templates", [])
+        if isinstance(templates, list):
+            for template in templates:
+                if isinstance(template, dict) and template.get("name") == name:
+                    if template.get("persona_memory", "") != memory:
+                        template["persona_memory"] = memory
+                        changed = True
+
+        return self.save(self.presets) if changed else True
 
     def get_group_presets(self) -> list:
         """Get saved group chat presets."""

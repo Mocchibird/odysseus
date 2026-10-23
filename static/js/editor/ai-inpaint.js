@@ -45,7 +45,7 @@ import { state } from './state.js';
 export function wireInpaintButtons({
   buildMergedMaskCanvas, dilateMask, applyInpaintFeather,
   getSelectedAIEndpoint, ensureActiveMaskLayer,
-  saveState, createLayer, composite, renderLayerPanel,
+  saveState, createLayer, composite, flatten, renderLayerPanel,
   spinnerModule, uiModule,
 }) {
   // Shared inpaint runner — used by Generate, Remove, and Outpaint.
@@ -110,16 +110,7 @@ export function wireInpaintButtons({
     } catch (_) { /* overlay is decorative */ }
     try {
       // Flatten current image.
-      const flatCanvas = document.createElement('canvas');
-      flatCanvas.width = state.imgWidth; flatCanvas.height = state.imgHeight;
-      const flatCtx = flatCanvas.getContext('2d');
-      for (const layer of state.layers) {
-        if (!layer.visible) continue;
-        flatCtx.globalAlpha = layer.opacity;
-        const off = state.layerOffsets.get(layer.id) || { x: 0, y: 0 };
-        flatCtx.drawImage(layer.canvas, off.x, off.y);
-      }
-      flatCtx.globalAlpha = 1;
+      const flatCanvas = flatten();
       // Dilate the user's brush mask before sending to the model.
       // The AI fills a small buffer zone around the brush, so the
       // post-gen Edge feather slider has AI content to fade INTO
@@ -136,6 +127,10 @@ export function wireInpaintButtons({
       const dilatedMask = dilateMask(mergedMask, padPx);
       const imageB64 = flatCanvas.toDataURL('image/png').split(',')[1];
       const maskB64 = dilatedMask.toDataURL('image/png').split(',')[1];
+      const baseSnap = document.createElement('canvas');
+      baseSnap.width = state.imgWidth;
+      baseSnap.height = state.imgHeight;
+      baseSnap.getContext('2d').drawImage(flatCanvas, 0, 0);
       const res = await fetch('/api/image/inpaint', {
         method: 'POST', credentials: 'same-origin',
         headers: { 'Content-Type': 'application/json' },
@@ -180,7 +175,7 @@ export function wireInpaintButtons({
           maskSnap.width = state.maskCanvas.width;
           maskSnap.height = state.maskCanvas.height;
           maskSnap.getContext('2d').drawImage(state.maskCanvas, 0, 0);
-          resultLayer.inpaintSource = { ai: aiSnap, mask: maskSnap, padPx };
+          resultLayer.inpaintSource = { ai: aiSnap, mask: maskSnap, base: baseSnap, padPx };
           // Apply initial alpha = hard mask (no feather, no edge shift).
           applyInpaintFeather(resultLayer, 0, 0);
           state.layers.push(resultLayer);
@@ -192,7 +187,9 @@ export function wireInpaintButtons({
           // on each sub-row's eye icon.
           for (const ly of state.layers) {
             if (!ly.masks || !ly.masks.length) continue;
-            for (const mk of ly.masks) mk.visible = false;
+            for (const mk of ly.masks) {
+              if (mk.mode !== 'layer') mk.visible = false;
+            }
           }
           composite();
           renderLayerPanel();
@@ -216,7 +213,9 @@ export function wireInpaintButtons({
           const eRow = document.getElementById('ge-inpaint-edgestroke-row');
           const eSlider = document.getElementById('ge-edgestroke-slider');
           const eLabel = document.getElementById('ge-edgestroke-label');
+          const autoRow = document.getElementById('ge-inpaint-automatch-row');
           if (eRow) eRow.style.display = '';
+          if (autoRow) autoRow.style.display = '';
           if (eSlider) {
             eSlider.max = String(padPx);
             eSlider.min = String(-padPx);

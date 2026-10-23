@@ -11,6 +11,7 @@ import shutil
 import subprocess
 import uuid
 import tempfile
+import time
 from collections import namedtuple
 from pathlib import Path
 from typing import Dict, Any
@@ -22,6 +23,7 @@ from src.host_docker_access import (
     running_in_container as _running_in_container,
 )
 from src.optional_deps import prepare_optional_dependency_import
+from src.auth_helpers import _auth_disabled
 
 # POSIX-only: `pty`/`fcntl` transitively import `termios`, which does NOT exist
 # on Windows, so importing them unconditionally crashed app startup there
@@ -46,6 +48,7 @@ from core.platform_compat import (
     IS_WINDOWS,
     detached_popen_kwargs,
     find_bash,
+    git_bash_path,
 )
 
 # rembg install extra. Defaults to "cpu": the default Odysseus image is CPU-only
@@ -59,6 +62,11 @@ _REMBG_EXTRA = (os.getenv("ODYSSEUS_REMBG_EXTRA") or "cpu").strip()
 def _require_admin(request: Request):
     """Reject non-admin callers. Shell exec is admin-only — never expose to
     regular users; that's RCE-after-signup."""
+    # In the explicitly single-user, auth-disabled deployment the middleware
+    # does not attach a current user. AuthManager is still instantiated by the
+    # app, so checking only for its presence incorrectly returns 403 here.
+    if _auth_disabled():
+        return
     auth_manager = getattr(request.app.state, "auth_manager", None)
     if not auth_manager:
         # No auth at all — only safe in fully-trusted localhost dev mode
@@ -83,6 +91,13 @@ def _reject_cross_site(request: Request):
 
 _SSH_PORT_RE = re.compile(r"^\d{1,5}$")
 _SAFE_VENV_RE = re.compile(r"^[A-Za-z0-9_./~-]+$")
+
+# Dependency probes can involve several SSH/import checks. Keep the result
+# briefly so the Dependencies tab and a pre-launch check arriving together do
+# not repeat the same expensive work. Installation clears this cache.
+_PACKAGE_STATUS_CACHE: dict[tuple[str, ...], tuple[float, dict[str, Any]]] = {}
+_PACKAGE_STATUS_CACHE_TTL = 3.0
+_PACKAGE_STATUS_CACHE_MAX = 64
 
 
 def _ssh_base_argv(host: str, ssh_port: str | None) -> list[str]:
@@ -163,6 +178,7 @@ def _package_installed_from_probe(name: str, probe: dict) -> bool:
     binaries = probe.get("binaries") if isinstance(probe.get("binaries"), dict) else {}
     dists = probe.get("dists") if isinstance(probe.get("dists"), dict) else {}
     modules = probe.get("modules") if isinstance(probe.get("modules"), dict) else {}
+    files = probe.get("files") if isinstance(probe.get("files"), dict) else {}
 
     if name == "vllm":
         return bool(binaries.get("vllm"))
@@ -177,6 +193,29 @@ def _package_installed_from_probe(name: str, probe: dict) -> bool:
             (dists.get("diffusers") or modules.get("diffusers", {}).get("real_module"))
             and (dists.get("torch") or modules.get("torch", {}).get("real_module"))
         )
+    if name == "krea_diffusers":
+        return bool(
+            (dists.get("diffusers") or modules.get("diffusers", {}).get("real_module"))
+            and (dists.get("torch") or modules.get("torch", {}).get("real_module"))
+        )
+    if name == "sam_mask":
+        return bool(
+            (dists.get("transformers") or modules.get("transformers", {}).get("real_module"))
+            and (dists.get("torch") or modules.get("torch", {}).get("real_module"))
+        )
+    if name == "office_docs":
+        return bool(
+            dists.get("markitdown")
+            or modules.get("markitdown", {}).get("real_module")
+            or dists.get("python-docx")
+            or modules.get("docx", {}).get("real_module")
+        )
+    if name == "psd_tools":
+        return bool(dists.get("psd-tools") or modules.get("psd_tools", {}).get("real_module"))
+    if name == "pymupdf":
+        return bool(dists.get("PyMuPDF") or modules.get("fitz", {}).get("real_module"))
+    if name == "libreoffice":
+        return bool(binaries.get("soffice") or binaries.get("libreoffice"))
     if name == "hf_transfer":
         return bool(
             dists.get("hf-transfer")
@@ -189,6 +228,7 @@ def _package_status_note(name: str, probe: dict) -> str:
     binaries = probe.get("binaries") if isinstance(probe.get("binaries"), dict) else {}
     modules = probe.get("modules") if isinstance(probe.get("modules"), dict) else {}
     dists = probe.get("dists") if isinstance(probe.get("dists"), dict) else {}
+    files = probe.get("files") if isinstance(probe.get("files"), dict) else {}
     module = modules.get(name) if isinstance(modules.get(name), dict) else {}
     locations = module.get("locations") or []
     if name == "vllm":
@@ -218,6 +258,36 @@ def _package_status_note(name: str, probe: dict) -> str:
         if _package_installed_from_probe(name, probe):
             return f"diffusers {dists.get('diffusers', 'available')} with torch {dists.get('torch', 'available')}"
         return "Diffusers serving needs both diffusers and torch."
+    if name == "krea_diffusers":
+        if _package_installed_from_probe(name, probe):
+            return f"Latest Diffusers runtime: diffusers {dists.get('diffusers', 'available')} with torch {dists.get('torch', 'available')}. Use Update/Reinstall to pull latest Diffusers from Git."
+        return "Some newer image models need torch plus latest Diffusers from Git."
+    if name == "sam_mask":
+        if _package_installed_from_probe(name, probe):
+            return f"SAM object masks: transformers {dists.get('transformers', 'available')} with torch {dists.get('torch', 'available')}"
+        return "SAM click/object mask selection needs transformers and torch."
+    if name == "office_docs":
+        if _package_installed_from_probe(name, probe):
+            if dists.get("markitdown"):
+                return f"Office document extraction: markitdown {dists['markitdown']}"
+            if dists.get("python-docx"):
+                return f"Word document extraction: python-docx {dists['python-docx']}"
+            return "Office document extraction available"
+        return "Office attachments need MarkItDown for full fidelity; DOCX has a basic built-in fallback."
+    if name == "psd_tools":
+        if _package_installed_from_probe(name, probe):
+            return f"PSD support: psd-tools {dists.get('psd-tools', 'available')}"
+        return "PSD files need psd-tools for layer/image parsing."
+    if name == "pymupdf":
+        if _package_installed_from_probe(name, probe):
+            return f"PDF forms/rendering: PyMuPDF {dists.get('PyMuPDF', 'available')}"
+        return "Advanced PDF open/render/form features need PyMuPDF."
+    if name == "libreoffice":
+        if binaries.get("soffice"):
+            return f"DOCX signable preview converter: {binaries['soffice']}"
+        if binaries.get("libreoffice"):
+            return f"DOCX signable preview converter: {binaries['libreoffice']}"
+        return "DOCX signing preview needs LibreOffice/soffice to convert Word files to PDF."
     if name == "mlx_lm":
         if _package_installed_from_probe(name, probe):
             return f"MLX LM {dists.get('mlx-lm', 'available')}"
@@ -321,11 +391,18 @@ dist_names={{
     'sglang':['sglang'],
     'mlx_lm':['mlx-lm'],
     'diffusers':['diffusers','torch'],
+    'krea_diffusers':['diffusers','torch'],
+    'sam_mask':['transformers','torch'],
+    'office_docs':['markitdown','python-docx'],
+    'psd_tools':['psd-tools'],
+    'pymupdf':['PyMuPDF'],
+    'libreoffice':[],
     'hf_transfer':['hf-transfer','hf_transfer'],
 }}
 bin_names={{
     'vllm':['vllm'],
     'llama_cpp':['llama-server'],
+    'libreoffice':['soffice', 'libreoffice'],
     'tmux':['tmux'],
 }}
 
@@ -376,9 +453,17 @@ def probe(n):
     mods = {{n: mod_status(n)}}
     if n == 'diffusers':
         mods['torch'] = mod_status('torch')
+    if n == 'office_docs':
+        mods['markitdown'] = mod_status('markitdown')
+        mods['docx'] = mod_status('docx')
+    if n == 'psd_tools':
+        mods['psd_tools'] = mod_status('psd_tools')
+    if n == 'pymupdf':
+        mods['fitz'] = mod_status('fitz')
     dists = dist_status(dist_names.get(n, [n]))
     bins = {{b: shutil.which(b) for b in bin_names.get(n, [])}}
-    return {{'modules': mods, 'dists': dists, 'binaries': bins}}
+    files = {{}}
+    return {{'modules': mods, 'dists': dists, 'binaries': bins, 'files': files}}
 
 print(json.dumps({{n: probe(n) for n in names}}))
 """
@@ -462,8 +547,16 @@ async def _create_shell(command: str, **kwargs):
     POSIX: /bin/sh via create_subprocess_shell (unchanged behaviour).
     Windows: prefer a real bash (Git Bash/WSL) so bash-syntax commands behave
     the same as on Linux; fall back to cmd.exe when no bash is installed.
+    Powershell commands are executed directly via cmd.exe /c to avoid quoting
+    and env variable expansion errors under Git Bash.
     """
     if IS_WINDOWS:
+        # PowerShell commands (used by the frontend for Windows log-file polling
+        # and session management) must run directly — passing them through
+        # bash -c mangles $env:VAR syntax and breaks the command.
+        cmd_trim = command.strip()
+        if cmd_trim.startswith("powershell") or cmd_trim.startswith("cmd "):
+            return await asyncio.create_subprocess_shell(command, **kwargs)
         bash = find_bash()
         if bash:
             return await asyncio.create_subprocess_exec(bash, "-c", command, **kwargs)
@@ -775,8 +868,8 @@ async def _generate_win_detached(cmd: str, request: Request):
     if bash:
         script_path = TMUX_LOG_DIR / f"{session_id}.sh"
         script_path.write_text(
-            f"{cmd} > {shlex.quote(str(log_path))} 2>&1\n"
-            f"echo $? > {shlex.quote(str(exit_path))}\n",
+            f"{cmd} > {shlex.quote(git_bash_path(log_path))} 2>&1\n"
+            f"echo $? > {shlex.quote(git_bash_path(exit_path))}\n",
             encoding="utf-8",
         )
         argv = [bash, str(script_path)]
@@ -1044,6 +1137,7 @@ def setup_shell_routes() -> APIRouter:
         "make":            {"debian": ["make"], "arch": ["make"], "fedora": ["make"], "alpine": ["make"], "suse": ["make"], "macos": []},
         "git":             {"debian": ["git"], "arch": ["git"], "fedora": ["git"], "alpine": ["git"], "suse": ["git"], "macos": ["git"]},
         "tmux":            {"debian": ["tmux"], "arch": ["tmux"], "fedora": ["tmux"], "alpine": ["tmux"], "suse": ["tmux"], "macos": ["tmux"]},
+        "libreoffice":     {"debian": ["libreoffice"], "arch": ["libreoffice-fresh"], "fedora": ["libreoffice"], "alpine": ["libreoffice"], "suse": ["libreoffice"], "macos": ["--cask", "libreoffice"]},
     }
     _BACKEND_EXTRAS = {
         "cuda":   {"debian": ["nvidia-cuda-toolkit"], "arch": ["cuda"], "fedora": ["cuda-toolkit"], "alpine": [], "suse": ["cuda"], "macos": []},
@@ -1086,6 +1180,8 @@ def setup_shell_routes() -> APIRouter:
         ssh_port: str | None = None,
         venv: str | None = None,
         backend: str | None = None,
+        platform: str | None = None,
+        model_hint: str | None = None,
     ):
         """Check which optional packages are installed.
 
@@ -1102,6 +1198,17 @@ def setup_shell_routes() -> APIRouter:
         import site
         import sys
 
+        platform_l = (platform or "").strip().lower()
+        package_cache_key = (
+            (host or "").strip(),
+            (ssh_port or "").strip(),
+            (venv or "").strip(),
+            (backend or "").strip().lower(),
+            platform_l,
+        )
+        cached_status = _PACKAGE_STATUS_CACHE.get(package_cache_key)
+        if cached_status and time.monotonic() - cached_status[0] < _PACKAGE_STATUS_CACHE_TTL:
+            return cached_status[1]
         _prepend_user_install_bins_to_path()
         importlib.invalidate_caches()
         try:
@@ -1156,7 +1263,7 @@ def setup_shell_routes() -> APIRouter:
                 "name": "hf_transfer",
                 "pip": "hf_transfer",
                 "desc": "Fast model downloads from HuggingFace",
-                "category": "LLM",
+                "category": "Tools",
                 "target": "remote",
             },
             {
@@ -1208,8 +1315,15 @@ def setup_shell_routes() -> APIRouter:
             # ── Image ── editor + diffusion model serving
             {
                 "name": "diffusers",
-                "pip": "diffusers[torch]",
-                "desc": "Image generation/editing pipelines (SD, Flux) with PyTorch",
+                "pip": "diffusers[torch] torchvision accelerate scipy python-multipart",
+                "desc": "Image generation/editing pipelines with PyTorch and Diffusers",
+                "category": "Image",
+                "target": "remote",
+            },
+            {
+                "name": "krea_diffusers",
+                "pip": "git+https://github.com/huggingface/diffusers.git torchvision accelerate scipy python-multipart",
+                "desc": "Latest Diffusers from Git for newly released image pipelines",
                 "category": "Image",
                 "target": "remote",
             },
@@ -1219,6 +1333,13 @@ def setup_shell_routes() -> APIRouter:
                 "desc": "Hugging Face model components used by SD/Flux pipelines and image tools",
                 "category": "Image",
                 "target": "remote",
+            },
+            {
+                "name": "sam_mask",
+                "pip": "torch torchvision transformers accelerate pillow",
+                "desc": "Neutral click/box/object segmentation masks for the image editor",
+                "category": "Image",
+                "target": "local",
             },
             {
                 "name": "rembg",
@@ -1240,6 +1361,13 @@ def setup_shell_routes() -> APIRouter:
                 "category": "Image",
                 "target": "local",
             },
+            {
+                "name": "psd_tools",
+                "pip": "psd-tools",
+                "desc": "Open Photoshop PSD files and inspect flattened/layered image data",
+                "category": "Image",
+                "target": "local",
+            },
             # ── Tools ──
             {
                 "name": "playwright",
@@ -1248,6 +1376,31 @@ def setup_shell_routes() -> APIRouter:
                 "category": "Tools",
                 "target": "local",
             },
+            {
+                "name": "office_docs",
+                "pip": "markitdown[docx,pptx,xlsx,xls]",
+                "desc": "Open Office attachments and documents (.docx, .pptx, .xlsx, .xls) as readable Markdown",
+                "category": "Tools",
+                "target": "local",
+            },
+            {
+                "name": "pymupdf",
+                "pip": "PyMuPDF",
+                "desc": "Advanced PDF opening, rendering, forms, annotations, and signatures",
+                "category": "Tools",
+                "target": "local",
+            },
+            {
+                "name": "libreoffice",
+                "pip": "",
+                "desc": "Convert DOCX attachments to signable PDF previews",
+                "category": "Tools",
+                "target": "local",
+                "kind": "system",
+                "system_prereqs": ["libreoffice"],
+                "install_cmd": "sudo apt install -y libreoffice || brew install --cask libreoffice",
+                "install_hint": "Install LibreOffice/soffice where Odysseus runs to open DOCX attachments as signable PDF previews. Without it, DOCX opens as readable Markdown.",
+            },
         ]
 
         # Most packages should not be installed through external means. Hence, set the default of the
@@ -1255,6 +1408,10 @@ def setup_shell_routes() -> APIRouter:
         for pkg in packages:
             pkg.setdefault("install_cmd", None)
             pkg.setdefault("update_cmd", None)
+        # Keep the Image section complete. Dependency visibility is a product
+        # capability decision, not a substring test against a model id. Model
+        # catalogs may declare an explicit runtime package, while the generic
+        # backend preflight handles ordinary models.
         # Remote check: for remote-target packages, probe the selected server's
         # venv over SSH so a remote `pip install` actually reflects here.
         remote_status: dict = {}
@@ -1385,6 +1542,8 @@ def setup_shell_routes() -> APIRouter:
                 target_os_id = ""
             if sys.platform == "darwin":
                 target_os_id = "macos"
+        if not target_os_id and platform_l in {"darwin", "macos", "mac"}:
+            target_os_id = "macos"
 
         for pkg in packages:
             on_remote = bool(host and pkg.get("target") == "remote")
@@ -1410,6 +1569,14 @@ def setup_shell_routes() -> APIRouter:
                         "Available on Apple Silicon (arm64) devices; exposed through a local OpenAI-compatible API."
                         if IS_APPLE_SILICON
                         else "Requires a native Apple Silicon Mac with Apple Foundational Models support."
+                    )
+                elif pkg["name"] == "libreoffice":
+                    soffice_path = shutil.which("soffice") or shutil.which("libreoffice")
+                    pkg["installed"] = soffice_path is not None
+                    pkg["status_note"] = (
+                        f"DOCX signable preview converter: {soffice_path}"
+                        if soffice_path
+                        else "DOCX signing preview needs LibreOffice/soffice."
                     )
                 else:
                     pkg["installed"] = shutil.which(pkg["name"]) is not None
@@ -1447,12 +1614,13 @@ def setup_shell_routes() -> APIRouter:
                 except (Exception, SystemExit):
                     # Installed but crashes on import — e.g. a CUDA build of
                     # llama-cpp-python raising FileNotFoundError when the CUDA
-                    # toolkit dir is absent, or rembg calling sys.exit(1) (→
-                    # SystemExit, which is a BaseException and slips past a bare
-                    # `except Exception`) when onnxruntime can't load libcudart.
-                    # One broken optional package must not tear down the packages
-                    # panel — or, since SystemExit unwinds all the way to the
-                    # ASGI lifespan, the whole server. Report it as not usable.
+                    # toolkit dir is absent, or rembg calling sys.exit(1) when no
+                    # onnxruntime backend can be loaded. SystemExit is a
+                    # BaseException, not Exception, so without catching it here a
+                    # single sys.exit-on-import package escapes and takes down the
+                    # whole packages panel / worker (the panel hangs forever). One
+                    # broken optional package must not 500 — or hang — the entire
+                    # panel; report it as not usable.
                     pkg["installed"] = False
 
             # llama_cpp partial-state probe: when the package is installed
@@ -1571,7 +1739,12 @@ def setup_shell_routes() -> APIRouter:
                 )
                 pkg["applicable"] = status.applicable
                 pkg["install_hint"] = status.install_hint
-        return {"packages": packages}
+        result = {"packages": packages}
+        if len(_PACKAGE_STATUS_CACHE) >= _PACKAGE_STATUS_CACHE_MAX:
+            oldest_key = min(_PACKAGE_STATUS_CACHE, key=lambda key: _PACKAGE_STATUS_CACHE[key][0])
+            _PACKAGE_STATUS_CACHE.pop(oldest_key, None)
+        _PACKAGE_STATUS_CACHE[package_cache_key] = (time.monotonic(), result)
+        return result
 
     @router.post("/api/cookbook/packages/install")
     async def install_package(request: Request):
@@ -1593,6 +1766,7 @@ def setup_shell_routes() -> APIRouter:
             "sglang[all]",
             "diffusers",
             "diffusers[torch]",
+            "git+https://github.com/huggingface/diffusers.git",
             "transformers",
             "TTS",
             "bark",
@@ -1614,6 +1788,7 @@ def setup_shell_routes() -> APIRouter:
             *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
         )
         stdout, stderr = await proc.communicate()
+        _PACKAGE_STATUS_CACHE.clear()
         if proc.returncode == 0:
             return {"ok": True, "output": stdout.decode()[-200:]}
         return {"ok": False, "error": stderr.decode()[-300:]}
@@ -1636,7 +1811,7 @@ def setup_shell_routes() -> APIRouter:
         ssh_port = body.get("ssh_port")
         # Names users can request — must match canonical names used in the
         # deps catalog's `system_prereqs` field and on the System rows.
-        ALLOWED = {"cmake", "build-essential", "g++", "gcc", "git", "tmux", "make"}
+        ALLOWED = {"cmake", "build-essential", "g++", "gcc", "git", "tmux", "make", "libreoffice"}
         pkgs = [str(p).strip() for p in raw if str(p).strip() in ALLOWED]
         if not pkgs:
             return {"ok": False, "error": "no installable packages requested (allowlist: " + ", ".join(sorted(ALLOWED)) + ")"}
@@ -1666,7 +1841,15 @@ def setup_shell_routes() -> APIRouter:
                 else: out.append(n)
             return out
         def _brew(names):
-            return [n for n in names if n not in ("build-essential", "g++", "gcc", "make")]
+            out = []
+            for n in names:
+                if n in ("build-essential", "g++", "gcc", "make"):
+                    continue
+                if n == "libreoffice":
+                    out += ["--cask", "libreoffice"]
+                else:
+                    out.append(n)
+            return out
         # Build a single shell snippet that detects the package manager and
         # runs the right install. Non-interactive sudo (-n) only — if sudo
         # asks for a password the script reports it instead of hanging.
@@ -1732,6 +1915,7 @@ def setup_shell_routes() -> APIRouter:
             combined = err_txt or tail_out or f"exit code {proc.returncode}"
         else:
             combined = None
+        _PACKAGE_STATUS_CACHE.clear()
         return {
             "ok": ok,
             "exit_code": proc.returncode,
