@@ -8,15 +8,13 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-# Importing core.database below runs init_db() at import time, and its default
-# (sqlite:///./data/app.db) can't be opened in a clean worktree because SQLite
-# won't create the missing ./data parent dir - pytest then dies during
-# collection, before any test module loads. Default to an in-memory DB for the
-# test session so collection is deterministic and writes no repo-local
-# artifacts. An explicit DATABASE_URL (a real test/CI database) is preserved.
-# This only unblocks collection/import-time init; it does not provide a shared
-# file-backed DB across processes - tests needing that must set DATABASE_URL.
-os.environ.setdefault("DATABASE_URL", "sqlite:///:memory:")
+# Isolate import-time database and filesystem defaults before collection.
+# File-backed databases remain fixture-owned. Cleanup restores the caller.
+# Keep the existing generated environment-reference locations stable.
+_database_environment = pytest.MonkeyPatch()
+_database_environment.setenv("DATABASE_URL", "sqlite:///:memory:")
+from tests.helpers.worker_runtime import bootstrap_runtime, configure_runtime
+_runtime_environment = bootstrap_runtime()
 
 # Pre-import real heavy modules BEFORE any test file's module-level stubs can
 # replace them with MagicMock. Some test files (e.g. test_llm_core_sanitize_*)
@@ -66,6 +64,37 @@ if "src.database" not in sys.modules:
 # collection, which breaks session import in subsequent tests).
 import core.models  # noqa: E402
 
+def pytest_addoption(parser):
+    """Add ``--shard N/M`` so CI can run the suite as parallel sections."""
+    group = parser.getgroup("sharding", "parallel test sharding")
+    group.addoption(
+        "--shard",
+        action="store",
+        default=None,
+        metavar="N/M",
+        help=(
+            "run only shard N of M (1-based), e.g. --shard 1/4. Shards partition "
+            "the suite by test file, so together they run every test exactly "
+            "once. See tests/_shards.py."
+        ),
+    )
+
+
+def _shard_spec(config):
+    """Parse the ``--shard`` option into a ShardSpec, or None when unset."""
+    from tests._shards import ShardSpecError, parse_shard_spec
+
+    value = config.getoption("shard")
+    if value is None:
+        return None
+    try:
+        return parse_shard_spec(value)
+    except ShardSpecError as error:
+        # UsageError fails the run immediately rather than silently running a
+        # subset nobody asked for - a dropped shard is invisible in a green CI.
+        raise pytest.UsageError(str(error)) from error
+
+
 def pytest_configure(config):
     """Register the dynamic taxonomy ``sub_*`` markers before collection.
 
@@ -74,6 +103,8 @@ def pytest_configure(config):
     unknown-mark warnings still surface genuine typos outside the taxonomy. This
     only registers marker names; it imports no production module.
     """
+    config.add_cleanup(_database_environment.undo)
+
     import pathlib
     from tests._taxonomy import discover_markers
 
@@ -83,21 +114,54 @@ def pytest_configure(config):
         if marker_name.startswith("sub_"):
             config.addinivalue_line("markers", f"{marker_name}: taxonomy sub-area marker")
 
+    # Validate --shard before collection so a bad selector fails the run up
+    # front instead of after a few minutes of collecting.
+    _shard_spec(config)
+
 
 def pytest_collection_modifyitems(config, items):
-    """Tag each collected test with its taxonomy ``area_*`` and ``sub_*`` markers.
+    """Tag each collected test with its taxonomy markers, then apply ``--shard``.
 
-    Collection-time only: this adds markers and nothing else. It does not skip,
-    reorder, or deselect tests, mutate fixtures or the environment, or import any
+    Tagging is collection-time only: it adds markers and nothing else. It does
+    not skip, reorder, mutate fixtures or the environment, or import any
     production module. See ``tests/_taxonomy.py`` for the classification rules.
+
+    Sharding deselects the test files that belong to another shard. It runs
+    after collection, so every test module is still imported, in the same order,
+    in every shard - the import-time stubbing above behaves identically whether
+    the suite runs whole or as one section of it. Only the deselected tests'
+    call phase is skipped. See ``tests/_shards.py`` for the partition.
     """
-    import pytest
     from tests._taxonomy import markers_for_path
 
     for item in items:
         path = getattr(item, "path", None) or item.fspath
         for marker_name in markers_for_path(path):
             item.add_marker(getattr(pytest.mark, marker_name))
+
+    spec = _shard_spec(config)
+    if spec is None or spec.selects_everything:
+        return
+
+    from tests._shards import accumulate_file_weights, plan_shards, relative_file_key
+
+    root = getattr(config, "rootpath", None)
+    keys = [
+        relative_file_key(getattr(item, "path", None) or item.fspath, root)
+        for item in items
+    ]
+    weights = accumulate_file_weights(
+        (key, item.get_closest_marker("slow") is not None)
+        for key, item in zip(keys, items)
+    )
+    selected_files = plan_shards(weights, spec.count)[spec.index - 1]
+
+    selected, deselected = [], []
+    for key, item in zip(keys, items):
+        (selected if key in selected_files else deselected).append(item)
+    if deselected:
+        config.hook.pytest_deselected(items=deselected)
+    items[:] = selected
 
 
 # ---------------------------------------------------------------------------
@@ -164,8 +228,8 @@ def _serve_test_static():
                 return "text/css"
             return super().guess_type(path)
 
-    class _Server(socketserver.TCPServer):
-        allow_reuse_address = True
+    class _Server(socketserver.ThreadingTCPServer):
+        allow_reuse_address = daemon_threads = True
 
     requested = int(os.environ.get("ODYSSEUS_TEST_STATIC_PORT") or 0)
     if not 0 <= requested <= 65535:
@@ -183,6 +247,8 @@ def _serve_test_static():
     previous_origin = os.environ.get("ODYSSEUS_TEST_STATIC_ORIGIN")
     os.environ["ODYSSEUS_TEST_STATIC_ORIGIN"] = origin
 
+    # One thread per connection: Chromium can hold a speculative connection
+    # open without a request, which stalled serial service for ~30s.
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
@@ -194,6 +260,28 @@ def _serve_test_static():
             os.environ["ODYSSEUS_TEST_STATIC_ORIGIN"] = previous_origin
         server.shutdown()
         server.server_close()
+
+
+@pytest.fixture(scope="session")
+def _effects_store_root(tmp_path_factory):
+    return tmp_path_factory.mktemp("effects")
+
+
+@pytest.fixture(autouse=True)
+def _isolated_effects_store(_effects_store_root):
+    """Keep durable effect claims out of the developer's real data directory.
+
+    Restored manually: requesting the shared ``monkeypatch`` here would move
+    its teardown after ``_no_leaked_module_stubs`` and misreport test stubs.
+    """
+    from src.agent_runtime import effect_log
+
+    previous = effect_log.EFFECTS_DIR
+    effect_log.EFFECTS_DIR = str(_effects_store_root)
+    try:
+        yield
+    finally:
+        effect_log.EFFECTS_DIR = previous
 
 
 @pytest.fixture(autouse=True)
@@ -296,3 +384,37 @@ def _no_context_window_network_probe(request):
 def context_probe_ledger(_no_context_window_network_probe):
     """Metadata requests the context resolver attempted during this test."""
     return _no_context_window_network_probe
+
+
+# Before pytest's tmpdir plugin reads the basetemp this sets.
+@pytest.hookimpl(specname="pytest_configure", tryfirst=True)
+def pytest_configure_worker_runtime(config):
+    configure_runtime(config, _runtime_environment)
+
+
+@pytest.hookimpl(specname="pytest_collection_modifyitems", tryfirst=True)
+def pytest_collection_worker_runtime(items):
+    # Mark before pytest applies -m. The final guard also respects --shard.
+    for item in items:
+        if "smoke" in item.path.parts:
+            item.add_marker(pytest.mark.serial)
+
+
+@pytest.hookimpl(tryfirst=True)
+def pytest_collection_finish(session):
+    """Refuse shared live resources after marker and shard deselection."""
+    config = session.config
+    parallel = bool(getattr(config.option, "numprocesses", None)) or hasattr(config, "workerinput")
+    if (os.environ.get("APP_PORT") and parallel
+            and any(item.get_closest_marker("serial") for item in session.items)):
+        message = (
+            "live smoke tests share one external application, accounts, and endpoints; "
+            "run tests/smoke with -n 0"
+        )
+        # A worker UsageError here races xdist's collection notification and
+        # can lose its message. Emit a normal collection failure before xdist
+        # sees any runnable items. Nothing may contact the external instance.
+        config.hook.pytest_collectreport(report=pytest.CollectReport(
+            nodeid="tests/smoke", outcome="failed", longrepr=message, result=[],
+        ))
+        session.items.clear()

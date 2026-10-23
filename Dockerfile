@@ -125,6 +125,9 @@ RUN pip install --no-cache-dir --no-deps /tmp/odysseus-wheels/*.whl \
 
 # Copy app code
 COPY . .
+# Require the redistribution notices in the image build context.
+COPY licenses/ ./licenses/
+COPY THIRD_PARTY_PROVENANCE.json ACKNOWLEDGMENTS.md ./
 
 # Minify the app's own JS/CSS in place (build-time only — the source on disk
 # stays un-minified for development). esbuild minifies both; static/lib is

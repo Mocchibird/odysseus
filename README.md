@@ -1,6 +1,4 @@
-<p align="center">
-  <img src="assets/branding/odysseus-wordmark.png" alt="Odysseus" width="238">
-</p>
+<h1 align="center">Odysseus</h1>
 
 # Odysseus
 
@@ -18,10 +16,6 @@
  ⊹ ࣪ ˖ ૮( ˶ᵔ ᵕ ᵔ˶ )っ  Odysseus vers. 1.0
 ───────────────────────────────────────────────
 ```
-
-<p align="center">
-  <img src="assets/branding/odysseus-browser.jpg" alt="Odysseus interface">
-</p>
 
 A self-hosted AI workspace -- meant to be the self-hosted version of the UI experience you get from ChatGPT and Claude. But with more jank and fun. Running on your own hardware, with your own data -- local-first, privacy-first, and no trojan.
 
@@ -43,23 +37,6 @@ A self-hosted AI workspace -- meant to be the self-hosted version of the UI expe
 
 ## Demo
 A full, hover-to-play tour lives on the landing page (`website/index.html`).
-
-<details>
-<summary>Screenshots / clips</summary>
-
-The clips below are the same ones the landing page plays. GitHub does not render
-`.webm` inline, so they are links — or open `website/index.html` locally for the
-hover-to-play tour.
-
-- [Chat & Agents](website/chat.webm)
-- [Deep Research](website/research.webm)
-- [Compare](website/compare.webm)
-- [Documents](website/document.webm)
-- [Notes & Tasks](website/notes.webm)
-- [Gallery](website/gallery.webm)
-- [Themes](website/theme.webm)
-
-</details>
 
 ## Quick Start
 
@@ -137,7 +114,7 @@ expose this port directly to the public internet. To build a clickable app wrapp
 ./build-macos-app.sh
 ```
 
-A full hover-to-play tour lives on the [Odysseus landing page](https://odysseus-dev.github.io/odysseus/). Its source lives under [`website/`](website/).
+The [Odysseus landing page](https://odysseus-dev.github.io/odysseus/) gives a text-only overview of each feature. Its source lives under [`website/`](website/).
 
 <details>
 <summary>Cookbook, GPU, Ollama, and troubleshooting notes</summary>

@@ -14,7 +14,6 @@ These tests pin both halves:
    web_fetching the HTML report.
 """
 import json
-from pathlib import Path
 
 import pytest
 
@@ -22,19 +21,13 @@ from src.tool_implementations import do_manage_research
 from src.agent_loop import TOOL_SECTIONS
 
 
-
 @pytest.fixture
-def saved_report():
-    # Resolve the store from the constant, not a CWD-relative literal: the
-    # implementation reads DEEP_RESEARCH_DIR, so a hardcoded "data/deep_research"
-    # both wrote into the repo and failed outright whenever ODYSSEUS_DATA_DIR
-    # pointed elsewhere (2 of the 3 tests here).
-    from src.constants import DEEP_RESEARCH_DIR
+def saved_report(tmp_path, monkeypatch):
+    from src.tools import research
 
-    data_dir = Path(DEEP_RESEARCH_DIR)
-    data_dir.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(research, "DEEP_RESEARCH_DIR", str(tmp_path))
     rid = "rp-testreport1363"
-    path = data_dir / f"{rid}.json"
+    path = tmp_path / f"{rid}.json"
     path.write_text(json.dumps({
         "query": "trending blender video ideas",
         "result": "## Findings\nShort-form Geometry Nodes tutorials are trending.",

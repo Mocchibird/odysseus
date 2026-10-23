@@ -28,6 +28,18 @@ _BINARY_ARTIFACT_SUFFIXES = _STRUCTURED_DOCUMENT_SUFFIXES | frozenset({
     ".png", ".wav", ".webm", ".webp", ".zip",
 })
 
+
+def _visible_bound_resource(path):
+    from src.agent_runtime.resource_binding import active_resource_operation
+    bound = active_resource_operation()
+    if bound is None:
+        return True
+    try:
+        bound.resolve_path(path)
+        return True
+    except (ValueError, OSError, RuntimeError):
+        return False
+
 # Models frequently put source artifacts in a Markdown code fence even when a
 # tool schema asks for the raw file body. Persisting that fence makes HTML,
 # CSS, JavaScript, and source files invalid. Restrict normalization to
@@ -223,6 +235,20 @@ def _unified_diff(old: str, new: str, path: str) -> Optional[Dict[str, Any]]:
         "file": os.path.basename(path) or (path or "file"),
     }
 
+def _edit_file_text(original: str, old: str, new: str, replace_all: bool) -> tuple[str | None, str]:
+    """The exact text edit_file writes for ``original``, or None and why not.
+
+    Pure: the effect adapter derives the requested post-state from this same
+    function, so the postcondition is the producer's own transformation.
+    """
+    count = original.count(old)
+    if count == 0:
+        return None, "not_found"
+    if count > 1 and not replace_all:
+        return None, f"not_unique:{count}"
+    return (original.replace(old, new) if replace_all else original.replace(old, new, 1)), "ok"
+
+
 class EditFileTool:
     async def execute(self, content: str, ctx: dict) -> dict:
         from src.tool_execution import _resolve_tool_path
@@ -257,26 +283,27 @@ class EditFileTool:
             # Exact replacement must not normalize unrelated CRLF/CR newlines.
             with open(path, "r", encoding="utf-8", newline="") as f:
                 original = f.read()
-            count = original.count(old)
-            if count == 0:
-                return original, None, "not_found"
-            if count > 1 and not replace_all:
-                return original, None, f"not_unique:{count}"
-            updated = original.replace(old, new) if replace_all else original.replace(old, new, 1)
+            updated, status = _edit_file_text(original, old, new, replace_all)
+            if updated is None:
+                return original, None, status
+            attempted.append(True)
             with open(path, "w", encoding="utf-8", newline="") as f:
                 f.write(updated)
             return original, updated, "ok"
 
+        # In-place rewrite: a failure after truncation may leave partial bytes.
+        attempted = []
+        partial = lambda: {"mutation_attempted": True} if attempted else {}
         try:
             original, updated, status = await asyncio.to_thread(_apply)
         except FileNotFoundError:
-            return {"error": f"edit_file: {path}: not found (use write_file to create it)", "exit_code": 1}
+            return {"error": f"edit_file: {path}: not found (use write_file to create it)", "exit_code": 1, **partial()}
         except (IsADirectoryError, UnicodeDecodeError):
-            return {"error": f"edit_file: {path}: not an editable text file", "exit_code": 1}
+            return {"error": f"edit_file: {path}: not an editable text file", "exit_code": 1, **partial()}
         except PermissionError:
-            return {"error": f"edit_file: {path}: permission denied", "exit_code": 1}
+            return {"error": f"edit_file: {path}: permission denied", "exit_code": 1, **partial()}
         except OSError as e:
-            return {"error": f"edit_file: {path}: {e}", "exit_code": 1}
+            return {"error": f"edit_file: {path}: {e}", "exit_code": 1, **partial()}
 
         if status == "not_found":
             return {"error": f"edit_file: old_string not found in {path}. Read the file and match it exactly.", "exit_code": 1}
@@ -450,6 +477,9 @@ class WriteFileTool:
                 "exit_code": 1,
                 "binary_artifact_preserved": target_existed,
             }
+        # This writer truncates in place. Once that stage is reached, a failure
+        # may leave a partial file; report it so effect evidence stays honest.
+        attempted = []
         try:
             def _write():
                 old = ""
@@ -461,14 +491,17 @@ class WriteFileTool:
                 d = os.path.dirname(path)
                 if d:
                     os.makedirs(d, exist_ok=True)
+                attempted.append(True)
                 with open(path, "w", encoding="utf-8") as f:
                     f.write(body)
                 return old, len(body)
             old_content, size = await asyncio.to_thread(_write)
         except PermissionError:
-            return {"error": f"write_file: {path}: permission denied", "exit_code": 1}
+            return {"error": f"write_file: {path}: permission denied", "exit_code": 1,
+                    **({"mutation_attempted": True} if attempted else {})}
         except OSError as e:
-            return {"error": f"write_file: {path}: {e}", "exit_code": 1}
+            return {"error": f"write_file: {path}: {e}", "exit_code": 1,
+                    **({"mutation_attempted": True} if attempted else {})}
         diff = _unified_diff(old_content, body, path)
         result = {
             "output": f"Wrote {size} bytes to {_display_tool_path(path)}",
@@ -750,7 +783,8 @@ class LsTool:
                     for entry in it:
                         if entry.name.startswith("."):
                             continue
-                        if _is_denied_tool_path(os.path.realpath(entry.path)):
+                        if (_is_denied_tool_path(os.path.realpath(entry.path))
+                                or not _visible_bound_resource(entry.path)):
                             continue
                         try:
                             is_dir = entry.is_dir(follow_symlinks=False)
@@ -824,7 +858,8 @@ class GlobTool:
                 # .ssh/id_rsa, …) falls through to the walk, which skips it —
                 # otherwise glob would surface secret paths that read_file /
                 # grep already refuse to touch.
-                if inside and os.path.exists(cand) and not _is_denied_tool_path(cand):
+                if (inside and os.path.exists(cand) and not _is_denied_tool_path(cand)
+                        and _visible_bound_resource(cand)):
                     return [cand], None
                 # Literal not at exact path — fall through to walk so
                 # e.g. "foo.py" still matches at any depth (like rglob).
@@ -853,7 +888,8 @@ class GlobTool:
                         if regex.fullmatch(rel) or regex.fullmatch(name):
                             # Skip deny-listed sensitive files (.env, id_rsa,
                             # known_hosts, …) the same way grep does.
-                            if _is_denied_tool_path(os.path.realpath(full)):
+                            if (_is_denied_tool_path(os.path.realpath(full))
+                                    or not _visible_bound_resource(full)):
                                 continue
                             try:
                                 mtime = os.stat(full).st_mtime
@@ -922,9 +958,13 @@ class GrepTool:
 
             from src.constants import DATA_DIR
 
+            from src.agent_runtime.resource_binding import active_resource_operation
+
             if not os.path.exists(root):
                 return None, f"grep: search target not found: {_display_tool_path(root)}"
-            rg = shutil.which("rg")
+            # The pathname-only fast path scans before individual resources can
+            # be checked. Bound searches must validate every file before read.
+            rg = None if active_resource_operation() is not None else shutil.which("rg")
             real_root = os.path.realpath(root)
             data_dir = os.path.realpath(DATA_DIR)
             spans_state = _path_within(data_dir, real_root)
