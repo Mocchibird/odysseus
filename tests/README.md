@@ -33,6 +33,8 @@ the sub-area. The `area_*` names are registered in `pyproject.toml`; the dynamic
 `sub_*` names are registered before collection by `pytest_configure` in
 `tests/conftest.py`, so unknown-mark warnings still flag genuine typos.
 
+The full suite does not come back clean on every machine. [KNOWN_FAILURES.md](KNOWN_FAILURES.md) lists which failures are expected, which are test bugs worth fixing, and the prerequisites a clean run needs; anything not on that list is a regression until shown otherwise.
+
 For common focused runs, use `tests/run_focus.py`. It validates area and
 sub-area names, accepts sub-areas with or without the `sub_` prefix, and passes
 extra pytest arguments after `--`:
@@ -136,6 +138,25 @@ depending on a particular order.
 The runner propagates pytest's exit code, so it composes with normal local
 workflows; "report-only" means it is not a CI gate, not that failures are
 swallowed.
+
+## CSS computed-style snapshot
+
+`tests/test_css_computed_style_snapshot.py` pins the rendered result of
+`static/style.css` - one 51k-line file whose behavior depends on source order -
+by hashing `getComputedStyle` over a fixed element inventory across pages,
+viewports, themes and density modes. Any PR that moves CSS has to produce an
+identical digest or explain why it did not.
+
+```bash
+./venv/bin/python -m pytest tests/test_css_computed_style_snapshot.py
+./venv/bin/python scripts/css_snapshot.py --check            # standalone, no pytest
+./venv/bin/python scripts/css_snapshot.py --write-baseline   # re-record, deliberately
+```
+
+The inventory, the baseline and the capture live in `tests/css_snapshot/`;
+`tests/css_snapshot/README.md` documents what is covered, what is deliberately
+not, and how to find the property that moved when it fails. The run takes about
+21 seconds and skips when `npm ci` has not been run.
 
 ## Core principles
 

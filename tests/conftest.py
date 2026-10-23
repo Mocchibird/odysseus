@@ -131,21 +131,22 @@ def _spill_files_go_to_tmp(tmp_path_factory):
 
 @pytest.fixture(scope="session", autouse=True)
 def _serve_test_static():
-    """Ensure static assets are available on loopback port 7011 for browser integration tests."""
-    import socket
+    """Serve static assets on loopback for the browser integration tests.
+
+    Binds an ephemeral port so several worktrees can run their own suite at the
+    same time, and publishes the resulting origin through
+    ``ODYSSEUS_TEST_STATIC_ORIGIN``.  The browser tests shell out to node, which
+    inherits the environment, so the snippets read the origin from
+    ``process.env`` instead of hardcoding a port.
+
+    Set ``ODYSSEUS_TEST_STATIC_PORT`` to pin a specific port when something
+    outside pytest has to reach this server.
+    """
+    import os
     import threading
     import http.server
     import socketserver
     from pathlib import Path
-
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    try:
-        is_bound = (sock.connect_ex(("127.0.0.1", 7011)) == 0)
-    finally:
-        sock.close()
-
-    if is_bound:
-        raise RuntimeError("port 7011 is already in use; browser tests require this worktree's static server")
 
     root_dir = Path(__file__).resolve().parent.parent
 
@@ -166,11 +167,68 @@ def _serve_test_static():
     class _Server(socketserver.TCPServer):
         allow_reuse_address = True
 
-    server = _Server(("127.0.0.1", 7011), _Handler)
+    requested = int(os.environ.get("ODYSSEUS_TEST_STATIC_PORT") or 0)
+    try:
+        server = _Server(("127.0.0.1", requested), _Handler)
+    except OSError as exc:
+        # Port 0 cannot collide, so this only fires for an explicit pin.
+        raise RuntimeError(
+            f"ODYSSEUS_TEST_STATIC_PORT={requested} is not bindable; unset it to "
+            "let the browser tests pick an ephemeral port"
+        ) from exc
+
+    origin = f"http://127.0.0.1:{server.server_address[1]}"
+    previous_origin = os.environ.get("ODYSSEUS_TEST_STATIC_ORIGIN")
+    os.environ["ODYSSEUS_TEST_STATIC_ORIGIN"] = origin
+
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
-        yield
+        yield origin
     finally:
+        if previous_origin is None:
+            os.environ.pop("ODYSSEUS_TEST_STATIC_ORIGIN", None)
+        else:
+            os.environ["ODYSSEUS_TEST_STATIC_ORIGIN"] = previous_origin
         server.shutdown()
         server.server_close()
+
+
+@pytest.fixture(autouse=True)
+def _no_leaked_module_stubs():
+    """Fail the test that leaves a bare ``src.*``/``core.*`` stub behind.
+
+    Several test modules install empty stand-in modules so an import-heavy
+    production module can be loaded under the mocks above. When one of those
+    writes is not undone, the stub stays in ``sys.modules`` for the rest of the
+    session and every later test that imports the real module silently gets an
+    empty one instead. The suite still passes as a whole, because the victims
+    usually run before the leak; it only breaks under a different collection
+    order, which is why this class of bug reaches CI green.
+
+    This fixture is declared in the root conftest, so it is set up before any
+    test-module fixture and torn down after all of them — a stub that a test's
+    own teardown removes is not reported. The leaked entries are dropped here
+    as well as reported, so the failure stays attributed to the test that
+    introduced it instead of cascading into the rest of the run.
+
+    Bare stubs present before the test starts are ignored: this guards against
+    new leaks, it does not police import state the session began with.
+    """
+    from tests.helpers.import_state import bare_module_stubs, clear_module
+
+    before = bare_module_stubs()
+    yield
+    leaked = sorted(bare_module_stubs() - before)
+    if not leaked:
+        return
+    for name in leaked:
+        clear_module(name)
+    pytest.fail(
+        "test left bare module stub(s) in sys.modules: "
+        + ", ".join(leaked)
+        + ". Register the stub through monkeypatch.setitem(sys.modules, ...) "
+        "or tests.helpers.import_state.preserve_import_state so it is undone "
+        "at teardown.",
+        pytrace=False,
+    )

@@ -19,6 +19,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import NullPool
 
 from tests.helpers.import_state import clear_fake_database_modules
+from tests.helpers.document_source import document_source
 
 clear_fake_database_modules()
 
@@ -222,7 +223,7 @@ def test_obsidian_extras_frontend_wiring_present():
 
     root = Path(__file__).resolve().parents[1]
     markdown = (root / "static" / "js" / "markdown.js").read_text(encoding="utf-8")
-    document = (root / "static" / "js" / "document.js").read_text(encoding="utf-8")
+    document = document_source()
     fork_css = (root / "static" / "fork.css").read_text(encoding="utf-8")
 
     # Renderer: `![[name]]` -> gallery-pending chip + the exported async resolver.
@@ -253,7 +254,7 @@ def test_live_refresh_wiring_present():
 
     root = Path(__file__).resolve().parents[1]
     j = lambda p: (root / "static" / "js" / p).read_text(encoding="utf-8")
-    document, chat = j("document.js"), j("chat.js")
+    document, chat = document_source(), j("chat.js")
     library, notes, tasks = j("documentLibrary.js"), j("notes.js"), j("tasks.js")
 
     # document.js: a single emit helper fired from user mutations AND the agent

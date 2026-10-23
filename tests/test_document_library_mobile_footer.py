@@ -3,11 +3,13 @@
 import json
 import subprocess
 from pathlib import Path
+from tests.helpers.stylesheets import app_css
+from tests.helpers.stylesheets import stylesheet_link_tags
 
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = (ROOT / "static/js/documentLibrary.js").read_text(encoding="utf-8")
-STYLE = (ROOT / "static/style.css").read_text(encoding="utf-8")
+STYLE = app_css()
 
 
 def test_mobile_footer_exposes_delete_open_and_more():
@@ -52,8 +54,8 @@ def test_mobile_open_in_new_chat_copies_to_materialized_session():
       import { chromium } from 'playwright';
       const browser = await chromium.launch({ headless: true });
       const page = await browser.newPage({ viewport: { width: 390, height: 844 }, hasTouch: true });
-      await page.goto('http://127.0.0.1:7011/static/js/documentStats.js');
-      await page.setContent('<link rel="stylesheet" href="/static/style.css?v=20260831richtexttools91"><div id="toast"></div><div id="chat-container"></div><div id="sidebar"></div>');
+      await page.goto(`${process.env.ODYSSEUS_TEST_STATIC_ORIGIN}/static/js/documentStats.js`);
+      await page.setContent('__ODY_STYLESHEETS__<div id="toast"></div><div id="chat-container"></div><div id="sidebar"></div>');
       const state = await page.evaluate(async () => {
         let currentSession = 'current-chat';
         let createDirectCalls = 0;
@@ -106,6 +108,7 @@ def test_mobile_open_in_new_chat_copies_to_materialized_session():
       console.log(JSON.stringify(state));
       await browser.close();
     """
+    script = script.replace("__ODY_STYLESHEETS__", stylesheet_link_tags())
     result = subprocess.run(
         ["node", "--input-type=module", "-e", script],
         cwd=ROOT,
