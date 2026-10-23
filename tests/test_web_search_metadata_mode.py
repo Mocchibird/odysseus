@@ -10,6 +10,27 @@ from src.agent_tools.web_tools import (
 )
 
 
+def test_long_report_preserves_late_source_through_tool_and_runtime(monkeypatch):
+    from src.clean_agent_preview import preview_tool_result_text
+    sources = [{'title': f'Page {i}', 'url': f'https://example.org/{i}'} for i in range(1, 6)]
+    report = '```sources\n' + '\n'.join(
+        f'[{i}] {s["title"]}\n    {s["url"]}' for i, s in enumerate(sources, 1)
+    ) + '\n```\nQuery: measured battery evidence\n'
+    for i, source in enumerate(sources, 1):
+        report += (f'\n[CONTENT {i}] From: {source["url"]}\nTitle: {source["title"]}\n------------------------------\n'
+                   + f'Unique evidence for page {i}. ' * 100
+                   + '\nTL;DR:\n' + 'Repeated body summary. ' * 200)
+    monkeypatch.setattr(search, 'comprehensive_web_search', lambda *a, **kw: (report, sources))
+    result = asyncio.run(WebSearchTool().execute(json.dumps({'query': 'measured battery evidence'}), {}))
+    observation = preview_tool_result_text(result, 'web_search', {})
+    assert len(observation) <= 8000
+    for i in range(1, 6):
+        assert f'[CONTENT {i}] From:' in observation
+        assert f'Unique evidence for page {i}.' in observation
+    assert 'Repeated body summary' not in observation
+    assert json.loads(result['output'].split('<!-- SOURCES:')[1].split(' -->')[0]) == sources
+
+
 @pytest.mark.parametrize('sources,status', [([], 'empty'),
     ([{'title': 'Example', 'url': 'https://example.org'}], 'available')])
 def test_search_reports_evidence_availability_independently_of_execution(monkeypatch, sources, status):
@@ -18,6 +39,24 @@ def test_search_reports_evidence_availability_independently_of_execution(monkeyp
     result = asyncio.run(WebSearchTool().execute(json.dumps({'query': 'example query'}), {}))
     assert result['exit_code'] == 0
     assert result['evidence_status'] == status
+
+
+@pytest.mark.parametrize('query', [
+    'Norway current events',
+    "What's happening in Norway",
+])
+def test_current_event_phrasing_uses_recent_search_mode(monkeypatch, query):
+    seen = {}
+
+    def search_call(*args, **kwargs):
+        seen.update(kwargs)
+        return 'Current reporting.', [{'title': 'Report', 'url': 'https://example.org/news'}]
+
+    monkeypatch.setattr(search, 'comprehensive_web_search', search_call)
+    result = asyncio.run(WebSearchTool().execute(json.dumps({'query': query}), {}))
+
+    assert result['evidence_status'] == 'available'
+    assert seen['time_filter'] == 'day'
 
 
 
@@ -141,3 +180,30 @@ def test_general_web_search_keeps_comprehensive_fetch(monkeypatch):
     assert result["exit_code"] == 0
     assert seen[0][0] == "best way to repair a bicycle tire"
     assert "full fetched answer" in result["output"]
+
+
+def test_general_web_search_degrades_to_metadata_when_content_fetch_times_out(monkeypatch):
+    monkeypatch.setattr(
+        search,
+        "comprehensive_web_search",
+        lambda *args, **kwargs: (_ for _ in ()).throw(asyncio.TimeoutError()),
+    )
+    monkeypatch.setattr(
+        search,
+        "searxng_search_results",
+        lambda query, count: [{
+            "title": "HTTP Semantics",
+            "url": "https://www.rfc-editor.org/rfc/rfc9110.html",
+            "snippet": "The Retry-After field indicates how long to wait.",
+        }],
+    )
+
+    result = asyncio.run(WebSearchTool().execute(
+        json.dumps({"query": "HTTP Retry-After semantics", "max_pages": 3}),
+        {},
+    ))
+
+    assert result["exit_code"] == 0
+    assert result["evidence_status"] == "available"
+    assert result["degraded_mode"] == "metadata_after_content_timeout"
+    assert "https://www.rfc-editor.org/rfc/rfc9110.html" in result["output"]

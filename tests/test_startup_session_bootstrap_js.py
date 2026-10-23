@@ -355,14 +355,6 @@ def results(tmp_path_factory):
             "import { registerEscapeLayer, bindMenuDismiss } from './escMenuStack.mjs';",
         ),
     )
-    # FORK: sessions.js also imports markdown.js (past-chat history rendering).
-    # Optional so the harness keeps working if that import is ever dropped.
-    source = re.sub(
-        r"import markdownModule from './markdown\.js(?:[?#][^']*)?';",
-        "import markdownModule from './markdown.mjs';",
-        source,
-        count=1,
-    )
     for pattern, replacement in versioned_rewrites:
         source, count = re.subn(pattern, replacement, source, count=1)
         assert count == 1, f"sessions import changed: {pattern}"

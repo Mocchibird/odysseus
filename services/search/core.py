@@ -3,11 +3,20 @@
 import json
 import logging
 import re
+import time
 import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from contextlib import contextmanager
+from contextvars import ContextVar
 from datetime import datetime, timedelta
 from typing import Dict, Any, Optional, List, Set
 from urllib.parse import urlparse
+from src.constants import (
+    ARXIV_API_URL,
+    OPENALEX_API_URL,
+    SCHOLARLY_LOOKUP_TOTAL_BUDGET,
+)
+from src.search_passages import search_excerpt
 
 import httpx
 
@@ -137,10 +146,11 @@ def _build_provider_chain(primary: str) -> List[str]:
     configured = [provider for provider in chain if provider_configured(provider)]
     for provider in set(chain) - set(configured):
         logger.warning("Skipping unconfigured search provider: %s", provider)
-    if primary == "searxng" and configured == ["searxng"]:
-        # No usable configured fallback: try a separate engine on the same
-        # private metasearch instance before reporting retrieval failure.
-        configured.append("searxng_yep")
+    if primary == "searxng" and "searxng_yep" not in configured:
+        # The no-key DuckDuckGo fallback can be configured yet unavailable or
+        # CAPTCHA-limited. Always retain a distinct engine on the private
+        # metasearch instance before reporting retrieval failure.
+        configured.insert(1, "searxng_yep")
     return configured
 
 
@@ -164,6 +174,45 @@ _SEARCH_QUERY_FILLER = {
 
 _SHORT_QUERY_SUBJECTS = {"ai", "ar", "eu", "uk", "us", "vr"}
 
+_EMPTY_RESULT_RELAXATION_TERMS = {
+    "find", "search", "lookup", "look", "online", "official", "source",
+    "sources", "english", "download", "please", "latest", "current",
+}
+
+
+def _relaxed_query_after_empty(query: str) -> str:
+    """Remove request scaffolding once an exact provider query returns nothing."""
+    # Token-based relaxation cannot preserve search operators, quoted phrases,
+    # or exclusions. Do not silently broaden an explicit source constraint.
+    if re.search(r'\b\w+:|["\u201c\u201d]|(?:^|\s)-\S', str(query or "")):
+        return ""
+    tokens = re.findall(r"[A-Za-z0-9][A-Za-z0-9_.+-]*", str(query or ""))
+    retained = [
+        token for token in tokens
+        if token.casefold() not in _EMPTY_RESULT_RELAXATION_TERMS
+    ]
+    relaxed = " ".join(retained).strip()
+    return relaxed if len(retained) >= 2 and relaxed.casefold() != str(query or "").strip().casefold() else ""
+
+
+def _empty_result_query_relaxations(query: str) -> list[str]:
+    """Return bounded increasingly broad discovery queries for an empty SERP."""
+    first = _relaxed_query_after_empty(query)
+    candidates = [first] if first else []
+    if first:
+        document_terms = {
+            "manual", "manuals", "guide", "guides", "instructions", "instruction",
+            "operator", "owners", "owner", "pdf", "documentation", "docs",
+        }
+        entity_tokens = [
+            token for token in first.split()
+            if token.casefold() not in document_terms
+        ]
+        entity_query = " ".join(entity_tokens).strip()
+        if len(entity_tokens) >= 2 and entity_query.casefold() != first.casefold():
+            candidates.append(entity_query)
+    return list(dict.fromkeys(candidate for candidate in candidates if candidate))
+
 _WEATHER_QUERY_HINTS = {
     "weather", "forecast", "forecasts", "temperature", "temperatures",
     "rain", "raining", "precipitation", "humid", "humidity", "wind",
@@ -185,6 +234,21 @@ def _meaningful_query_terms(query: str) -> list[str]:
     ]
 
 
+# Leading function/auxiliary words carry no entity signal. They are kept out
+# of _SEARCH_QUERY_FILLER (which gates overall query meaningfulness) and
+# applied only to the document-cue entity test below, where taking the *first*
+# surviving token as the entity otherwise picks "how"/"i"/"best" and rejects
+# every genuinely relevant result.
+_QUERY_FUNCTION_WORDS = frozenset({
+    "how", "to", "i", "we", "you", "your", "my", "our", "me", "us",
+    "a", "an", "is", "are", "was", "were", "do", "does", "did", "can",
+    "could", "should", "would", "will", "get", "getting", "got",
+    "there", "here", "need", "needed", "want", "looking", "show", "give",
+    "help", "best", "good", "top", "recommended", "some", "it", "its",
+    "of", "in", "on", "at", "by", "or", "and", "be", "have", "has",
+})
+
+
 def _result_has_query_overlap(query: str, result: dict) -> bool:
     terms = _meaningful_query_terms(query)
     if not terms:
@@ -200,6 +264,44 @@ def _result_has_query_overlap(query: str, result: dict) -> bool:
             and any(marker in text for marker in _WEATHER_RESULT_HINTS)
         )
     result_tokens = set(re.findall(r"[a-z0-9]+", text))
+
+    document_cues = {
+        "manual", "manuals", "guide", "guides", "instructions", "instruction",
+        "documentation", "docs", "pdf", "handbook",
+    }
+    if query_tokens & document_cues:
+        entity_fillers = _SEARCH_QUERY_FILLER | document_cues | _QUERY_FUNCTION_WORDS | {
+            "english", "operator", "owner", "owners", "user", "installation",
+        }
+        ordered_query_tokens = re.findall(r"[a-z0-9]+", str(query or "").lower())
+        entity_terms = [
+            token for token in ordered_query_tokens
+            if token not in entity_fillers and not token.isdigit()
+        ]
+        # Product/manual lookups are especially vulnerable to homonyms. A
+        # result matching only the generic product word and "manual" is not
+        # evidence for the named brand/entity in the request.
+        #
+        # Test *any* entity term rather than specifically the first. Position
+        # does not identify the entity: "how to configure nginx docs" leads
+        # with a task verb, "best guide for sourdough" with a qualifier. A
+        # result naming none of the entity terms is still rejected, which is
+        # what keeps a Ford manual out of an IKEA BILLY lookup.
+        if entity_terms and not (set(entity_terms) & result_tokens):
+            return False
+        model_numbers = {token for token in ordered_query_tokens if token.isdigit()}
+        # Temporal qualifiers are not product identifiers. In particular,
+        # query normalization may append "latest 2026" to a documentation
+        # lookup; an evergreen official page need not put that year in its
+        # title/snippet/URL. Retain actual product numbers (including years
+        # used as model names without an explicit temporal qualifier).
+        temporal_years = set(re.findall(
+            r'\b(?:latest|current|updated|as\s+of)\s+(20\d{2})\b',
+            str(query or ''), re.I,
+        ))
+        model_numbers -= temporal_years
+        if model_numbers and not model_numbers.issubset(result_tokens):
+            return False
 
     def lexical_root(word: str) -> str:
         for suffix in ("ation", "ition", "ence", "ance", "ment", "ents", "ent", "ant", "ing", "ed", "es", "s"):
@@ -223,10 +325,39 @@ def _result_has_query_overlap(query: str, result: dict) -> bool:
 def _filter_low_relevance_results(query: str, results: list[dict]) -> list[dict]:
     if not results:
         return []
-    relevant = [result for result in results if _result_has_query_overlap(query, result)]
-    # Only reject a provider when it returned a fully off-topic page set. Mixed
-    # result pages are common; ranking can handle those.
-    return relevant if relevant else []
+    scoped = [result for result in results if _result_matches_site_scope(query, result)]
+    relevant = [result for result in scoped if _result_has_query_overlap(query, result)]
+    # Relevance matching is intentionally conservative and cannot understand
+    # every inflection or language. Keep explicit site constraints strict, but
+    # let ranking handle a provider page when the heuristic rejects every
+    # otherwise in-scope result.
+    return relevant or scoped
+
+
+def _result_matches_site_scope(query: str, result: dict) -> bool:
+    """Enforce explicit site constraints even when a provider ignores them."""
+    scopes = re.findall(r'(?<!\S)(-?)site:([^\s()]+)', query, re.IGNORECASE)
+    if not scopes:
+        return True
+    try:
+        target = urlparse(str(result.get("url") or ""))
+        if target.scheme not in {"https", "http"} or not target.hostname:
+            return False
+        host = target.hostname.lower().rstrip(".")
+        included = []
+        for excluded, scope in scopes:
+            parsed = urlparse(scope if "://" in scope else "https://" + scope)
+            domain = (parsed.hostname or "").lower().rstrip(".")
+            matches = bool(domain) and (host == domain or host.endswith("." + domain))
+            if parsed.path and parsed.path != "/":
+                matches = matches and target.path.startswith(parsed.path)
+            if excluded and matches:
+                return False
+            if not excluded:
+                included.append(matches)
+        return any(included) if included else True
+    except ValueError:
+        return False
 
 
 _SCHOLARLY_QUERY_CUE_RE = re.compile(
@@ -366,22 +497,106 @@ def _result_strongly_matches_title(title: str, result: dict) -> bool:
     return overlap >= (1.0 if len(wanted) == 2 else 0.8)
 
 
+def _scholarly_user_agent() -> str:
+    """Identify this build to the scholarly APIs using the real app version."""
+    from src.constants import APP_VERSION
+
+    return f"Odysseus/{APP_VERSION} scholarly-title-resolver"
+
+
+_scholarly_deadline: ContextVar[Optional[float]] = ContextVar(
+    "scholarly_deadline", default=None
+)
+
+
+@contextmanager
+def _scholarly_budget():
+    """Open one wall-clock budget shared by every hop of a lookup chain."""
+    token = _scholarly_deadline.set(
+        time.monotonic() + SCHOLARLY_LOOKUP_TOTAL_BUDGET
+    )
+    try:
+        yield
+    finally:
+        _scholarly_deadline.reset(token)
+
+
+MAX_SCHOLARLY_REDIRECTS = 3
+
+
+def _scholarly_api_get(url: str, params: dict) -> Optional[httpx.Response]:
+    """GET a scholarly metadata API under the shared outbound policy.
+
+    Returns ``None`` when any destination URL fails the outbound check or the
+    caller's budget is already spent, so callers degrade to their next source
+    instead of raising. Bounded manual redirects ensure every hop passes
+    through ``check_outbound_url`` before the destination is contacted.
+    """
+    from src.constants import SCHOLARLY_LOOKUP_TIMEOUT
+    from src.url_safety import check_outbound_url
+
+    current_url = url
+    current_params: Optional[dict] = params
+
+    for _ in range(MAX_SCHOLARLY_REDIRECTS + 1):
+        ok, reason = check_outbound_url(current_url, block_private=True)
+        if not ok:
+            logger.warning("Scholarly lookup blocked for %s: %s", current_url, reason)
+            return None
+
+        timeout = SCHOLARLY_LOOKUP_TIMEOUT
+        deadline = _scholarly_deadline.get()
+        if deadline is not None:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                logger.info("Scholarly lookup budget exhausted before %s", current_url)
+                return None
+            timeout = min(timeout, remaining)
+
+        response = httpx.get(
+            current_url,
+            params=current_params,
+            headers={"User-Agent": _scholarly_user_agent()},
+            timeout=timeout,
+            follow_redirects=False,
+        )
+
+        is_redirect = getattr(response, "is_redirect", False) or (
+            getattr(response, "status_code", None) in (301, 302, 303, 307, 308)
+        )
+        if is_redirect:
+            headers = getattr(response, "headers", {})
+            location = headers.get("location")
+            if not location:
+                logger.warning(
+                    "Scholarly redirect missing Location header from %s", current_url
+                )
+                return None
+            current_url = str(httpx.URL(str(response.url)).join(location))
+            current_params = None
+            continue
+
+        response.raise_for_status()
+        return response
+
+    logger.warning("Scholarly lookup exceeded max redirects from %s", url)
+    return None
+
+
 def _arxiv_title_results(title: str, count: int = 3) -> list[dict]:
     """Resolve a paper title through arXiv's public Atom API."""
 
     try:
-        response = httpx.get(
-            "https://export.arxiv.org/api/query",
-            params={
+        response = _scholarly_api_get(
+            ARXIV_API_URL,
+            {
                 "search_query": f'ti:"{title}"',
                 "start": 0,
                 "max_results": max(1, min(int(count), 5)),
             },
-            headers={"User-Agent": "Odysseus/0.20 scholarly-title-resolver"},
-            timeout=12.0,
-            follow_redirects=True,
         )
-        response.raise_for_status()
+        if response is None:
+            return []
         root = ET.fromstring(response.text)
     except Exception as exc:
         logger.info("arXiv title lookup failed for %r: %s", title, exc)
@@ -418,20 +633,18 @@ def _openalex_title_results(title: str, count: int = 3) -> list[dict]:
         # OpenAlex treats a literal question mark as query syntax and returns
         # HTTP 400 for otherwise valid titles such as "How Far ... GPT-4V?".
         search_title = re.sub(r"[?]+", " ", str(title or "")).strip()
-        response = httpx.get(
-            "https://api.openalex.org/works",
-            params={
+        response = _scholarly_api_get(
+            OPENALEX_API_URL,
+            {
                 "search": search_title,
                 "per-page": max(1, min(int(count), 5)),
                 "select": (
                     "display_name,doi,primary_location,publication_year,type"
                 ),
             },
-            headers={"User-Agent": "Odysseus/0.20 scholarly-title-resolver"},
-            timeout=12.0,
-            follow_redirects=True,
         )
-        response.raise_for_status()
+        if response is None:
+            return []
         payload = response.json()
     except Exception as exc:
         logger.info("OpenAlex title lookup failed for %r: %s", title, exc)
@@ -474,8 +687,16 @@ def _openalex_title_results(title: str, count: int = 3) -> list[dict]:
 
 
 def _scholarly_title_results(title: str, count: int = 3) -> list[dict]:
-    """Retry a noisy scholarly query as a bare title, then use arXiv API."""
+    """Retry a noisy scholarly query as a bare title, then use arXiv API.
 
+    The three hops share one wall-clock budget so a slow upstream cannot hold a
+    user-facing search open for the sum of every per-request timeout.
+    """
+    with _scholarly_budget():
+        return _scholarly_title_results_inner(title, count)
+
+
+def _scholarly_title_results_inner(title: str, count: int) -> list[dict]:
     try:
         simplified = searxng_search_api(title, count=max(3, count))
     except Exception as exc:
@@ -498,10 +719,11 @@ def _direct_scholarly_title_results(title: str, count: int = 3) -> list[dict]:
 
     # OpenAlex typically resolves titles in under a second and often returns
     # the official arXiv landing page. The arXiv API remains the fallback.
-    openalex = _openalex_title_results(title, count)
-    if openalex:
-        return openalex
-    return _arxiv_title_results(title, count)
+    with _scholarly_budget():
+        openalex = _openalex_title_results(title, count)
+        if openalex:
+            return openalex
+        return _arxiv_title_results(title, count)
 
 
 def _augment_scholarly_results(query: str, results: list[dict], count: int) -> list[dict]:
@@ -630,8 +852,9 @@ def searxng_search_results(query: str, count: int = 10, time_filter: str = None)
     # first instead of spending the full tool deadline retrying generic search
     # providers; the returned official URL lets the agent proceed to PDF tools.
     scholarly_title = _scholarly_title_from_query(provider_query)
-    if scholarly_title:
-        direct_results = _direct_scholarly_title_results(scholarly_title, count)
+    if scholarly_title and not time_filter:
+        direct_results = [result for result in _direct_scholarly_title_results(scholarly_title, count)
+                          if _result_matches_site_scope(provider_query, result)]
         if direct_results:
             _record_query(provider_query, True, cache_hit=False)
             return direct_results[:count]
@@ -691,12 +914,35 @@ def searxng_search_results(query: str, count: int = 10, time_filter: str = None)
                 if results:
                     logger.info(f"{provider_name} search succeeded with {len(results)} results")
                     break
+                # A completed empty/unrelated result set is not a transport
+                # failure. Advance to another provider rather than repeating
+                # the exact request and spending the tool deadline twice.
+                break
             except (NetworkError, ParseError, RateLimitError) as e:
                 error_logger.error(f"{provider_name} search error (attempt {attempt + 1}): {e}")
             except Exception as e:
                 error_logger.error(f"Unexpected error during {provider_name} search (attempt {attempt + 1}): {e}")
         if results:
             break
+
+    if not results:
+        for relaxed_query in _empty_result_query_relaxations(provider_query):
+            logger.info(
+                "Exact search returned no evidence for %r; retrying broadened query %r",
+                provider_query, relaxed_query,
+            )
+            for provider_name in provider_chain:
+                try:
+                    results = _call_provider(provider_name, relaxed_query, count, time_filter)
+                    results = _filter_low_relevance_results(relaxed_query, results)
+                except Exception as exc:
+                    error_logger.error("Relaxed %s search failed: %s", provider_name, exc)
+                    results = []
+                if results:
+                    break
+            if results:
+                provider_query = relaxed_query
+                break
 
     results = _augment_scholarly_results(provider_query, results, count)
 
@@ -805,6 +1051,8 @@ def comprehensive_web_search(
                     logger.info(f"Comprehensive search: {provider_name} returned {len(search_results)} results")
                     break
                 empty = True
+                last_err = None
+                break
             except Exception as e:
                 last_err = e
                 logger.warning(f"Comprehensive search: {provider_name} attempt {attempt + 1} failed: {e}")
@@ -814,6 +1062,33 @@ def comprehensive_web_search(
             provider_attempts[provider_name] = f"error: {last_err}"
         elif empty:
             provider_attempts[provider_name] = "empty"
+
+    if not search_results:
+        for relaxed_query in _empty_result_query_relaxations(provider_query):
+            logger.info(
+                "Comprehensive search empty for %r; retrying broadened query %r",
+                provider_query, relaxed_query,
+            )
+            for provider_name in provider_chain:
+                try:
+                    search_results = _call_provider(
+                        provider_name, relaxed_query, fetch_count, time_filter,
+                    )
+                    search_results = _filter_low_relevance_results(
+                        relaxed_query, search_results,
+                    )
+                except Exception as exc:
+                    provider_attempts[f"{provider_name}:relaxed"] = f"error: {exc}"
+                    search_results = []
+                if search_results:
+                    provider_attempts[f"{provider_name}:relaxed"] = (
+                        f"ok ({len(search_results)})"
+                    )
+                    provider_query = relaxed_query
+                    break
+                provider_attempts[f"{provider_name}:relaxed"] = "empty"
+            if search_results:
+                break
 
     search_results = _augment_scholarly_results(
         provider_query,
@@ -955,9 +1230,7 @@ def comprehensive_web_search(
             output_parts.append(f"Title: {content['title']}")
             output_parts.append("-" * 30)
 
-            text = content["content"][:3000]
-            if len(content["content"]) > 3000:
-                text += "... [truncated]"
+            text = search_excerpt(content["content"], provider_query, 3000)
             output_parts.append(text)
 
             key_points = extract_key_points(content["content"])

@@ -54,8 +54,9 @@ def test_think_wrapper_closes_at_agent_round_boundaries():
         "} else if (json.type === 'agent_step') {",
     ):
         idx = chat.index(handler)
-        # the closer is the first thing each boundary handler does
-        assert "_closeOpenThinkingMarkup(" in chat[idx:idx + 400], handler
+        # the closer runs at the top of each boundary handler (after upstream's
+        # leading comment + TTFT marker in tool_start)
+        assert "_closeOpenThinkingMarkup(" in chat[idx:idx + 800], handler
     # teacher takeover abandons the student bubble — flag reset there too
     assert "_thinkOpen = false; // student bubble abandoned" in chat
 

@@ -147,6 +147,7 @@ def _chat_stream_endpoint(
     capture_context=False,
     endpoint_url="https://selected.example/v1",
     session_model="selected-model",
+    session_history=(),
 ):
     def add_message(message):
         captured.setdefault("added_messages", []).append(message)
@@ -156,7 +157,7 @@ def _chat_stream_endpoint(
         model=session_model,
         headers={"Authorization": "Bearer selected"},
         name="test",
-        history=[],
+        history=list(session_history),
         add_message=add_message,
     )
     session_manager = SimpleNamespace(
@@ -208,6 +209,7 @@ def _chat_stream_endpoint(
         captured["agent"] = {
             "primary": (endpoint_url, model, kwargs.get("headers")),
             "fallbacks": kwargs.get("fallbacks"),
+            "thinking_mode": kwargs.get("thinking_mode"),
         }
         if kwargs.get("external_untrusted_context_seen"):
             captured["agent_external_untrusted_context_seen"] = True
@@ -311,7 +313,7 @@ async def test_chat_stream_route_keeps_selected_model_strict_with_legacy_data(mo
     if mode == "chat":
         assert captured == {"chat": [selected]}
     else:
-        assert captured == {"agent": {"primary": selected, "fallbacks": []}}
+        assert captured == {"agent": {"primary": selected, "fallbacks": [], "thinking_mode": "off"}}
 
 
 @pytest.mark.asyncio
@@ -566,7 +568,7 @@ async def test_chat_stream_route_uses_only_new_explicit_fallback_policy(monkeypa
     if mode == "chat":
         assert captured == {"chat": [selected, backup]}
     else:
-        assert captured == {"agent": {"primary": selected, "fallbacks": [backup]}}
+        assert captured == {"agent": {"primary": selected, "fallbacks": [backup], "thinking_mode": "off"}}
 
 
 @pytest.mark.asyncio
@@ -1804,6 +1806,36 @@ async def test_chat_stream_threads_form_endpoint_id_to_descriptor_builder(monkey
 
 
 @pytest.mark.asyncio
+async def test_model_reconciliation_clears_stale_thinking_toggle(monkeypatch):
+    captured = {}
+    endpoint = _chat_stream_endpoint(
+        monkeypatch,
+        "agent",
+        captured,
+        session_model="qwen3-thinking",
+    )
+
+    def switch_to_grok(request, session, session_id, form_data, owner=None):
+        session.model = "x-ai/grok-4.5"
+        session.endpoint_url = "https://openrouter.ai/api/v1/chat/completions"
+
+    monkeypatch.setattr(
+        chat_routes,
+        "_reconcile_selected_route_from_request",
+        switch_to_grok,
+    )
+    request = _RouteRequest("agent")
+    request._form["thinking_mode"] = "on"
+
+    response = await endpoint(request)
+    async for _chunk in response.body_iterator:
+        pass
+
+    assert captured["agent"]["primary"][1] == "x-ai/grok-4.5"
+    assert captured["agent"]["thinking_mode"] == "off"
+
+
+@pytest.mark.asyncio
 async def test_nonstream_chat_threads_request_endpoint_id_to_descriptor_builder(
     monkeypatch,
 ):
@@ -2473,6 +2505,7 @@ def test_late_agent_fallback_records_each_round_and_stays_pinned(monkeypatch):
             headers=primary[2],
             max_rounds=4,
             relevant_tools={"bash"},
+            workspace="/workspace",
             fallbacks=[backup],
             fallback_statuses=FOREGROUND_AVAILABILITY_STATUSES,
             fallback_on_empty=False,
@@ -2580,6 +2613,7 @@ def test_agent_terminal_later_round_error_stops_after_completed_tool(
             [{"role": "user", "content": "Run one tool."}],
             max_rounds=3,
             relevant_tools={"bash"},
+            workspace="/workspace",
             fallback_statuses=FOREGROUND_AVAILABILITY_STATUSES,
             fallback_on_empty=False,
             _is_teacher_run=True,
@@ -3002,6 +3036,7 @@ def test_agent_metrics_attribute_usage_to_each_answering_route(monkeypatch):
         headers=primary[2],
         max_rounds=3,
         relevant_tools={"bash"},
+        workspace="/workspace",
         fallbacks=[backup],
         route_descriptors=[
             {"endpoint_id": "paid", "endpoint_label": "Paid", "endpoint_cost_tracked": True},
@@ -3185,6 +3220,7 @@ def test_force_answer_recovery_persists_and_bills_pinned_fallback_route(
         headers=primary[2],
         max_rounds=6,
         relevant_tools={"bash"},
+        workspace="/workspace",
         fallbacks=[backup],
         route_descriptors=[
             {
@@ -3276,6 +3312,7 @@ def test_agent_terminal_retains_completed_paid_fallback_usage(monkeypatch):
         headers=primary[2],
         max_rounds=3,
         relevant_tools={"bash"},
+        workspace="/workspace",
         fallbacks=[backup],
         route_descriptors=[
             {"endpoint_id": "local", "endpoint_label": "Local", "endpoint_cost_tracked": False},
@@ -3475,6 +3512,7 @@ def test_agent_fallback_request_uses_candidate_context_budget(
             headers=primary[2],
             max_rounds=2,
             relevant_tools={"bash"},
+            workspace="/workspace",
             fallbacks=[backup],
             fallback_statuses=FOREGROUND_AVAILABILITY_STATUSES,
             fallback_on_empty=False,
@@ -3722,7 +3760,11 @@ def test_skill_activation_reaches_later_fallback_request_and_pinned_round(monkey
         for schema in round_two_requests[0]["kwargs"]["tools"]
     }
     assert "grep" in primary_schema_names
-    assert round_two_requests[1]["kwargs"]["tools"] is None
+    fallback_schema_names = {
+        schema["function"]["name"]
+        for schema in round_two_requests[1]["kwargs"]["tools"]
+    }
+    assert {"grep", "manage_skills"} <= fallback_schema_names
     fallback_route_prompt = next(
         message.get("content") or ""
         for message in round_two_requests[1]["messages"]

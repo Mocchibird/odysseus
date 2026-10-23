@@ -40,7 +40,8 @@ def test_tasks_filter_chips_include_active_paused_switch():
     assert "mkChip(`active (${activeCount})`, 'active', _taskStatusFilter === 'active', 'status');" in src
     assert "mkChip(`paused (${pausedCount})`, 'paused', _taskStatusFilter === 'paused', 'status');" in src
     assert "if (_taskStatusFilter && String(t.status || '').toLowerCase() !== _taskStatusFilter) return false;" in src
-    assert "if (value === null) _taskStatusFilter = null;" in src
+    assert "_taskStatusFilter = _taskStatusFilter === value ? null : value;" in src
+    assert "_taskStatusFilter = null;" in src[src.index("if (kind === 'status')"):src.index("_renderList();", src.index("if (kind === 'status')"))]
 
 
 def test_tasks_completed_view_exposes_active_paused_shortcuts():
@@ -51,3 +52,12 @@ def test_tasks_completed_view_exposes_active_paused_shortcuts():
     assert "_taskStatusFilter = value;" in src
     assert "_switchTab('tasks');" in src
     assert "if (_activeTab === 'completed') _renderCompletedTaskStatusShortcuts();" in src
+
+
+def test_completed_task_preview_links_research_runs_to_visual_report():
+    src = (ROOT / "static/js/tasks.js").read_text()
+
+    assert "entry.researchId" in src
+    assert "task-completed-report-btn" in src
+    assert "api/research/report/${encodeURIComponent(entry.researchId)}" in src
+    assert "task-completed-report-btn').forEach" in src

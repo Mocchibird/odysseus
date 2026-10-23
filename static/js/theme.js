@@ -2,7 +2,7 @@
 // ES6 module
 
 import Storage from './storage.js';
-import uiModule from './ui.js?v=20260908weekhoverfix1';
+import uiModule from './ui.js?v=20260916largetoolscroll1';
 import { initColorPickers, attachColorPicker } from './colorPicker.js?v=20260910eyedropper1';
 import { hexToRgb } from './color/hex.js';
 import { makeWindowDraggable } from './windowDrag.js';
@@ -24,13 +24,14 @@ export const THEMES = {
                 advanced: { sendBtnBg: '#949494', sendBtnHover: '#7f7f7f',
                             userBubbleBg: '#2f2f2f', aiBubbleBg: '#171717',
                             inputBg: '#2f2f2f', brandColor: '#ffffff', brandMixTo: '#ffffff' } },
-  claude:     { bg:'#262624', fg:'#f5f4f0', panel:'#30302e', border:'#4a4a47', red:'#c6613f' },
+  claude:     { bg:'#1f1e1b', fg:'#f5f1e8', panel:'#2b2926', border:'#514b43', red:'#d97757' },
   cute:       { bg:'#fff4f7', fg:'#63394d', panel:'#fffafd', border:'#edc7d5', red:'#d65f88' },
   eclipse:    { bg:'#17191c', fg:'#e8e4dc', panel:'#0f1113', border:'#3c4248', red:'#46c2b3' },
   porcelain:  { bg:'#edf0f2', fg:'#252a30', panel:'#ffffff', border:'#c7cdd2', red:'#3478c9' },
   arcade:     { bg:'#15131d', fg:'#f4e85c', panel:'#0b1720', border:'#305f68', red:'#ff4f91' },
   blueprint:  { bg:'#10263b', fg:'#e8f1f5', panel:'#091a29', border:'#48758d', red:'#e6b84a' },
   monolith:   { bg:'#202020', fg:'#d8d8d2', panel:'#121212', border:'#50504b', red:'#b6e05c' },
+  yoyo:       { bg:'#211f23', fg:'#dfdbd7', panel:'#141415', border:'#3e5146', red:'#e09d6c' },
 };
 
 const DEFAULT_THEME = 'dark';
@@ -67,6 +68,7 @@ const THEME_DEFAULT_PATTERN = {
   arcade:     'synapse',
   blueprint:  'dots',
   monolith:   'perlin-flow',
+  yoyo:       'ascii-fireflies',
 };
 
 // Default effect colors for specific themes (overrides --fg)
@@ -80,6 +82,7 @@ const THEME_DEFAULT_EFFECT_COLOR = {
   arcade:     '#ff4f91',
   blueprint:  '#e6b84a',
   monolith:   '#b6e05c',
+  yoyo:       '#b8e6c1',
 };
 
 // Default effect intensity (0..1) per theme. Any theme not listed defaults to 1.
@@ -87,7 +90,16 @@ const THEME_DEFAULT_INTENSITY = {
   midnight:   0.5,
   cyberpunk:  0.55,
   terminal:   0.8,
-  organs:     0.65,
+  yoyo:       0.8,
+  organs:     0.75,
+};
+
+const THEME_DEFAULT_SIZE = {
+  organs:     0.75,
+};
+
+const THEME_DEFAULT_SPEED = {
+  organs:     0.05,
 };
 
 // Default frosted-glass state per theme. Themes not listed default to false.
@@ -429,8 +441,8 @@ export function applyBgEffectSize(v) {
 }
 
 export function applyBgEffectSpeed(v) {
-  // v is a multiplier 0.25..2.5. Canvas effects read this every frame.
-  const n = (v === undefined || v === null || isNaN(v)) ? 1 : Math.max(0.25, Math.min(2.5, Number(v)));
+  // v is a multiplier 0.05..2.5. Canvas effects read this every frame.
+  const n = (v === undefined || v === null || isNaN(v)) ? 1 : Math.max(0.05, Math.min(2.5, Number(v)));
   document.documentElement.style.setProperty('--bg-effect-speed', String(n));
 }
 
@@ -700,7 +712,9 @@ export function initThemeUI() {
   // Render custom theme swatches into separate card
   const userGrid = document.getElementById('themeUserGrid');
   const userCard = document.getElementById('themeUserCard');
-  const customEntries = Object.entries(customThemes);
+  // Hide legacy custom copies after a theme graduates into the preset list.
+  const customEntries = Object.entries(customThemes)
+    .filter(([name]) => !THEMES[name]);
   if (customEntries.length > 0 && userGrid && userCard) {
     userCard.style.display = '';
     userGrid.innerHTML = customEntries.map(([name, c]) => `
@@ -762,8 +776,8 @@ export function initThemeUI() {
         const p = ct && ct.bgPattern ? ct.bgPattern : (THEME_DEFAULT_PATTERN[name] || 'none');
         const ec = ct && ct.bgEffectColor ? ct.bgEffectColor : (THEME_DEFAULT_EFFECT_COLOR[name] || '');
         const ei = (ct && ct.bgEffectIntensity !== undefined) ? ct.bgEffectIntensity : (THEME_DEFAULT_INTENSITY[name] !== undefined ? THEME_DEFAULT_INTENSITY[name] : 1);
-        const sz = (ct && ct.bgEffectSize !== undefined) ? ct.bgEffectSize : 1;
-        const sp = (ct && ct.bgEffectSpeed !== undefined) ? ct.bgEffectSpeed : 1;
+        const sz = (ct && ct.bgEffectSize !== undefined) ? ct.bgEffectSize : (THEME_DEFAULT_SIZE[name] !== undefined ? THEME_DEFAULT_SIZE[name] : 1);
+        const sp = (ct && ct.bgEffectSpeed !== undefined) ? ct.bgEffectSpeed : (THEME_DEFAULT_SPEED[name] !== undefined ? THEME_DEFAULT_SPEED[name] : 1);
         const fr = (ct && ct.frosted !== undefined)
           ? !!ct.frosted
           : (THEME_DEFAULT_FROSTED[name] === true);
@@ -1153,8 +1167,8 @@ export function initThemeUI() {
   const _initEffectIntensity = (saved && saved.bgEffectIntensity !== undefined)
     ? saved.bgEffectIntensity
     : (saved && THEME_DEFAULT_INTENSITY[saved.name] !== undefined ? THEME_DEFAULT_INTENSITY[saved.name] : 1);
-  const _initEffectSize = (saved && saved.bgEffectSize !== undefined) ? saved.bgEffectSize : 1;
-  const _initEffectSpeed = (saved && saved.bgEffectSpeed !== undefined) ? saved.bgEffectSpeed : 1;
+  const _initEffectSize = (saved && saved.bgEffectSize !== undefined) ? saved.bgEffectSize : (saved && THEME_DEFAULT_SIZE[saved.name] !== undefined ? THEME_DEFAULT_SIZE[saved.name] : 1);
+  const _initEffectSpeed = (saved && saved.bgEffectSpeed !== undefined) ? saved.bgEffectSpeed : (saved && THEME_DEFAULT_SPEED[saved.name] !== undefined ? THEME_DEFAULT_SPEED[saved.name] : 1);
   const _initFrosted = (saved && saved.frosted !== undefined)
     ? !!saved.frosted
     : (saved && THEME_DEFAULT_FROSTED[saved.name] === true);

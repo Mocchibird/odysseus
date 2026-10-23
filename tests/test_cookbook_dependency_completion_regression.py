@@ -583,7 +583,9 @@ def test_serve_panel_removes_global_handlers_when_collapsed():
     assert "document.removeEventListener('keydown', _onEscClose, true);" in source
     assert "existingPanel?._cleanupServePanel?.();" in source
     assert "openPanel?._cleanupServePanel?.();" in source
-    assert "clearInterval(_vramTimer);" in source
+    # FORK: upstream clears a block-scoped `const _vramTimer` from another scope
+    # (ReferenceError); the fork keeps the timer id module-scoped.
+    assert "clearInterval(_vramTimerId);" in source
     assert "expandedPanel?._cleanupServePanel?.();" in cookbook_source
 
 

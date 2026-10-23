@@ -119,11 +119,16 @@ class Session:
     is_important: bool = False
     message_count: int = 0
     memory_extraction_enabled: bool = True
+    memory_injection_enabled: bool = True
     skill_injection_enabled: bool = True
     thinking_mode: str = "off"
     temperature_override: Optional[float] = None
     max_tokens_override: Optional[int] = None
     cwd: Optional[str] = None
+    # Registered ModelEndpoint id this session is bound to (None = legacy /
+    # URL-matched). Lets two endpoints that share a provider URL but not
+    # credentials stay distinguishable.
+    endpoint_id: Optional[str] = None
 
     def __post_init__(self):
         if self.headers is None:

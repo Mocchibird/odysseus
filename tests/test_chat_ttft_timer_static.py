@@ -25,10 +25,13 @@ def test_measured_ttft_is_shown_in_message_stats():
 
 def test_compact_footer_and_details_show_real_performance_counters():
     assert "`${Number(tps).toFixed(2)} tok/s`" in RENDERER
-    assert "`${Number(ttft).toFixed(3)}s TTFT`" in RENDERER
-    assert "`${Number(injectedTokens).toLocaleString()} in`" in RENDERER
-    assert 'Input (all rounds)' in RENDERER
-    assert 'Injected (first request)' in RENDERER
+    assert "const visibleTtft = metrics.client_ttft ?? metrics.time_to_first_token" in RENDERER
+    assert "${Number(visibleTtft).toFixed(3)}s" in RENDERER
+    assert "${Number(injectedTokens).toLocaleString()}" in RENDERER
+    assert '<span class="ctx-label">Input</span>' in RENDERER
+    assert '<span class="ctx-label">Injected</span>' in RENDERER
+    assert 'all rounds' not in RENDERER
+    assert 'first request' not in RENDERER
     assert 'Tool schemas' in RENDERER
     assert 'Agent rounds' in RENDERER
     assert 'Tool calls' in RENDERER

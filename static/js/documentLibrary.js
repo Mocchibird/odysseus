@@ -5,7 +5,7 @@
  */
 
 import { topPortalZ } from './toolWindowZOrder.js';
-import uiModule from './ui.js?v=20260908weekhoverfix1';
+import uiModule from './ui.js?v=20260916largetoolscroll1';
 import sessionModule from './sessions.js';
 import spinnerModule from './spinner.js';
 import markdownModule from './markdown.js';
@@ -38,17 +38,26 @@ function _isEmailDocument(doc) {
   return String(doc?.language || '').toLowerCase() === 'email';
 }
 
-function _documentExport(doc, extMap) {
+function _documentExport(doc, extMap, format = 'original') {
   const email = _isEmailDocument(doc);
-  const ext = email ? '.eml' : (extMap[doc?.language] || '.txt');
+  const requestedFormat = String(format || 'original').toLowerCase();
+  const forcedMarkdown = requestedFormat === 'markdown' || requestedFormat === 'md';
+  const forcedText = requestedFormat === 'text' || requestedFormat === 'txt';
+  const ext = forcedMarkdown ? '.md' : forcedText ? '.txt'
+    : email ? '.eml' : (extMap[doc?.language] || '.txt');
   const title = String(doc?.title || 'document').trim() || 'document';
   const filename = title.toLowerCase().endsWith(ext) ? title : title + ext;
   // Email drafts use an internal header/body separator for the editor. Turn it
   // into the blank line required by RFC 5322 when exporting as .eml.
-  const content = email
+  const content = email && !forcedMarkdown && !forcedText
     ? String(doc?.current_content || '').replace(/\r?\n---\r?\n/, '\r\n\r\n')
     : String(doc?.current_content || '');
-  return { filename, content, type: email ? 'message/rfc822' : 'text/plain;charset=utf-8' };
+  return {
+    filename,
+    content,
+    type: forcedMarkdown ? 'text/markdown;charset=utf-8'
+      : email && !forcedText ? 'message/rfc822' : 'text/plain;charset=utf-8',
+  };
 }
 
 const _LIBRARY_SORT_ICONS = {
@@ -887,14 +896,14 @@ function _setLibraryCountChipContent(chip, label, count) {
     exportItem.className = 'dropdown-item-compact';
     exportItem.style.cssText = 'background:none;border:none;width:100%;';
     exportItem.innerHTML = _di(_exportIco) + '<span>Export</span>';
-    const exportDocumentFile = async () => {
+    const exportDocumentFile = async (format = 'original') => {
       hideCardDropdown();
       try {
         const res = await fetch(`${API_BASE}/api/document/${doc.id}`);
         if (!res.ok) throw new Error('Failed');
         const full = await res.json();
         const extMap = { javascript: '.js', python: '.py', html: '.html', svg: '.svg', css: '.css', markdown: '.md', json: '.json', yaml: '.yml', bash: '.sh', sql: '.sql', rust: '.rs', go: '.go', java: '.java', c: '.c', cpp: '.cpp', typescript: '.ts', ruby: '.rb', php: '.php', xml: '.xml', toml: '.toml', ini: '.ini' };
-        const exported = _documentExport(full, extMap);
+        const exported = _documentExport(full, extMap, format);
         const blob = new Blob([exported.content], { type: exported.type });
         const a = document.createElement('a');
         a.href = URL.createObjectURL(blob);
@@ -1108,7 +1117,25 @@ function _setLibraryCountChipContent(chip, label, count) {
       e.preventDefault();
       e.stopPropagation();
       _showLibDropdown(mobileMoreBtn, [
-        { label: 'Export file', icon: 'export', action: () => expandedExportBtn.click() },
+        {
+          label: 'Export file ›',
+          icon: 'export',
+          action: () => {
+            const formatItems = [
+              { label: 'Original format', icon: 'export', action: () => expandedExportBtn.click() },
+              { label: 'Markdown (.md)', action: () => exportDocumentFile('markdown') },
+              { label: 'Plain text (.txt)', action: () => exportDocumentFile('text') },
+            ];
+            const language = String(doc.language || '').toLowerCase();
+            if (language === 'docx' || language === 'pdf') {
+              formatItems.push(
+                { label: 'PDF (.pdf)', action: () => exportDocumentFile('pdf') },
+                { label: 'Word (.docx)', action: () => exportDocumentFile('docx') },
+              );
+            }
+            _showLibDropdown(mobileMoreBtn, formatItems);
+          },
+        },
         {
           label: _libraryArchivedView ? 'Restore document' : 'Archive document',
           icon: _libraryArchivedView ? 'restore' : 'archive',
@@ -1769,7 +1796,7 @@ function _setLibraryCountChipContent(chip, label, count) {
       '.scss': 'css', '.sass': 'css', '.less': 'css',
       '.csv': 'csv', '.tsv': 'csv',
       '.xlsx': 'csv', '.xls': 'csv', '.ods': 'csv',
-      '.docx': 'markdown', '.doc': 'markdown',
+      '.docx': 'docx', '.doc': 'markdown',
     };
 
     let imported = 0;
@@ -1788,6 +1815,7 @@ function _setLibraryCountChipContent(chip, label, count) {
 
         const isSpreadsheet = ['.xlsx', '.xls', '.ods'].includes(ext);
         const isPdf = ext === '.pdf';
+        const isDocx = ext === '.docx';
 
         if (isPdf) {
           // Backend handles save + AcroForm detection in one shot — picks the
@@ -1803,6 +1831,24 @@ function _setLibraryCountChipContent(chip, label, count) {
             let _e = `HTTP ${res.status}`;
             try { const _j = await res.json(); _e = _j.detail || _j.error || _e; } catch {}
             throw new Error('PDF import failed: ' + _e);
+          }
+          imported++;
+          continue;
+        }
+
+        if (isDocx) {
+          // Preserve the original upload so the document panel can render a
+          // Word-style preview and offer conversion/export actions later.
+          const fd = new FormData();
+          fd.append('file', file);
+          const res = await fetch(`${API_BASE}/api/documents/import-docx`, {
+            method: 'POST',
+            body: fd,
+          });
+          if (!res.ok) {
+            let _e = `HTTP ${res.status}`;
+            try { const _j = await res.json(); _e = _j.detail || _j.error || _e; } catch {}
+            throw new Error('DOCX import failed: ' + _e);
           }
           imported++;
           continue;

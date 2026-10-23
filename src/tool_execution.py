@@ -308,6 +308,38 @@ def _client_bridge(client_runtime_context: Optional[Dict]) -> Optional[Dict]:
 
 _ROUTED_BRIDGE_TOOLS = TUI_ROUTED_BRIDGE_TOOL_NAMES
 _BRIDGE_TOOL_TIMEOUT_S = 900.0
+# ``write_file`` transports UTF-8 source/text only.  Keep this guard on the
+# bridge route as well as the local WriteFileTool: native/Harbor runs use the
+# bridge for workspace files, so otherwise a model can overwrite a verified
+# PNG/PDF screenshot with a prose status message.
+_TEXT_WRITE_BINARY_SUFFIXES = frozenset({
+    ".bmp", ".gif", ".ico", ".jpeg", ".jpg", ".mp3", ".mp4", ".ogg",
+    ".pdf", ".png", ".wav", ".webm", ".webp", ".zip",
+})
+
+
+def _text_write_to_binary_artifact_result(content: str) -> tuple[str, Dict] | None:
+    """Reject UTF-8 text writes that target a binary artifact path."""
+    raw = str(content or "")
+    path, _, _body = raw.partition("\n")
+    path = path.strip()
+    if raw.lstrip().startswith("{"):
+        try:
+            args = json.loads(raw)
+            if isinstance(args, dict) and isinstance(args.get("path"), str):
+                path = args["path"].strip()
+        except (TypeError, ValueError):
+            pass
+    if os.path.splitext(path)[1].casefold() not in _TEXT_WRITE_BINARY_SUFFIXES:
+        return None
+    return f"write_file: {path[:80]}", {
+        "error": (
+            f"write_file: refusing UTF-8 text for binary artifact path {path}. "
+            "Use Python or a format-specific creation tool, then inspect the result."
+        ),
+        "exit_code": 1,
+        "binary_artifact_preserved": True,
+    }
 
 
 async def _route_tool_via_bridge(tool: str, content: str, session_id: Optional[str], client_runtime_context: Optional[Dict]):
@@ -663,6 +695,9 @@ async def _route_tool_via_bridge(tool: str, content: str, session_id: Optional[s
             "error": "write_file: path is required",
             "exit_code": 1,
         }
+    rejected = _text_write_to_binary_artifact_result(content)
+    if rejected is not None:
+        return rejected
     return f"write_file: {path[:80]}", await _bridge_post(
         bridge,
         "/write",
@@ -710,7 +745,7 @@ _SENSITIVE_BASENAMES: set[str] = {
 
 _SENSITIVE_FILE_PATTERNS: tuple[str, ...] = (
     "authorized_keys", "id_rsa", "id_ed25519", "id_ecdsa",
-    "known_hosts",
+    "known_hosts", "auth.json", "app.db", "settings.json",
 )
 
 # Case-folded views used for matching. On a case-insensitive filesystem
@@ -1028,14 +1063,14 @@ def _resolve_tool_path(raw_path: str) -> str:
     expanded = os.path.expanduser(str(raw_path).strip())
     resolved = os.path.realpath(expanded)
 
+    if _is_app_state_path(resolved):
+        raise ValueError(
+            f"path '{raw_path}' is inside the application state directory"
+        )
     if _is_sensitive_path(resolved):
         raise ValueError(
             f"path '{raw_path}' is inside a sensitive directory "
             f"(e.g. .ssh, .gnupg) or matches a sensitive filename"
-        )
-    if _is_app_state_path(resolved):
-        raise ValueError(
-            f"path '{raw_path}' is inside the application state directory"
         )
     if _is_hardlinked_regular_file(resolved):
         raise ValueError(f"path '{raw_path}' is a hard-linked file")
@@ -1076,14 +1111,14 @@ def _resolve_tool_path_in_workspace(workspace: str, raw_path: str) -> str:
         expanded = os.path.join(base, expanded.removeprefix("/workspace/"))
     candidate = expanded if os.path.isabs(expanded) else os.path.join(base, expanded)
     resolved = os.path.realpath(candidate)
+    if _is_app_state_path(resolved):
+        raise ValueError(
+            f"path '{raw_path}' is inside the application state directory"
+        )
     if _is_sensitive_path(resolved):
         raise ValueError(
             f"path '{raw_path}' is inside a sensitive directory "
             f"(e.g. .ssh, .gnupg) or matches a sensitive filename"
-        )
-    if _is_app_state_path(resolved):
-        raise ValueError(
-            f"path '{raw_path}' is inside the application state directory"
         )
     if _is_hardlinked_regular_file(resolved):
         raise ValueError(f"path '{raw_path}' is a hard-linked file")
@@ -1771,13 +1806,21 @@ async def _execute_tool_block_impl(
             "exit_code": 1,
             "failure_kind": "turn_contract_denied",
         }
-    if disabled_tools and not policy_names.isdisjoint(disabled_tools):
+    # A turn contract narrows the offered tool inventory; it is not an
+    # authorization grant overriding explicit execution-time restrictions.
+    if (
+        disabled_tools
+        and not policy_names.isdisjoint(disabled_tools)
+    ):
         desc = f"{tool}: BLOCKED"
         result = {"error": f"Tool '{tool}' is disabled by user.", "exit_code": 1}
         logger.info(f"Tool blocked by user: {tool}")
         return desc, result
 
-    if tool_policy and any(tool_policy.blocks(name) for name in policy_names):
+    if (
+        tool_policy
+        and any(tool_policy.blocks(name) for name in policy_names)
+    ):
         desc = f"{tool}: BLOCKED"
         result = {
             "error": f"Execution of tool '{tool}' is forbade by the active guide-only policy.",
@@ -1818,6 +1861,14 @@ async def _execute_tool_block_impl(
         }
         logger.warning("Public tool policy blocked owner=%r tool=%s", owner, tool)
         return desc, result
+
+    # A request-scoped bridge owns where a task workspace lives, not the
+    # semantic contract of write_file.  Keep text writes from corrupting a
+    # rendered image/PDF even when the bridge handles the physical write.
+    if tool == "write_file":
+        rejected = _text_write_to_binary_artifact_result(content)
+        if rejected is not None:
+            return rejected
 
     if bridge_owns_tool:
         try:

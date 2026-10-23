@@ -4,10 +4,88 @@ The old src.search provider path aliases this module; these tests pin the
 behavior at the single implementation point.
 """
 
+import ipaddress
 import sys
+import pytest
 
 from services.search import core
 from services.search import providers
+
+
+@pytest.fixture(autouse=True)
+def _deterministic_outbound_dns(monkeypatch):
+    """Keep the outbound-URL policy running, but take it off live DNS.
+
+    ``_scholarly_api_get`` validates each destination through
+    ``check_outbound_url`` before it reaches the mocked ``httpx`` transport, and
+    that check resolves the hostname. Without this stub these tests depend on
+    real DNS: on a DNS64/NAT64 network an IPv4-only host such as
+    export.arxiv.org resolves to ``64:ff9b::<v4>``, so the lookup is judged on a
+    synthesised address that has nothing to do with the title-resolution,
+    fallback, request-parameter and ordering behaviour asserted here.
+
+    Only name resolution is replaced. The policy itself still runs in full, and
+    a literal-IP host still resolves to itself, so a test that points at a
+    prohibited address is still genuinely rejected. This is deliberately not a
+    stand-in for SSRF/NAT64 coverage, which lives in tests/test_url_safety.py
+    and tests/test_review_20260923_fixes.py.
+    """
+
+    def _resolve(host: str):
+        try:
+            return [str(ipaddress.ip_address(host))]
+        except ValueError:
+            return ["93.184.216.34"]  # public, policy-clean
+
+    monkeypatch.setattr("src.url_safety._default_resolver", _resolve)
+
+
+def test_html_transport_fallback_preserves_query_constraints(monkeypatch):
+    seen = []
+    class Response:
+        is_success = True
+        text = '<article class="result"><h3><a href="https://example.org/report">Report</a></h3><p class="content">Evidence</p></article>'
+    def get(*args, **kwargs):
+        seen.append(dict(kwargs['params']))
+        if len(seen) == 1:
+            raise ValueError('JSON transport unavailable')
+        return Response()
+    monkeypatch.setattr(providers, '_get_search_instance', lambda: 'http://searx.test')
+    monkeypatch.setattr(providers, '_get_search_settings', lambda: {'search_safesearch': 'strict'})
+    monkeypatch.setattr(providers, '_get_provider_key', lambda name: '')
+    monkeypatch.setattr(providers.httpx, 'get', get)
+    results = providers.searxng_search_api('AI news site:example.org', time_filter='week', engines='test-engine')
+    assert len(results) == 1
+    assert len(seen) == 2
+    assert seen[1] == {k: v for k, v in seen[0].items() if k != 'format'}
+    assert seen[1]['time_range'] == 'week'
+
+
+@pytest.mark.parametrize('query,category', [
+    ('AI developments this week', 'news'),
+    ('recent developments in battery manufacturing', 'news'),
+    ('latest developments in quantum computing', 'news'),
+    ('web development tutorial this week', 'general'),
+    ('current Firefox privacy documentation', 'general'),
+    ('historical developments in mathematics', 'general'),
+    ('latest Python version developments', 'general'),
+])
+def test_temporal_developments_select_news_not_reference_search(monkeypatch, query, category):
+    seen = []
+    class Response:
+        def raise_for_status(self): pass
+        def json(self):
+            return {'results': [{'title': 'Result', 'url': 'https://example.org/report'}]}
+    def get(*args, **kwargs):
+        seen.append(kwargs['params'])
+        return Response()
+    monkeypatch.setattr(providers, '_get_search_instance', lambda: 'http://searx.test')
+    monkeypatch.setattr(providers, '_get_search_settings', lambda: {})
+    monkeypatch.setattr(providers, '_get_provider_key', lambda name: '')
+    monkeypatch.setattr(providers.httpx, 'get', get)
+    providers.searxng_search_api(query, time_filter='week')
+    assert seen[0]['categories'] == category
+    assert seen[0]['time_range'] == 'week'
 
 
 def test_dead_credentialed_fallback_is_skipped_for_same_instance_engine(monkeypatch):
@@ -21,7 +99,9 @@ def test_valid_configured_fallback_is_preserved(monkeypatch):
     monkeypatch.setattr(core, "_get_search_settings", lambda: {"search_fallback_chain": ["google_pse"]})
     monkeypatch.setattr(providers, "_get_search_settings", lambda: {"google_pse_cx": "test-cx"})
     monkeypatch.setattr(providers, "_get_provider_key", lambda name: "test-key")
-    assert core._build_provider_chain("searxng") == ["searxng", "google_pse"]
+    assert core._build_provider_chain("searxng") == [
+        "searxng", "searxng_yep", "google_pse",
+    ]
 
 
 def test_service_safesearch_values_match_provider_contract(monkeypatch):
@@ -72,7 +152,12 @@ def test_service_searxng_json_sends_safesearch(monkeypatch):
     assert seen["params"]["safesearch"] == "1"
 
 
-def test_service_searxng_latest_release_uses_general_search(monkeypatch):
+@pytest.mark.parametrize('query,expected_time', [
+    ('latest ollama release version github', 'day'),
+    ('current Firefox Chrome privacy features comparison', 'day'),
+    ('Sony headphone manual', 'day'),
+])
+def test_service_searxng_latest_release_uses_general_search(monkeypatch, query, expected_time):
     seen = {}
 
     class _Response:
@@ -99,7 +184,7 @@ def test_service_searxng_latest_release_uses_general_search(monkeypatch):
     monkeypatch.setattr(providers.httpx, "get", fake_get)
 
     results = providers.searxng_search_api(
-        "latest ollama release version github",
+        query,
         count=1,
         time_filter="day",
     )
@@ -107,7 +192,7 @@ def test_service_searxng_latest_release_uses_general_search(monkeypatch):
     assert results
     assert seen["params"]["categories"] == "general"
     assert seen["params"]["engines"] == providers._GENERAL_ENGINES
-    assert "time_range" not in seen["params"]
+    assert seen['params'].get('time_range') == expected_time
 
 
 def test_service_searxng_specific_current_event_uses_news_search(monkeypatch):
@@ -684,6 +769,7 @@ def test_service_ddg_html_fallback_sends_safesearch(monkeypatch):
 
     def fake_get(url, **kwargs):
         seen["params"] = kwargs["params"]
+        seen["timeout"] = kwargs["timeout"]
         return _Response()
 
     monkeypatch.setattr(providers, "_get_search_settings", lambda: {"search_safesearch": "off"})
@@ -693,4 +779,23 @@ def test_service_ddg_html_fallback_sends_safesearch(monkeypatch):
     results = providers.duckduckgo_search("odysseus", count=1)
 
     assert seen["params"]["kp"] == "-2"
+    assert seen["timeout"] <= 5
     assert results[0]["url"].startswith("https://notduckduckgo.com/")
+def test_relevance_filter_falls_back_when_heuristic_rejects_every_result():
+    rows = [{
+        "title": "Bicycle buying guide",
+        "snippet": "Road bikes and city bikes",
+        "url": "https://example.test/bicycle-guide",
+    }]
+
+    assert core._filter_low_relevance_results("bicycles", rows) == rows
+
+
+def test_relevance_filter_does_not_bypass_explicit_site_scope():
+    rows = [{
+        "title": "Bicycle buying guide",
+        "snippet": "Road bikes and city bikes",
+        "url": "https://example.test/bicycle-guide",
+    }]
+
+    assert core._filter_low_relevance_results("site:official.test bicycles", rows) == []

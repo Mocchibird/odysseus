@@ -124,7 +124,9 @@ class CompletionDecision:
 
 _ARTIFACT_PATH = r"(?:/|\./|\.\./)?[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)*\.[A-Za-z0-9]{1,12}"
 _ARTIFACT_REQUEST_RE = re.compile(
-    rf"\b(?:write|create|make|save|produce|generate|export|edit|modify|update|fix|put|place)\b"
+    rf"\b(?:writ(?:e|ten)|creat(?:e|ed)|make|made|sav(?:e|ed)|produc(?:e|ed)|"
+    rf"generat(?:e|ed)|export(?:ed)?|edit(?:ed)?|modif(?:y|ied)|updat(?:e|ed)|"
+    rf"fix(?:ed)?|put|plac(?:e|ed))\b"
     rf"[^\n]{{0,80}}?(?P<path>{_ARTIFACT_PATH})",
     re.IGNORECASE,
 )
@@ -133,7 +135,7 @@ _OUTPUT_PATH_RE = re.compile(
     re.IGNORECASE,
 )
 _EXPLICIT_OUTPUT_FILE_RE = re.compile(
-    rf"\b(?:to|at|as)\s+(?:the\s+)?(?:file|path)\s+(?P<path>{_ARTIFACT_PATH})",
+    rf"\b(?:to|at|as|into)\s+(?:the\s+|a\s+)?(?:single\s+)?(?:file|path)\s+(?P<path>{_ARTIFACT_PATH})",
     re.IGNORECASE,
 )
 _NAMED_OUTPUT_FILE_RE = re.compile(
@@ -141,8 +143,9 @@ _NAMED_OUTPUT_FILE_RE = re.compile(
     re.IGNORECASE,
 )
 _EXPLICIT_OUTPUT_DIRECTORY_RE = re.compile(
-    r"\b(?:save|write|create|make|produce|generate|export|put|place)\b"
-    r"[^\n]{0,100}?\b(?:into|to|under|inside)\s+"
+    r"\b(?:sav(?:e|ed)|writ(?:e|ten)|creat(?:e|ed)|make|made|produc(?:e|ed)|"
+    r"generat(?:e|ed)|export(?:ed)?|put|plac(?:e|ed))\b"
+    r"[^\n]{0,100}?\b(?:in|into|to|under|inside)\s+"
     r"[`'\"]?(?P<path>/(?:[A-Za-z0-9_.-]+/)*[A-Za-z0-9_.-]+/?)"
     r"(?=[`'\"\s.,;:]|$)",
     re.IGNORECASE,
@@ -208,14 +211,80 @@ def _is_prose_abbreviation(value: str) -> bool:
     return _clean_path(value).lower() in {"e.g", "i.e"}
 
 
+def _artifact_match_is_negated(instruction: str, match: re.Match[str]) -> bool:
+    """Reject paths attached to an explicitly negated mutation verb."""
+
+    prefix = instruction[max(0, match.start() - 32):match.start()]
+    return bool(re.search(r"(?:do\s+not|don't|must\s+not|never)\s+$", prefix, re.IGNORECASE))
+
+
+def _artifact_match_is_callable(instruction: str, match: re.Match[str], path: str) -> bool:
+    """Reject dotted callable names such as ``json.dumps(...)`` as artifacts."""
+
+    if "/" in path or "\\" in path:
+        return False
+    if instruction[match.end("path"):].startswith("("):
+        return True
+    # Procedural prompts often name existence helpers without parentheses,
+    # e.g. "verify with os.path.exists or ls". They are code references, not
+    # output filenames, even though the generic path regex sees an extension.
+    return bool(re.fullmatch(r"(?:os\.path|pathlib\.Path|Path)\.[A-Za-z_]\w*", path))
+
+
+def _artifact_match_is_email_host(instruction: str, match: re.Match[str]) -> bool:
+    """Reject the domain portion of an email address as an output path."""
+
+    start = match.start("path")
+    prefix = instruction[max(0, start - 80):start]
+    return bool(re.search(r"[A-Za-z0-9_.+-]+@$", prefix))
+
+
+def _workspace_path_identity(value: str) -> str:
+    """Return a stable identity for native workspace path aliases."""
+
+    path = _clean_path(value).replace("\\", "/")
+    for prefix in ("/tmp_workspace/", "/workspace/"):
+        if path.startswith(prefix):
+            return path[len(prefix):]
+    return path
+
+
+def _known_input_is_explicit_mutation_target(instruction: str, path: str) -> bool:
+    """Preserve a known input only when the user explicitly asks to edit it.
+
+    Input descriptions commonly say that a file is "saved in" or is a
+    "post-write checklist".  Those phrases must not turn read-only evidence
+    into a required output artifact.  Direct edit/update requests remain
+    supported.
+    """
+
+    escaped = re.escape(_clean_path(path))
+    active_edit = rf"(?<![-\w])(?:edit|modify|update|fix)\s+(?:the\s+)?[`'\"]?{escaped}"
+    direct_create = (
+        rf"(?<![-\w])(?:write|create|make|save|produce|generate|export|put|place)"
+        rf"\s+[`'\"]?{escaped}"
+    )
+    directed_create = (
+        rf"(?<![-\w])(?:write|create|make|save|produce|generate|export|put|place)"
+        rf"\b[^\n]{{0,80}}?\b(?:to|into|at|as|under|inside)\s+"
+        rf"(?:the\s+|a\s+)?[`'\"]?{escaped}"
+    )
+    return any(
+        re.search(pattern, instruction, re.IGNORECASE)
+        for pattern in (active_edit, direct_create, directed_create)
+    )
+
+
 def infer_completion_requirements(
     instruction: str,
     *,
     executable_verifier_available: bool = False,
     verifier_commands: Sequence[str] = (),
+    known_input_paths: Sequence[str] = (),
 ) -> CompletionRequirements:
     """Infer only explicitly requested output/edit paths from an instruction."""
 
+    text = str(instruction or "")
     paths: list[str] = []
     for pattern in (
         _ARTIFACT_REQUEST_RE,
@@ -226,12 +295,30 @@ def infer_completion_requirements(
         _EXPLICIT_OUTPUT_DIRECTORY_RE,
         _LOCALIZED_OUTPUT_DIRECTORY_RE,
     ):
-        for match in pattern.finditer(str(instruction or "")):
+        for match in pattern.finditer(text):
             path = _clean_path(match.group("path"))
+            if _artifact_match_is_negated(text, match):
+                continue
+            if _artifact_match_is_callable(text, match, path):
+                continue
+            if _artifact_match_is_email_host(text, match):
+                continue
             if path and not _is_prose_abbreviation(path) and path not in paths:
                 paths.append(path)
     paths = [path.rstrip("/") if path != "/" else path for path in paths]
     paths = list(dict.fromkeys(paths))
+    input_identities = {
+        _workspace_path_identity(path)
+        for path in known_input_paths
+        if _clean_path(path)
+    }
+    if input_identities:
+        paths = [
+            path
+            for path in paths
+            if _workspace_path_identity(path) not in input_identities
+            or _known_input_is_explicit_mutation_target(text, path)
+        ]
     # When the instruction names an absolute output directory and then gives
     # relative example filenames (for example ``1.tex, 2.tex, ...``), the
     # directory is the actual completion contract.  Treating the first example
@@ -249,6 +336,13 @@ def infer_completion_requirements(
             if path in explicit_directories
             or any(path.startswith(directory.rstrip("/") + "/") for directory in explicit_directories)
         ]
+        explicit_files = [path for path in paths if Path(path).suffix]
+        if explicit_files:
+            paths = [
+                path for path in paths
+                if path not in explicit_directories
+                or not any(file.startswith(path.rstrip("/") + "/") for file in explicit_files)
+            ]
     cleaned_verifier_commands = tuple(dict.fromkeys(
         str(command or "").strip()
         for command in verifier_commands
@@ -276,9 +370,27 @@ def requirements_from_runtime_context(
     *,
     instruction: str = "",
 ) -> CompletionRequirements:
-    raw = (context or {}).get("completion_requirements")
+    runtime_context = context or {}
+    known_inputs: list[str] = []
+    for value in runtime_context.get("input_files") or ():
+        path = _clean_path(str(value or ""))
+        if path:
+            known_inputs.append(path)
+    media_ingress = runtime_context.get("media_ingress")
+    if isinstance(media_ingress, Mapping):
+        for artifact in media_ingress.get("artifacts") or ():
+            if not isinstance(artifact, Mapping):
+                continue
+            path = _clean_path(str(artifact.get("source_path") or ""))
+            if path:
+                known_inputs.append(path)
+
+    raw = runtime_context.get("completion_requirements")
     if not isinstance(raw, Mapping):
-        return infer_completion_requirements(instruction)
+        return infer_completion_requirements(
+            instruction,
+            known_input_paths=known_inputs,
+        )
     paths = raw.get("required_artifacts")
     if not isinstance(paths, (list, tuple)):
         paths = ()
@@ -287,6 +399,16 @@ def requirements_from_runtime_context(
         for value in paths
         if (path := _clean_path(str(value or "")))
     )
+    input_identities = {
+        _workspace_path_identity(path) for path in known_inputs
+    }
+    if input_identities:
+        cleaned = tuple(
+            path
+            for path in cleaned
+            if _workspace_path_identity(path) not in input_identities
+            or _known_input_is_explicit_mutation_target(instruction, path)
+        )
     verifier_commands = raw.get("verifier_commands")
     if not isinstance(verifier_commands, (list, tuple)):
         verifier_commands = ()
@@ -335,6 +457,14 @@ def _artifact_path_matches_required(artifact_path: str, required_path: str) -> b
 
 def _explicit_tool_paths(tool: str, command: str) -> list[str]:
     if tool == "write_file":
+        try:
+            args = json.loads(command or "{}")
+        except (TypeError, json.JSONDecodeError):
+            args = None
+        if isinstance(args, Mapping):
+            path = _clean_path(str(args.get("path") or ""))
+            return [path] if path else []
+        # Keep compatibility with the legacy ``path\ncontent`` transport.
         path = _clean_path(str(command or "").splitlines()[0] if command else "")
         return [path] if path else []
     if tool == "edit_file":
@@ -538,6 +668,29 @@ class EvidenceLedger:
                 source=event,
                 artifact_path=path,
             )
+
+        if tool == "read_file":
+            try:
+                read_args = json.loads(command or "{}")
+            except (TypeError, json.JSONDecodeError):
+                read_args = None
+            read_path = (
+                _clean_path(str(read_args.get("path") or ""))
+                if isinstance(read_args, Mapping)
+                else ""
+            )
+            if read_path and any(
+                _artifact_path_matches_required(read_path, required)
+                for required in self.requirements.required_artifacts
+            ):
+                self._append(
+                    kind=EvidenceKind.ARTIFACT_VALIDATION,
+                    success=success,
+                    authoritative=authoritative,
+                    source=event,
+                    artifact_path=read_path,
+                    detail="post-write artifact inspection",
+                )
 
         if _TEST_COMMAND_RE.search(_command_text(command)) or _matches_declared_verifier(
             command,

@@ -6,20 +6,20 @@
 // ES6 module — IIFE removed
 
 import Storage from './storage.js';
-import uiModule from './ui.js?v=20260908weekhoverfix1';
+import uiModule from './ui.js?v=20260916largetoolscroll1';
 import sessionModule from './sessions.js';
-import chatRenderer, { renderToolIcon } from './chatRenderer.js?v=563';
-import chatStream from './chatStream.js?v=563';
+import chatRenderer, { renderToolIcon } from './chatRenderer.js?v=20260914metricssummary1';
+import chatStream from './chatStream.js?v=20260914pdfstrip1';
 import { addAITTSButton } from './tts-ai.js';
 import markdownModule from './markdown.js';
 import spinnerModule from './spinner.js';
 import presetsModule from './presets.js?v=20260908personaname1';
 import fileHandlerModule from './fileHandler.js?v=20260909mobileattachmentedit1';
 import searchModule from './search.js';
-import documentModule from './document.js?v=563';
-import * as emailInbox from './emailInbox.js';
+import documentModule from './document.js?v=20260916docctx2';
+import * as emailInbox from './emailInbox.js?v=20260914aireply4';
 import codeRunnerModule from './codeRunner.js?v=20260831richtexttools91';
-import slashCommands, { initSlashCommands, isCommand, handleSlashCommand, handleSetupInput, handleSetupWizard, typewriterInto } from './slashCommands.js';
+import slashCommands, { initSlashCommands, isCommand, handleSlashCommand, handleSetupInput, handleSetupWizard, typewriterInto } from './slashCommands.js?v=20260921chatgptusage1';
 import createResearchSynapse from './researchSynapse.js?v=20260910roundlabels2';
 import { createStreamRenderer } from './streamingRenderer.js';
 import { createTurnRendering, startsContinuationRound } from './turnRendering.js?v=20260910round1stable1';
@@ -278,7 +278,10 @@ import { invalidateSettings } from './appConfig.js';
   function _renderContextHeaderRing(pill, pct) {
     const value = Math.max(0, Math.min(100, Number(pct || 0)));
     pill.style.setProperty('--ctx-color', _contextRingColor(value));
+    pill.innerHTML = _contextRingMarkup(value);
+    if (false) {
     pill.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>';
+    }
   }
 
   function _clampAutoCompactThreshold(value) {
@@ -301,7 +304,18 @@ import { invalidateSettings } from './appConfig.js';
     const hashId = _hashSessionCandidate();
     const lastSelectedId = String(window.__odysseusLastSelectedSessionId || '').trim();
     const targetId = activeRowId || hashId || lastSelectedId;
-    if (!targetId) return '';
+    if (!targetId) {
+      // New chats are deliberately held in memory until the first prompt.
+      // Per-chat settings are still actionable before that prompt, so create
+      // the pending session when a setting needs a real session id.
+      if (adopt && sm?.hasPendingChat?.() && sm?.materializePendingSession) {
+        try {
+          await sm.materializePendingSession();
+        } catch (_) {}
+        return (sm.getCurrentSessionId && sm.getCurrentSessionId()) || '';
+      }
+      return '';
+    }
     if (!adopt) return targetId;
     try {
       window.__odysseusComposerUserEdited = true;
@@ -409,8 +423,35 @@ import { invalidateSettings } from './appConfig.js';
 	      await _setChatMemoryExtraction(!memoryToggle.classList.contains('active'), memoryToggle, memoryState);
 	    });
 	    memoryRow.appendChild(memoryCopy);
-	    memoryRow.appendChild(memoryToggle);
-	    popup.appendChild(memoryRow);
+    memoryRow.appendChild(memoryToggle);
+    popup.appendChild(memoryRow);
+
+    const memoryInjectionOn = d.memory_injection_enabled !== false;
+    const memoryInjectionRow = document.createElement('div');
+    memoryInjectionRow.className = 'chat-context-toggle-row';
+    const memoryInjectionCopy = document.createElement('div');
+    memoryInjectionCopy.className = 'chat-context-toggle-copy';
+    const memoryInjectionLabel = document.createElement('span');
+    memoryInjectionLabel.textContent = 'Memory injection';
+    const memoryInjectionState = document.createElement('span');
+    memoryInjectionState.className = 'chat-context-toggle-state';
+    memoryInjectionState.textContent = memoryInjectionOn ? 'On' : 'Off';
+    memoryInjectionCopy.appendChild(memoryInjectionLabel);
+    memoryInjectionCopy.appendChild(memoryInjectionState);
+    const memoryInjectionToggle = document.createElement('button');
+    memoryInjectionToggle.type = 'button';
+    memoryInjectionToggle.className = `chat-context-toggle${memoryInjectionOn ? ' active' : ''}`;
+    memoryInjectionToggle.setAttribute('role', 'switch');
+    memoryInjectionToggle.setAttribute('aria-label', 'Memory injection for this chat');
+    memoryInjectionToggle.setAttribute('aria-checked', memoryInjectionOn ? 'true' : 'false');
+    memoryInjectionToggle.addEventListener('click', async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      await _setChatMemoryInjection(!memoryInjectionToggle.classList.contains('active'), memoryInjectionToggle, memoryInjectionState);
+    });
+    memoryInjectionRow.appendChild(memoryInjectionCopy);
+    memoryInjectionRow.appendChild(memoryInjectionToggle);
+    popup.appendChild(memoryInjectionRow);
 
     const skillsOn = d.skill_injection_enabled !== false;
     const skillsRow = document.createElement('div');
@@ -439,6 +480,7 @@ import { invalidateSettings } from './appConfig.js';
     skillsRow.appendChild(skillsToggle);
     popup.appendChild(skillsRow);
 
+    if (d.thinking_supported) {
     const thinkingOn = d.thinking_mode === 'on';
     const thinkingRow = document.createElement('div');
     thinkingRow.className = 'chat-context-toggle-row';
@@ -459,6 +501,7 @@ import { invalidateSettings } from './appConfig.js';
     });
     thinkingRow.appendChild(thinkingToggle);
     popup.appendChild(thinkingRow);
+    }
 
     const addGenerationSlider = (label, value, min, max, step, formatter, key) => {
       const row = document.createElement('div');
@@ -652,6 +695,41 @@ import { invalidateSettings } from './appConfig.js';
       return true;
     } catch (err) {
       uiModule.showError(`Could not save skill injection: ${err.message || err}`);
+      return false;
+    } finally {
+      if (toggleBtn) toggleBtn.disabled = false;
+    }
+  }
+
+  async function _setChatMemoryInjection(enabled, toggleBtn, stateText) {
+    const sid = await _resolveCurrentSessionId({ adopt: true });
+    if (!sid) {
+      uiModule.showToast('Open a chat first');
+      return false;
+    }
+    const next = !!enabled;
+    if (toggleBtn) toggleBtn.disabled = true;
+    try {
+      const res = await fetch(`/api/session/${encodeURIComponent(sid)}/memory-injection`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ enabled: next }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+      _contextHeaderData = {
+        ...(_contextHeaderData || {}),
+        memory_injection_enabled: next,
+      };
+      if (toggleBtn) {
+        toggleBtn.classList.toggle('active', next);
+        toggleBtn.setAttribute('aria-checked', next ? 'true' : 'false');
+      }
+      if (stateText) stateText.textContent = next ? 'On' : 'Off';
+      uiModule.showToast(next ? 'Memory injection on for this chat' : 'Memory injection off for this chat');
+      return true;
+    } catch (err) {
+      uiModule.showError(`Could not save memory injection: ${err.message || err}`);
       return false;
     } finally {
       if (toggleBtn) toggleBtn.disabled = false;
@@ -2196,6 +2274,10 @@ import { invalidateSettings } from './appConfig.js';
         const _bubbleMode = (_toggleStateForBubble.mode || 'chat') === 'agent' ? 'agent' : 'chat';
         const _bubbleMeta = _pendingAttachInfo ? { attachments: _pendingAttachInfo } : {};
         _bubbleMeta.interaction_mode = _bubbleMode;
+        if (docSel) {
+          _bubbleMeta.document_id = documentModule?.getCurrentDocId?.() || '';
+          _bubbleMeta.document_selections = Array.isArray(docSel) ? docSel : [docSel];
+        }
         _userMsgEl = addMessage('user', userDisplay, null, _bubbleMeta);
       }
       _sendPerf.mark('user_bubble_visible');
@@ -2419,6 +2501,11 @@ import { invalidateSettings } from './appConfig.js';
         }
         fd.append('active_doc_id', activeDocIdForSend);
       }
+      // A minimized mobile sheet remains linked to chat even though it is not
+      // visually mounted. An explicit tab close returns no document id.
+      fd.append('active_doc_state', activeDocIdForSend
+        ? (documentModule?.isPanelOpen?.() ? 'visible' : 'minimized')
+        : 'none');
       // Active email context — when an email reader is open, pass its
       // uid/folder/account so "reply", "summarize", "what does this say"
       // resolve to the email the user is actually looking at instead of
@@ -2499,6 +2586,12 @@ import { invalidateSettings } from './appConfig.js';
       if (presetsModule.getSelectedPreset()) {
         fd.append('preset_id', presetsModule.getSelectedPreset());
       }
+      try {
+        const effort = window.__odysseusGetReasoningEffort ? window.__odysseusGetReasoningEffort() : null;
+        if (effort) {
+          fd.append('reasoning_effort', effort);
+        }
+      } catch (_) {}
 
 
       // Superseded during preflight (uploads, document saves): a newer send
@@ -3168,6 +3261,7 @@ import { invalidateSettings } from './appConfig.js';
       let _liveThinkHeader = null;
       let _liveThinkSpinnerSlot = null;
       let _liveThinkTimerEl = null;
+      let _liveThinkSpinner = null;
       let _liveThinkTokenCount = 0;
       let _liveThinkToggle = null;
       let _liveThinkDomId = null;
@@ -3265,6 +3359,22 @@ import { invalidateSettings } from './appConfig.js';
         _startLiveThinkTimer();
       }
 
+      function _removeLiveThinkingSpinner() {
+        const liveSpinner = _liveThinkSpinner;
+        _liveThinkSpinner = null;
+        if (liveSpinner) {
+          const wrapper = liveSpinner.element;
+          try { liveSpinner.destroy(); } catch (_) {}
+          // createWhirlpool returns an outer wrapper around the Spinner's
+          // inner element; destroy() removes only the inner element.
+          wrapper?.remove?.();
+        }
+        if (_liveThinkSpinnerSlot) {
+          _liveThinkSpinnerSlot.replaceChildren();
+          _liveThinkSpinnerSlot = null;
+        }
+      }
+
       _flushLiveThinking = ({ text = null, rich = false } = {}) => {
         if (text !== null) _queueLiveThinking(text, true);
         if (_liveThinkRenderThrottle) _liveThinkRenderThrottle.flush();
@@ -3280,6 +3390,7 @@ import { invalidateSettings } from './appConfig.js';
         _liveThinkRenderThrottle = null;
         _stopLiveThinkTimer();
         _cancelThinkingGrace();
+        _removeLiveThinkingSpinner();
       };
 
       function _finalizeLiveThinking(text, rich = true) {
@@ -3327,7 +3438,7 @@ import { invalidateSettings } from './appConfig.js';
         if (_liveThinkContent) _liveThinkContent.classList.remove('expanded');
         if (_liveThinkToggle) _liveThinkToggle.classList.remove('expanded');
         if (_liveThinkTimerEl) _liveThinkTimerEl.textContent = elapsed ? _formatThinkStats(elapsed, _liveThinkTokenCount) : '';
-        if (_liveThinkSpinnerSlot) _liveThinkSpinnerSlot.remove();
+        _removeLiveThinkingSpinner();
       }
 
       function _cancelThinkingGrace() {
@@ -3371,7 +3482,7 @@ import { invalidateSettings } from './appConfig.js';
         if (_liveThinkHeader) _liveThinkHeader.textContent = 'View thinking process';
         if (_liveThinkContent) _liveThinkContent.classList.remove('expanded');
         if (_liveThinkToggle) _liveThinkToggle.classList.remove('expanded');
-        if (_liveThinkSpinnerSlot) _liveThinkSpinnerSlot.remove();
+        _removeLiveThinkingSpinner();
         if (_liveThinkTimerEl && elapsed) {
           _liveThinkTimerEl.textContent = _formatThinkStats(elapsed, _liveThinkTokenCount);
           _liveThinkTimerEl.style.marginLeft = 'auto';
@@ -3729,7 +3840,7 @@ import { invalidateSettings } from './appConfig.js';
                 // collapsed (the header label above already says "View").
                 if (_liveThinkContent) _liveThinkContent.classList.remove('expanded');
                 if (_liveThinkToggle) _liveThinkToggle.classList.remove('expanded');
-                if (_liveThinkSpinnerSlot) _liveThinkSpinnerSlot.remove();
+                _removeLiveThinkingSpinner();
                 if (_liveThinkTimerEl && _elapsedDone) {
                   _liveThinkTimerEl.textContent = _formatThinkStats(_elapsedDone, _liveThinkTokenCount);
                   _liveThinkTimerEl.style.marginLeft = 'auto';
@@ -4035,12 +4146,12 @@ import { invalidateSettings } from './appConfig.js';
                   _queueLiveThinking(roundText);
                   // Whirlpool spinner
                   if (_liveThinkSpinnerSlot) {
-                    var _wp = spinnerModule.createWhirlpool(12);
-                    _wp.element.style.margin = '0';
-                    _wp.element.style.width = '12px';
-                    _wp.element.style.height = '12px';
-                    _wp.element.style.transform = 'translateY(-1px)'; // align the whirlpool with the header text
-                    _liveThinkSpinnerSlot.appendChild(_wp.element);
+                    _liveThinkSpinner = spinnerModule.createWhirlpool(12);
+                    _liveThinkSpinner.element.style.margin = '0';
+                    _liveThinkSpinner.element.style.width = '12px';
+                    _liveThinkSpinner.element.style.height = '12px';
+                    _liveThinkSpinner.element.style.transform = 'translateY(-1px)'; // align the whirlpool with the header text
+                    _liveThinkSpinnerSlot.appendChild(_liveThinkSpinner.element);
                   }
                   if (_thinkingRecheckAt) _scheduleThinkingGrace();
                 } else if (hasUnclosedThink && isThinking) {
@@ -4479,6 +4590,13 @@ import { invalidateSettings } from './appConfig.js';
                 if (holder && json.id) holder.dataset.dbId = json.id;
 
               } else if (json.type === 'tool_start') {
+                // A tool call is the model's first completed output for this
+                // round, even though it is rendered as a structured card
+                // rather than prose. Stop the initial TTFT ticker here so
+                // browser/search execution time is not later mislabeled as
+                // "waiting for first token" on the continuation bubble. The
+                // running tool card owns elapsed time until tool_output.
+                markFirstVisibleOutput();
                 _closeOpenThinkingMarkup(_isBg);
                 if (_isBg) continue;
                 _cancelThinkingTimer();
@@ -6727,10 +6845,14 @@ import { invalidateSettings } from './appConfig.js';
 
     const saveBtn = document.createElement('button');
     saveBtn.className = 'edit-save-btn';
-    saveBtn.textContent = 'Send';
+    saveBtn.type = 'button';
+    saveBtn.title = 'Send edited message';
+    saveBtn.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5"></path><path d="m5 12 7-7 7 7"></path></svg><span>Send</span>';
     const cancelBtn = document.createElement('button');
     cancelBtn.className = 'edit-cancel-btn';
-    cancelBtn.textContent = 'Cancel';
+    cancelBtn.type = 'button';
+    cancelBtn.title = 'Cancel editing';
+    cancelBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg><span>Cancel</span>';
     btnRow.appendChild(saveBtn);
     btnRow.appendChild(cancelBtn);
 
@@ -7878,7 +8000,7 @@ import { invalidateSettings } from './appConfig.js';
       }
     } catch (e) {
       console.error('open attachment as document failed', e);
-      import('./ui.js?v=20260908weekhoverfix1').then(m => m.showError && m.showError('Could not open attachment')).catch(() => {});
+      import('./ui.js?v=20260916largetoolscroll1').then(m => m.showError && m.showError('Could not open attachment')).catch(() => {});
       window.open(url, '_blank');  // fallback so the file is still reachable
     }
   }
@@ -7912,11 +8034,24 @@ import { invalidateSettings } from './appConfig.js';
     continueFrom,
     _appendViewReportLink,
     hasActiveStream,
-    openContextSettings: () => {
+    openContextSettings: async () => {
       const pill = document.getElementById('chat-context-pill');
       if (pill && !pill.hidden) {
         pill.click();
         return true;
+      }
+      const sm = _liveSessionModule();
+      if (sm?.hasPendingChat?.() && sm?.materializePendingSession) {
+        try {
+          const materialized = await sm.materializePendingSession();
+          if (materialized) {
+            await refreshChatContextHeader('open-context-settings');
+            if (pill && !pill.hidden) {
+              pill.click();
+              return true;
+            }
+          }
+        } catch (_) {}
       }
       return false;
     },

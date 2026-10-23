@@ -231,6 +231,7 @@ def _wrap_workspace_namespace(
     cwd: str,
     *,
     chdir: str = "/workspace",
+    interpreter_prefix: str | None = None,
 ) -> str | None:
     """Run a shell command with the active workspace mounted at /workspace.
 
@@ -254,8 +255,53 @@ def _wrap_workspace_namespace(
         "--dir", "/tmp", "--tmpfs", "/tmp",
         "--dev-bind", "/dev", "/dev", "--proc", "/proc",
         "--dir", "/workspace", "--bind", cwd, "/workspace",
-        "--chdir", chdir, "/bin/bash", "-lc", content,
     ]
+    # setup-python installs interpreters under /opt, and local CI virtualenvs
+    # can live under /tmp. Those paths are hidden by the private root/tmpfs.
+    # Expose only the active interpreter environment, read-only, so Python
+    # tools keep their installed packages without exposing the host /tmp.
+    if interpreter_prefix:
+        prefix = os.path.abspath(interpreter_prefix)
+        resolved_prefix = os.path.realpath(prefix)
+        mounted_roots = ("/usr", "/home", "/mnt")
+        reserved_roots = {
+            "/", "/tmp", "/var", "/opt", "/etc", "/workspace",
+            "/root", "/run", "/proc", "/dev", "/sys", *mounted_roots,
+        }
+        already_visible = any(
+            prefix == root or prefix.startswith(root + os.sep)
+            for root in mounted_roots
+        )
+        # A prefix is trusted only when it names a specific interpreter tree.
+        # In particular, never overlay the private root, tmpfs, or workspace
+        # with a broad host directory. Reject symlinked prefixes too: bwrap
+        # would otherwise bind the resolved source at a different destination.
+        has_environment_layout = (
+            os.path.isfile(os.path.join(prefix, "pyvenv.cfg"))
+            or (
+                os.path.isfile(os.path.join(prefix, "bin", "python"))
+                and os.path.isdir(os.path.join(
+                    prefix, "lib", f"python{sys.version_info.major}.{sys.version_info.minor}",
+                ))
+            )
+        )
+        if (
+            not already_visible
+            and prefix == resolved_prefix
+            and prefix not in reserved_roots
+            and len(prefix.split(os.sep)) >= 3
+            and os.path.isdir(prefix)
+            and has_environment_layout
+        ):
+            parents = []
+            parent = os.path.dirname(prefix)
+            while parent not in ("/", "/tmp", "/etc", "/workspace", *mounted_roots):
+                parents.append(parent)
+                parent = os.path.dirname(parent)
+            for directory in reversed(parents):
+                args.extend(("--dir", directory))
+            args.extend(("--ro-bind", prefix, prefix))
+    args.extend(("--chdir", chdir, "/bin/bash", "-lc", content))
     return shlex.join(args)
 
 
@@ -874,6 +920,15 @@ def _python_with_visible_final_expression(content: str) -> str:
     return ast.unparse(tree)
 
 
+def _python_with_configured_import_paths(content: str, env: dict | None) -> str:
+    """Expose only explicitly configured package roots under Python ``-I``."""
+    raw = str((env or {}).get("ODYSSEUS_PYTHON_TOOL_SITE_PACKAGES", ""))
+    paths = [item for item in raw.split(os.pathsep) if item and os.path.isabs(item)]
+    if not paths:
+        return content
+    return f"import site\n[site.addsitedir(path) for path in {paths!r}]\nexec(compile({content!r}, '<odysseus-python-tool>', 'exec'))"
+
+
 class PythonTool:
     async def execute(self, content: str, ctx: dict) -> dict:
         from src.tool_execution import agent_cwd, _truncate
@@ -917,7 +972,9 @@ class PythonTool:
         # process-global `/workspace` symlink would break concurrent tasks.
         # Give Python the same per-task namespace Bash receives so both inline
         # code and loaded scripts see the stable virtual workspace root.
-        namespaced_content = _python_with_visible_final_expression(content)
+        namespaced_content = _python_with_configured_import_paths(
+            _python_with_visible_final_expression(content), _subproc_env
+        )
         python_command = shlex.join((sys.executable or "python", "-I", "-c", namespaced_content))
         # Code that explicitly uses the public /workspace path runs inside a
         # namespace whose stable cwd is that same bind. Host workspaces under
@@ -929,6 +986,7 @@ class PythonTool:
                 python_command,
                 agent_cwd(),
                 chdir="/workspace",
+                interpreter_prefix=sys.prefix,
             )
             if needs_virtual_namespace
             else None
@@ -944,8 +1002,11 @@ class PythonTool:
         else:
             # Platforms without a usable namespace still receive the same
             # alias contract through a conservative source rewrite.
-            content = _python_with_visible_final_expression(
-                _replace_workspace_alias(content, agent_cwd())
+            content = _python_with_configured_import_paths(
+                _python_with_visible_final_expression(
+                    _replace_workspace_alias(content, agent_cwd())
+                ),
+                _subproc_env,
             )
             proc = await asyncio.create_subprocess_exec(
                 (sys.executable or "python"), "-I", "-c", content,

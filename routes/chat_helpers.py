@@ -29,6 +29,31 @@ logger = logging.getLogger(__name__)
 _INVISIBLE_RESPONSE_CHARS = "\u2063\u200b\u200c\u200d\ufeff"
 
 
+def youtube_prefetch_sources(message: str, transcripts: list) -> list[dict[str, str]]:
+    """Expose successful automatic YouTube acquisition as answer provenance."""
+    evidence = "\n".join(str(item or "") for item in transcripts)
+    has_transcript = "[YOUTUBE VIDEO TRANSCRIPT]" in evidence
+    has_comments = "[YOUTUBE VIDEO COMMENTS" in evidence
+    if not (has_transcript or has_comments):
+        return []
+    title_match = re.search(r"(?m)^Title:\s*(.+?)\s*$", evidence)
+    sources = []
+    for raw in re.findall(r"https?://[^\s<>\"']+", str(message or ""), re.I):
+        url = raw.rstrip(".,;:!?)]}")
+        if not re.match(r"https?://(?:www\.)?(?:youtube\.com|youtu\.be)(?:/|$)", url, re.I):
+            continue
+        if any(source["url"] == url for source in sources):
+            continue
+        sources.append({
+            "url": url,
+            "title": title_match.group(1).strip() if title_match else "YouTube video",
+            "acquisition": "automatic_youtube_context",
+            "evidence": "transcript+comments" if has_transcript and has_comments
+                        else "transcript" if has_transcript else "comments",
+        })
+    return sources
+
+
 def _skill_run_is_complex(agent_rounds: int, agent_tool_calls: int) -> bool:
     """Keep one-off TUI edit loops out of automatic skill extraction."""
     return agent_tool_calls >= 4 or (agent_rounds >= 5 and agent_tool_calls >= 3)
@@ -795,6 +820,52 @@ def _session_url_matches_endpoint(session_url: str, endpoint_base: str) -> bool:
         return False
 
 
+def _endpoint_created_sort_key(ep) -> tuple:
+    created = getattr(ep, "created_at", None)
+    try:
+        ts = float(created.timestamp()) if created else 0.0
+    except Exception:
+        ts = 0.0
+    return (ts, str(getattr(ep, "id", "") or ""))
+
+
+def _select_session_endpoint(sess, target_url: str, endpoints) -> tuple:
+    """Pick the endpoint a session should use for credential resolution.
+
+    Two endpoints may share one provider URL but not credentials (e.g. two
+    ChatGPT Subscription accounts), so an explicit ``sess.endpoint_id`` binding
+    wins whenever it still matches the session URL. Without a binding the
+    oldest URL-matching endpoint is chosen deterministically and persisted.
+
+    Returns ``(endpoint, bound_by_fallback)``; ``bound_by_fallback`` is True
+    when the choice came from URL matching and may be persisted as a binding.
+    """
+    matching = [ep for ep in endpoints if _session_url_matches_endpoint(target_url, getattr(ep, "base_url", "") or "")]
+    if not matching:
+        return None, False
+    bound_id = getattr(sess, "endpoint_id", None) or None
+    if bound_id:
+        for ep in matching:
+            if str(ep.id) == str(bound_id):
+                sess.endpoint_id = ep.id
+                return ep, False
+        # The bound endpoint is gone or disabled. Never silently borrow another
+        # endpoint's credentials when several routes share this URL.
+        return None, False
+    matching.sort(key=_endpoint_created_sort_key)
+    chosen = matching[0]
+    if len(matching) > 1:
+        logger.warning(
+            "Session %s has no endpoint binding and %d endpoints share its URL; using oldest endpoint %s",
+            getattr(sess, "id", "?"), len(matching), chosen.id,
+        )
+    try:
+        sess.endpoint_id = chosen.id
+    except Exception:
+        pass
+    return chosen, True
+
+
 def _has_auth_keys(headers) -> bool:
     """True if a headers dict carries an Authorization/x-api-key entry."""
     return isinstance(headers, dict) and any(
@@ -804,6 +875,7 @@ def _has_auth_keys(headers) -> bool:
 
 def resolve_session_auth(sess, session_id: str, owner: Optional[str] = None):
     """Ensure session has auth headers — resolve from endpoint DB if missing."""
+    owner = owner or getattr(sess, "owner", None)
     try:
         from src.chatgpt_subscription import is_chatgpt_subscription_base
         is_chatgpt_subscription = is_chatgpt_subscription_base(getattr(sess, "endpoint_url", "") or "")
@@ -812,11 +884,22 @@ def resolve_session_auth(sess, session_id: str, owner: Optional[str] = None):
     has_auth = _has_auth_keys(sess.headers)
     if has_auth and not is_chatgpt_subscription:
         return
+    if is_chatgpt_subscription:
+        # Never reuse a stale bearer after deletion, disablement or failed refresh.
+        sess.headers = {}
 
     try:
         from src.endpoint_resolver import build_headers, resolve_endpoint_runtime
         db = SessionLocal()
         try:
+            stored_q = db.query(DBSession).filter(DBSession.id == session_id)
+            if owner:
+                stored_q = stored_q.filter(DBSession.owner == owner)
+            if is_chatgpt_subscription:
+                stored = stored_q.first()
+                if stored is not None and _has_auth_keys(stored.headers):
+                    stored_q.update({"headers": {}})
+                    db.commit()
             target_url = getattr(sess, "endpoint_url", "") or ""
             if not target_url:
                 return
@@ -827,44 +910,36 @@ def resolve_session_auth(sess, session_id: str, owner: Optional[str] = None):
                 # with similar endpoint URLs can borrow each other's API key.
                 from src.auth_helpers import owner_filter
                 q = owner_filter(q, ModelEndpoint, owner)
-            for ep in q.all():
-                if not _session_url_matches_endpoint(target_url, ep.base_url or ""):
-                    continue
-                try:
-                    base, api_key = resolve_endpoint_runtime(ep, owner=owner)
-                except Exception as e:
-                    logger.warning("Failed to resolve provider auth for session %s: %s", session_id, e)
-                    return
-                if not api_key:
-                    # No usable key (e.g. ChatGPT Subscription needs re-auth).
-                    return
-                sess.headers = build_headers(api_key, base)
-                if is_chatgpt_subscription:
-                    # The bearer is short-lived and re-resolved per request, so it
-                    # stays request-local and is never written to the plaintext
-                    # sessions.headers column. Proactively strip any bearer an
-                    # older code path may have persisted so it does not linger.
-                    stale_q = db.query(DBSession).filter(DBSession.id == session_id)
-                    if owner:
-                        stale_q = stale_q.filter(DBSession.owner == owner)
-                    stored = stale_q.first()
-                    if stored is not None and _has_auth_keys(stored.headers):
-                        stale_q.update({"headers": {}})
-                        db.commit()
-                        logger.info(f"Cleared persisted ChatGPT Subscription bearer from session {session_id}")
-                    logger.debug(f"Resolved request-local ChatGPT Subscription auth for session {session_id}")
-                    return
-                update_q = db.query(DBSession).filter(DBSession.id == session_id)
-                if owner:
-                    update_q = update_q.filter(DBSession.owner == owner)
-                update_q.update({"headers": sess.headers})
-                db.commit()
-                logger.info(f"Resolved and persisted auth headers for session {session_id} from endpoint {ep.name}")
+            ep, bound_here = _select_session_endpoint(sess, target_url, q.all())
+            if ep is None:
                 return
+            if bound_here:
+                # Bind before authentication, including failed/expired credentials.
+                stored_q.filter(DBSession.endpoint_id == None).update({"endpoint_id": ep.id})
+                db.commit()
+            try:
+                base, api_key = resolve_endpoint_runtime(ep, owner=owner)
+            except Exception as e:
+                logger.warning("Failed to resolve provider auth for session %s: %s", session_id, type(e).__name__)
+                return
+            if not api_key:
+                # No usable key (e.g. ChatGPT Subscription needs re-auth).
+                return
+            sess.headers = build_headers(api_key, base)
+            if is_chatgpt_subscription:
+                # Request-local only; persistence was cleaned before resolution.
+                return
+            update_q = db.query(DBSession).filter(DBSession.id == session_id)
+            if owner:
+                update_q = update_q.filter(DBSession.owner == owner)
+            update_q.update({"headers": sess.headers})
+            db.commit()
+            logger.info(f"Resolved and persisted auth headers for session {session_id} from endpoint {ep.name}")
+            return
         finally:
             db.close()
     except Exception as e:
-        logger.warning(f"Failed to resolve session headers: {e}")
+        logger.warning("Failed to resolve session headers: %s", type(e).__name__)
 
 
 def _match_cached_model_id(requested: str, models) -> Optional[str]:
@@ -1041,7 +1116,12 @@ async def build_chat_context(
     casual_low_signal = _is_casual_low_signal(context_message)
 
     # Memory enabled?
-    mem_enabled = not incognito and not no_memory and uprefs.get("memory_enabled", True)
+    mem_enabled = (
+        not incognito
+        and not no_memory
+        and uprefs.get("memory_enabled", True)
+        and getattr(sess, "memory_injection_enabled", True) is not False
+    )
     # Skills injection respects its own enable toggle (mirrors memory_enabled).
     # When off, the "Available skills" index is not added to the prompt.
     skills_enabled = (
@@ -1137,6 +1217,11 @@ async def build_chat_context(
     # YouTube transcripts
     for transcript in preprocessed.youtube_transcripts:
         preface.append(untrusted_context_message("youtube transcript", transcript))
+    for source in youtube_prefetch_sources(
+        preprocessed.text_for_context, preprocessed.youtube_transcripts
+    ):
+        if not any(existing.get("url") == source["url"] for existing in web_sources):
+            web_sources.append(source)
 
     # Normalize model ID. Prefer cached endpoint models so group chat does not
     # re-hit slow local /models endpoints on every participant turn.

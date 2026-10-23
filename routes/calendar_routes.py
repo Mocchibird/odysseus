@@ -310,6 +310,7 @@ def _import_ics_content(
         ).delete()
 
     imported = skipped = repaired = 0
+    event_uids = []
     for comp in cal_data.walk():
         if comp.name != "VEVENT":
             continue
@@ -345,6 +346,7 @@ def _import_ics_content(
                 if fixed_end != existing.dtend:
                     existing.dtend = fixed_end
                     repaired += 1
+                event_uids.append(existing.uid)
                 skipped += 1
                 continue
 
@@ -391,6 +393,7 @@ def _import_ics_content(
             origin="ics" if persistent else None,
         )
         db.add(ev)
+        event_uids.append(uid_val)
         imported += 1
 
     db.commit()
@@ -402,6 +405,7 @@ def _import_ics_content(
         "deleted": deleted_existing,
         "calendar": cal_display,
         "calendar_id": target_cal.id,
+        "event_uids": event_uids,
     }
 
 
@@ -1105,6 +1109,10 @@ def _event_to_dict(ev: CalendarEvent, db=None, owner: str | None = None) -> dict
         "reminder_note_id": reminder["note_id"] if reminder else None,
         "reminder_due_date": reminder["due_date"] if reminder else None,
         "reminder_minutes": reminder["minutes"] if reminder else None,
+        "source_email_uid": getattr(ev, "source_email_uid", None),
+        "source_email_folder": getattr(ev, "source_email_folder", None),
+        "source_email_account_id": getattr(ev, "source_email_account_id", None),
+        "source_email_message_id": getattr(ev, "source_email_message_id", None),
     }
 
 

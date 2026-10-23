@@ -149,7 +149,10 @@ def _safesearch_for(provider: str) -> Optional[str]:
 
 # ── SearXNG ──
 
-_NEWS_HINTS = ("news", "nyheter", "headlines", "breaking", "latest", "today", "idag")
+_NEWS_HINTS = (
+    "news", "nyheter", "headlines", "breaking", "idag",
+    "current events", "what's happening", "what is happening",
+)
 _NEWS_EVENT_HINT_RE = re.compile(
     r"\b(?:deport(?:ation|ed|ing)?|arrest(?:ed|s)?|election(?:s)?|"
     r"evacuat(?:e|ed|ion)|flood(?:ing|s|ed)?|sanction(?:s|ed)?)\b",
@@ -210,19 +213,24 @@ def searxng_search_api(query: str, count: Optional[int] = None, categories: str 
     is_news = (
         not is_software_release_query
         and (
-            time_filter is not None
-            or any(h in q_lc for h in _NEWS_HINTS)
+            any(h in q_lc for h in _NEWS_HINTS)
             or bool(_NEWS_EVENT_HINT_RE.search(query))
+            or (
+                bool(re.search(r'\bdevelopments\b', query, re.I))
+                and bool(re.search(r'\b(?:latest|recent|today|this\s+(?:week|month)|past\s+(?:week|month))\b', query, re.I))
+            )
         )
     )
     if is_news and categories == "general":
         params["categories"] = "news"
         if time_filter in ("day", "week", "month", "year"):
-            # 'day' is too sparse on most SearXNG news engines — widen to a week
-            # so there's enough volume; the news category already biases recent.
-            params["time_range"] = "week" if time_filter in ("day", "week") else time_filter
+            params["time_range"] = time_filter
     else:
         params["categories"] = categories
+        # Freshness and source category are independent: current manuals,
+        # comparisons and documentation still belong in general search.
+        if time_filter in ("day", "week", "month", "year"):
+            params["time_range"] = time_filter
         # Route general queries to engines that aren't blocked (default general
         # set returns 0 on this instance — see _GENERAL_ENGINES).
         if categories == "general" and _GENERAL_ENGINES:
@@ -259,17 +267,11 @@ def searxng_search_api(query: str, count: Optional[int] = None, categories: str 
 
         active_params = params
         parsed, data = _run(active_params)
-        if not parsed and is_news and categories == "general":
+        if not parsed and active_params.get("categories") == "news":
             # Some self-hosted SearXNG configs have no working news engines.
             # Fall back to the known-good general engines before reporting an
             # empty search, otherwise common queries like "Canada news" fail.
-            fallback = {
-                "q": query,
-                "format": "json",
-                "language": "en",
-                "categories": "general",
-                "safesearch": _safesearch_for("searxng"),
-            }
+            fallback = {**active_params, "categories": "general"}
             if _GENERAL_ENGINES:
                 fallback["engines"] = _GENERAL_ENGINES
             logger.info(
@@ -303,23 +305,28 @@ def searxng_search_api(query: str, count: Optional[int] = None, categories: str 
         return parsed
     except Exception as e:
         logger.warning(f"SearXNG JSON API search failed: {e}")
-        html_results = searxng_search(query, max_results=count)
+        html_results = searxng_search(query, max_results=count, search_params=active_params)
         if html_results:
             logger.info(f"SearXNG HTML fallback returned {len(html_results)} results for: {query}")
         return html_results
 
 
-def searxng_search(query, max_results=10):
+def searxng_search(query, max_results=10, *, search_params=None):
     """Search using SearXNG instance - parsing HTML."""
     instance = _get_search_instance()
     api_key = ""
     req_headers = {"User-Agent": WEB_FETCH_USER_AGENT}
     if api_key:
         req_headers["Authorization"] = f"Bearer {api_key}"
+    # Transport fallback must not change the user's retrieval constraints.
+    # In particular omit only JSON formatting, not publication time/category.
+    params = {key: value for key, value in (search_params or {}).items()
+              if key in {'categories', 'engines', 'language', 'time_range'}}
+    params.update({'q': query, 'safesearch': _safesearch_for('searxng')})
     try:
         response = httpx.get(
             f"{instance}/search",
-            params={"q": query, "safesearch": _safesearch_for("searxng")},
+            params=params,
             headers=req_headers,
             timeout=10,
         )
@@ -453,7 +460,11 @@ def duckduckgo_search(query: str, count: Optional[int] = None, time_filter: Opti
                 "https://html.duckduckgo.com/html/",
                 params={"q": query, "kp": _safesearch_for("duckduckgo_html")},
                 headers={"User-Agent": WEB_FETCH_USER_AGENT},
-                timeout=REQUEST_TIMEOUT,
+                # This is a last-resort compatibility path when the declared
+                # optional ``ddgs`` dependency is absent. Keep it short so a
+                # blocked public endpoint cannot consume the full search SLA
+                # across provider and query-relaxation retries.
+                timeout=min(REQUEST_TIMEOUT, 5),
             )
             response.raise_for_status()
             soup = BeautifulSoup(response.text, "html.parser")

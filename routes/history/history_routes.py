@@ -319,6 +319,7 @@ def setup_history_routes(session_manager, upload_handler=None) -> APIRouter:
                     "history": history_dict,
                     "model": db_session.model,
                     "endpoint_url": db_session.endpoint_url,
+                    "endpoint_id": getattr(db_session, "endpoint_id", None),
                     "name": db_session.name,
                     "offset": page_offset,
                     "limit": page_limit,
@@ -382,6 +383,7 @@ def setup_history_routes(session_manager, upload_handler=None) -> APIRouter:
             "history": history_dict,
             "model": session.model,
             "endpoint_url": session.endpoint_url,
+            "endpoint_id": getattr(session, "endpoint_id", None),
             "name": session.name,
         }
 
@@ -806,6 +808,7 @@ def setup_history_routes(session_manager, upload_handler=None) -> APIRouter:
                 model=source.model,
                 rag=False,
                 owner=getattr(source, 'owner', None),
+                endpoint_id=getattr(source, 'endpoint_id', None),
             )
 
             # Copy messages up to keep_count
@@ -862,10 +865,12 @@ def setup_history_routes(session_manager, upload_handler=None) -> APIRouter:
         try:
             from src.context_compactor import auto_compact_threshold_percent
             from src.model_context import estimate_tokens, get_context_length
+            from src.model_profiles import supports_user_thinking_toggle
 
             messages = session.get_context_messages()
             used = int(estimate_tokens(messages))
             ctx_len = int(get_context_length(session.endpoint_url, session.model) or 0)
+            thinking_supported = supports_user_thinking_toggle(session.model)
             pct = round((used / ctx_len) * 100, 1) if ctx_len else 0.0
             pct = max(0.0, min(100.0, pct))
             auto_threshold = auto_compact_threshold_percent()
@@ -882,6 +887,7 @@ def setup_history_routes(session_manager, upload_handler=None) -> APIRouter:
                 "session_id": session_id,
                 "model": session.model,
                 "endpoint_url": session.endpoint_url,
+                "endpoint_id": getattr(session, "endpoint_id", None),
                 "used_tokens": used,
                 "context_length": ctx_len,
                 "context_percent": pct,
@@ -892,8 +898,10 @@ def setup_history_routes(session_manager, upload_handler=None) -> APIRouter:
                 "should_compact": pct >= auto_threshold,
                 "auto_compact_threshold": auto_threshold,
                 "memory_extraction_enabled": getattr(session, "memory_extraction_enabled", True) is not False,
+                "memory_injection_enabled": getattr(session, "memory_injection_enabled", True) is not False,
                 "skill_injection_enabled": getattr(session, "skill_injection_enabled", True) is not False,
-                "thinking_mode": getattr(session, "thinking_mode", "") or "off",
+                "thinking_mode": (getattr(session, "thinking_mode", "") or "off") if thinking_supported else "off",
+                "thinking_supported": thinking_supported,
                 "temperature_override": getattr(session, "temperature_override", None),
                 "max_tokens_override": getattr(session, "max_tokens_override", None),
             }
@@ -975,6 +983,43 @@ def setup_history_routes(session_manager, upload_handler=None) -> APIRouter:
         finally:
             db.close()
 
+    @router.post("/api/session/{session_id}/memory-injection")
+    async def set_session_memory_injection(request: Request, session_id: str) -> Dict[str, Any]:
+        """Toggle saved-memory injection for one chat session."""
+        _verify_session_owner(request, session_id, session_manager)
+        try:
+            session = session_manager.get_session(session_id)
+        except KeyError:
+            raise HTTPException(404, "Session not found")
+
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        if "enabled" not in body:
+            raise HTTPException(400, "Missing enabled")
+        enabled = bool(body.get("enabled"))
+
+        db = SessionLocal()
+        try:
+            db_session = db.query(DbSession).filter(DbSession.id == session_id).first()
+            if not db_session:
+                session.memory_injection_enabled = enabled
+                session_manager.save_sessions()
+                return {"status": "success", "memory_injection_enabled": enabled}
+            db_session.memory_injection_enabled = enabled
+            db.commit()
+            session.memory_injection_enabled = enabled
+            return {"status": "success", "memory_injection_enabled": enabled}
+        except HTTPException:
+            raise
+        except Exception as e:
+            db.rollback()
+            logger.error(f"Memory injection toggle error {session_id}: {e}")
+            raise HTTPException(500, "Failed to update memory injection")
+        finally:
+            db.close()
+
     @router.post("/api/session/{session_id}/generation-settings")
     async def set_session_generation_settings(request: Request, session_id: str) -> Dict[str, Any]:
         _verify_session_owner(request, session_id, session_manager)
@@ -983,13 +1028,49 @@ def setup_history_routes(session_manager, upload_handler=None) -> APIRouter:
             body = await request.json()
         except KeyError:
             raise HTTPException(404, "Session not found")
-        mode = str(body.get("thinking_mode") or "").lower()
-        if mode not in {"", "on", "off"}:
-            raise HTTPException(400, "Invalid thinking mode")
-        temperature = body.get("temperature_override")
-        temperature = None if temperature in (None, "") else max(0.0, min(2.0, float(temperature)))
-        max_tokens = body.get("max_tokens_override")
-        max_tokens = None if max_tokens in (None, "", 0) else max(256, min(32768, int(max_tokens)))
+        mode = getattr(session, "thinking_mode", "off") or "off"
+        raw_effort = body.get("reasoning_effort")
+        if raw_effort is not None:
+            clean_effort = str(raw_effort).strip().lower()
+            if clean_effort in {"", "default"}:
+                mode = "off"
+            else:
+                from src.chatgpt_subscription import get_chatgpt_model_metadata
+                meta = get_chatgpt_model_metadata(session.model)
+                if meta and clean_effort in [lvl.lower() for lvl in meta.get("supported_reasoning_levels", [])]:
+                    mode = f"effort:{clean_effort}"
+                else:
+                    mode = "off"
+        elif "thinking_mode" in body:
+            raw_mode = str(body.get("thinking_mode") or "").strip().lower()
+            if raw_mode.startswith("effort:"):
+                clean_effort = raw_mode[7:].strip()
+                from src.chatgpt_subscription import get_chatgpt_model_metadata
+                meta = get_chatgpt_model_metadata(session.model)
+                if meta and clean_effort in [lvl.lower() for lvl in meta.get("supported_reasoning_levels", [])]:
+                    mode = f"effort:{clean_effort}"
+                else:
+                    mode = "off"
+            elif raw_mode in {"", "on", "off"}:
+                mode = raw_mode
+                from src.model_profiles import supports_user_thinking_toggle
+                if not supports_user_thinking_toggle(session.model):
+                    mode = "off"
+            else:
+                raise HTTPException(400, "Invalid thinking mode")
+
+        if "temperature_override" in body:
+            temperature = body.get("temperature_override")
+            temperature = None if temperature in (None, "") else max(0.0, min(2.0, float(temperature)))
+        else:
+            temperature = getattr(session, "temperature_override", None)
+
+        if "max_tokens_override" in body:
+            max_tokens = body.get("max_tokens_override")
+            max_tokens = None if max_tokens in (None, "", 0) else max(256, min(32768, int(max_tokens)))
+        else:
+            max_tokens = getattr(session, "max_tokens_override", None)
+
         db = SessionLocal()
         try:
             row = db.query(DbSession).filter(DbSession.id == session_id).first()
@@ -998,7 +1079,14 @@ def setup_history_routes(session_manager, upload_handler=None) -> APIRouter:
             row.thinking_mode, row.temperature_override, row.max_tokens_override = mode, temperature, max_tokens
             db.commit()
             session.thinking_mode, session.temperature_override, session.max_tokens_override = mode, temperature, max_tokens
-            return {"status": "success", "thinking_mode": mode, "temperature_override": temperature, "max_tokens_override": max_tokens}
+            resp_effort = mode[7:] if mode.startswith("effort:") else ("default" if mode in {"", "off"} else None)
+            return {
+                "status": "success",
+                "thinking_mode": mode,
+                "reasoning_effort": resp_effort,
+                "temperature_override": temperature,
+                "max_tokens_override": max_tokens,
+            }
         finally:
             db.close()
 

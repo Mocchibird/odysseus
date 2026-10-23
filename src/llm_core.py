@@ -15,6 +15,7 @@ from contextlib import asynccontextmanager
 from fastapi import HTTPException
 from typing import Optional, Dict, List, Tuple
 from src.model_context import get_context_length, DEFAULT_CONTEXT, is_local_endpoint
+from src.model_profiles import is_odysseus_merged_tools_model
 from urllib.parse import urlparse
 from src.constants import OLLAMA_DEFAULT_PORT, LOCAL_HOSTS
 
@@ -39,9 +40,9 @@ def _is_managed_stream_endpoint(url: str) -> bool:
     except ValueError:
         return False
 
-_LOCAL_MODEL_LOCK = asyncio.Lock()
-_LOCAL_MODEL_WAITING_FOREGROUND = 0
-_LOCAL_MODEL_CURRENT: Dict[str, object] = {}
+_LOCAL_MODEL_LOCKS: Dict[str, asyncio.Lock] = {}
+_LOCAL_MODEL_WAITING_FOREGROUND: Dict[str, int] = {}
+_LOCAL_MODEL_CURRENT: Dict[str, Dict[str, object]] = {}
 
 
 def _normalize_usage_counts(input_value=0, output_value=0):
@@ -95,6 +96,14 @@ def _local_model_gate_enabled() -> bool:
     return os.getenv("ODYSSEUS_LOCAL_MODEL_GATE", "true").lower() not in {"0", "false", "no", "off"}
 
 
+def _local_model_gate_key(target_url: str) -> str:
+    """Identify one independently schedulable local inference endpoint."""
+    parsed = urlparse(str(target_url or ""))
+    host = (parsed.hostname or "").lower()
+    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    return f"{parsed.scheme.lower()}://{host}:{port}"
+
+
 def _gate_workload(workload: Optional[str]) -> str:
     return "background" if str(workload or "").lower() == "background" else "foreground"
 
@@ -112,12 +121,15 @@ async def _local_model_slot(target_url: str, model: str, workload: Optional[str]
         yield
         return
 
-    global _LOCAL_MODEL_WAITING_FOREGROUND
+    gate_key = _local_model_gate_key(target_url)
+    gate_lock = _LOCAL_MODEL_LOCKS.setdefault(gate_key, asyncio.Lock())
     kind = _gate_workload(workload)
     current_task = asyncio.current_task()
     if kind == "foreground":
-        _LOCAL_MODEL_WAITING_FOREGROUND += 1
-        current = dict(_LOCAL_MODEL_CURRENT)
+        _LOCAL_MODEL_WAITING_FOREGROUND[gate_key] = (
+            _LOCAL_MODEL_WAITING_FOREGROUND.get(gate_key, 0) + 1
+        )
+        current = dict(_LOCAL_MODEL_CURRENT.get(gate_key, {}))
         if current.get("workload") == "background":
             task = current.get("task")
             if isinstance(task, asyncio.Task) and not task.done():
@@ -133,32 +145,38 @@ async def _local_model_slot(target_url: str, model: str, workload: Optional[str]
             from src.interactive_gate import has_foreground_activity
         except Exception:
             has_foreground_activity = lambda: False  # type: ignore
-        while _LOCAL_MODEL_WAITING_FOREGROUND > 0 or has_foreground_activity():
+        while (
+            _LOCAL_MODEL_WAITING_FOREGROUND.get(gate_key, 0) > 0
+            or has_foreground_activity()
+        ):
             await asyncio.sleep(0.25)
 
     acquired = False
     try:
-        await _LOCAL_MODEL_LOCK.acquire()
+        await gate_lock.acquire()
         acquired = True
         if kind == "foreground":
-            _LOCAL_MODEL_WAITING_FOREGROUND = max(0, _LOCAL_MODEL_WAITING_FOREGROUND - 1)
-        _LOCAL_MODEL_CURRENT.clear()
-        _LOCAL_MODEL_CURRENT.update({
+            _LOCAL_MODEL_WAITING_FOREGROUND[gate_key] = max(
+                0, _LOCAL_MODEL_WAITING_FOREGROUND.get(gate_key, 0) - 1
+            )
+        _LOCAL_MODEL_CURRENT[gate_key] = {
             "task": current_task,
             "workload": kind,
             "url": target_url,
             "model": model,
             "started": time.time(),
-        })
+        }
         yield
     finally:
-        if kind == "foreground":
-            _LOCAL_MODEL_WAITING_FOREGROUND = max(0, _LOCAL_MODEL_WAITING_FOREGROUND - 1)
-        if acquired and _LOCAL_MODEL_LOCK.locked():
-            owner = _LOCAL_MODEL_CURRENT.get("task")
+        if kind == "foreground" and not acquired:
+            _LOCAL_MODEL_WAITING_FOREGROUND[gate_key] = max(
+                0, _LOCAL_MODEL_WAITING_FOREGROUND.get(gate_key, 0) - 1
+            )
+        if acquired and gate_lock.locked():
+            owner = _LOCAL_MODEL_CURRENT.get(gate_key, {}).get("task")
             if owner is current_task:
-                _LOCAL_MODEL_CURRENT.clear()
-            _LOCAL_MODEL_LOCK.release()
+                _LOCAL_MODEL_CURRENT.pop(gate_key, None)
+            gate_lock.release()
 
 class LLMConfig:
     """Configuration constants for LLM operations."""
@@ -237,7 +255,8 @@ def _cache_header_identity(headers) -> str:
 
 def _get_cache_key(url: str, model: str, messages: List[Dict],
                    temperature: float, max_tokens: int, headers=None,
-                   thinking_mode: Optional[str] = None) -> str:
+                   thinking_mode: Optional[str] = None,
+                   reasoning_effort: Optional[str] = None) -> str:
     """Generate a cache key partitioned by endpoint and credential identity."""
     hashable_messages = []
     for msg in messages:
@@ -251,6 +270,7 @@ def _get_cache_key(url: str, model: str, messages: List[Dict],
         'temp': temperature,
         'max_tokens': max_tokens,
         'thinking_mode': _normalize_thinking_mode(thinking_mode),
+        'reasoning_effort': str(reasoning_effort or "").strip().lower(),
         # Never put credentials in a cache key or loggable cache payload.  The
         # digest only prevents responses from one configured account/route
         # being returned under another route with the same URL and model.
@@ -1080,6 +1100,8 @@ def _detect_provider(url: str) -> str:
     from src.copilot import is_copilot_base
     if is_copilot_base(url):
         return "copilot"
+    if _host_match(url, "featherless.ai"):
+        return "featherless"
     if _host_match(url, "cerebras.ai"):
         return "cerebras"
     if _host_match(url, "mistral.ai"):
@@ -1167,7 +1189,7 @@ def _is_odysseus_qwen_tool_router_model(model: str) -> bool:
         or "qwen35-9b-tool-router" in value
         or "qwen3.5-9b-tool-router" in value
         or "odysseus-qwen3.5-9b" in value
-        or value.startswith("odysseus-qwen3.5-tools-")
+        or is_odysseus_merged_tools_model(value)
         or "qwen35-email" in value
         or "qwen3.5-email" in value
         or "qwen35-calendar" in value
@@ -1311,6 +1333,7 @@ def _provider_label(url: str) -> str:
     if is_chatgpt_subscription_base(url): return "ChatGPT Subscription"
     from src.copilot import is_copilot_base
     if is_copilot_base(url): return "GitHub Copilot"
+    if _host_match(url, "featherless.ai"): return "Featherless.ai"
     if _host_match(url, "cerebras.ai"):
         return "cerebras"
     if _host_match(url, "mistral.ai"): return "Mistral"
@@ -1478,6 +1501,33 @@ def _chatgpt_subscription_instructions(messages: List[Dict]) -> str:
     return "You are a helpful AI assistant."
 
 
+# Provider-native agentic surfaces that must never be sent on the ChatGPT
+# Subscription route. ChatGPT provides model inference only; Odysseus is the
+# only agent (planning, tool selection/execution, filesystem, shell, browser,
+# MCP). Odysseus' own text tool protocol travels inside ``instructions``/``input``.
+CHATGPT_FORBIDDEN_PAYLOAD_KEYS = frozenset({
+    "tools",
+    "tool_choice",
+    "parallel_tool_calls",
+    "web_search",
+    "web_search_preview",
+    "file_search",
+    "computer",
+    "computer_use",
+    "computer_use_preview",
+    "shell",
+    "local_shell",
+    "code_interpreter",
+    "image_generation",
+    "mcp",
+    "function",
+    "functions",
+    "include",
+    "previous_response_id",
+    "background",
+})
+
+
 def _build_chatgpt_responses_payload(
     model: str,
     messages: List[Dict],
@@ -1485,9 +1535,19 @@ def _build_chatgpt_responses_payload(
     max_tokens: int,
     *,
     stream: bool = False,
+    tools: Optional[List[Dict]] = None,
+    reasoning_effort: Optional[str] = None,
+    **_ignored,
 ) -> Dict:
+    """Build the ChatGPT/Codex Responses request: model inference only.
+
+    ``tools`` (and any other provider-native tool declaration) is accepted for
+    signature compatibility with the other transports and deliberately
+    discarded. See :data:`CHATGPT_FORBIDDEN_PAYLOAD_KEYS`.
+    """
     from src.chatgpt_subscription import build_responses_input
 
+    del tools, _ignored
     conversation = [msg for msg in (messages or []) if (msg.get("role") or "") != "system"]
     payload: Dict = {
         "model": model,
@@ -1501,7 +1561,29 @@ def _build_chatgpt_responses_payload(
     # ChatGPT Subscription Codex API does not support max_output_tokens —
     # passing it returns HTTP 400 "Unsupported parameter: max_output_tokens".
     # Do not include it in the payload.
-    return payload
+    if reasoning_effort and str(reasoning_effort).strip().lower() not in {"", "default"}:
+        payload["reasoning"] = {"effort": str(reasoning_effort).strip().lower()}
+    return _strip_chatgpt_native_tool_surfaces(payload)
+
+
+CHATGPT_ALLOWED_PAYLOAD_KEYS = frozenset({
+    "model", "instructions", "input", "stream", "store", "temperature", "reasoning",
+})
+
+
+def _strip_chatgpt_native_tool_surfaces(payload: Dict) -> Dict:
+    """Only explicitly approved inference fields may cross this boundary."""
+    return {key: value for key, value in payload.items() if key in CHATGPT_ALLOWED_PAYLOAD_KEYS}
+
+
+def _chatgpt_safe_error(message: str, headers: Dict) -> str:
+    """Upstream diagnostics must never echo the request bearer to the UI."""
+    result = str(message)
+    for key, value in (headers or {}).items():
+        if key.lower() in {"authorization", "x-api-key"} and value:
+            secret = str(value).removeprefix("Bearer ")
+            result = result.replace(str(value), "[redacted]").replace(secret, "[redacted]")
+    return result
 
 
 def _format_chatgpt_subscription_error(status_code: int, text: str) -> str:
@@ -2501,6 +2583,7 @@ async def llm_call_async(
     availability_only_transport: bool = False,
     return_model_metadata: bool = False,
     thinking_mode: Optional[str] = None,
+    reasoning_effort: Optional[str] = None,
 ) -> str | tuple[str, str]:
     """Asynchronous LLM call using httpx with connection pooling, timeout, retry logic, and performance logging."""
     provider = _detect_provider(url)
@@ -2519,9 +2602,27 @@ async def llm_call_async(
     else:
         messages_copy = non_sys
 
+    # Non-streaming background callers historically inherited the 32k global
+    # default even when the selected local endpoint exposed a smaller context
+    # window.  Streaming requests already apply this bound; enforce the same
+    # invariant here before cache-key construction and payload creation.
+    if max_tokens and max_tokens > 0:
+        try:
+            from src.generation_budget import fit_output_token_budget
+
+            max_tokens = fit_output_token_budget(
+                max_tokens,
+                get_context_length(url, model),
+                messages_copy,
+            )
+        except Exception:
+            # Context discovery is best-effort. Preserve the established call
+            # path when endpoint metadata is unavailable.
+            pass
+
     cache_key = _get_cache_key(
         url, model, messages_copy, temperature, max_tokens, headers=headers,
-        thinking_mode=thinking_mode,
+        thinking_mode=thinking_mode, reasoning_effort=reasoning_effort,
     )
     cached_response = _get_cached_response(cache_key)
     if cached_response:
@@ -2545,6 +2646,8 @@ async def llm_call_async(
             headers=headers,
             timeout=timeout,
             workload=workload,
+            thinking_mode=thinking_mode,
+            reasoning_effort=reasoning_effort,
         ):
             event_is_error = False
             for line in str(chunk).splitlines():
@@ -2800,7 +2903,7 @@ async def stream_llm(url: str, model: str, messages: List[Dict], temperature: fl
                      timeout: int = LLMConfig.STREAM_TIMEOUT, prompt_type: Optional[str] = None,
                      tools: Optional[List[Dict]] = None, session_id: Optional[str] = None,
                      tool_choice_none: bool = False, workload: str = "foreground",
-                     thinking_mode: Optional[str] = None):
+                     thinking_mode: Optional[str] = None, reasoning_effort: Optional[str] = None):
     target_url = _stream_target_url(url)
     async with _local_model_slot(target_url, model, workload):
         async for chunk in _stream_llm_inner(
@@ -2816,6 +2919,7 @@ async def stream_llm(url: str, model: str, messages: List[Dict], temperature: fl
             session_id=session_id,
             tool_choice_none=tool_choice_none,
             thinking_mode=thinking_mode,
+            reasoning_effort=reasoning_effort,
         ):
             yield chunk
 
@@ -2825,6 +2929,7 @@ async def _stream_llm_inner(url: str, model: str, messages: List[Dict], temperat
                             timeout: int = LLMConfig.STREAM_TIMEOUT, prompt_type: Optional[str] = None,
                             tools: Optional[List[Dict]] = None, session_id: Optional[str] = None,
                             tool_choice_none: bool = False, thinking_mode: Optional[str] = None,
+                            reasoning_effort: Optional[str] = None,
                             _retry_silent_local: bool = True):
     """Stream LLM responses with improved error handling.
 
@@ -2868,7 +2973,10 @@ async def _stream_llm_inner(url: str, model: str, messages: List[Dict], temperat
     elif provider == "chatgpt-subscription":
         target_url = _normalize_chatgpt_subscription_url(url)
         h = _provider_headers(provider, headers)
-        payload = _build_chatgpt_responses_payload(model, messages_copy, temperature, max_tokens, stream=True)
+        payload = _build_chatgpt_responses_payload(
+            model, messages_copy, temperature, max_tokens, stream=True,
+            reasoning_effort=reasoning_effort,
+        )
     else:
         target_url = _normalize_openai_chat_url(url)
         payload = {
@@ -2943,8 +3051,8 @@ async def _stream_llm_inner(url: str, model: str, messages: List[Dict], temperat
                 _clear_host_dead(target_url)
                 if r.status_code != 200:
                     raw = (await r.aread()).decode(errors="replace")
-                    friendly = _format_chatgpt_subscription_error(r.status_code, raw)
-                    yield f'event: error\ndata: {json.dumps({"status": r.status_code, "text": friendly, "raw": raw[:500]})}\n\n'
+                    friendly = _format_chatgpt_subscription_error(r.status_code, _chatgpt_safe_error(raw, h))
+                    yield f'event: error\ndata: {json.dumps({"status": r.status_code, "text": friendly})}\n\n'
                     return
                 async for line in r.aiter_lines():
                     if not line:
@@ -3029,13 +3137,13 @@ async def _stream_llm_inner(url: str, model: str, messages: List[Dict], temperat
                             }
                         text = err.get("message") if isinstance(err, dict) else str(err or "ChatGPT Subscription request failed")
                         status = _provider_stream_error_status(err, default=400)
-                        yield f'event: error\ndata: {json.dumps({"status": status, "text": text})}\n\n'
+                        yield f'event: error\ndata: {json.dumps({"status": status, "text": _chatgpt_safe_error(text, h)})}\n\n'
                         return
                 yield "data: [DONE]\n\n"
         except (httpx.ConnectError, httpx.ConnectTimeout) as e:
             _cooled = _mark_host_dead(target_url)
             _tail = f" — host cooled for {DEAD_HOST_COOLDOWN:.0f}s" if _cooled else " — transient, will retry"
-            logger.warning(f"ChatGPT Subscription stream connect to {target_url} failed: {e}{_tail}")
+            logger.warning("ChatGPT Subscription stream connect failed: %s%s", type(e).__name__, _tail)
             yield f'event: error\ndata: {json.dumps({"error": f"Cannot reach {_host_key(target_url)}", "status": 503})}\n\n'
         except httpx.ReadTimeout:
             yield f'event: error\ndata: {json.dumps({"error": "Read timeout", "status": 504})}\n\n'
@@ -3048,8 +3156,8 @@ async def _stream_llm_inner(url: str, model: str, messages: List[Dict], temperat
         except httpx.NetworkError:
             yield f'event: error\ndata: {json.dumps({"error": "Network error", "status": 502, "fallback_eligible": False})}\n\n'
         except Exception as e:
-            logger.error(f"ChatGPT Subscription stream error: {e}")
-            yield f'event: error\ndata: {json.dumps({"error": str(e), "status": 502, "fallback_eligible": False})}\n\n'
+            logger.error("ChatGPT Subscription stream error: %s", type(e).__name__)
+            yield f'event: error\ndata: {json.dumps({"error": "ChatGPT Subscription stream failed", "status": 502, "fallback_eligible": False})}\n\n'
         return
 
     # ── Native Ollama streaming ──
@@ -3065,7 +3173,7 @@ async def _stream_llm_inner(url: str, model: str, messages: List[Dict], temperat
                 if r.status_code != 200:
                     raw = (await r.aread()).decode(errors="replace")
                     friendly = _format_upstream_error(r.status_code, raw, target_url)
-                    yield f'event: error\ndata: {json.dumps({"status": r.status_code, "text": friendly, "raw": raw[:500]})}\n\n'
+                    yield f'event: error\ndata: {json.dumps({"status": r.status_code, "text": friendly})}\n\n'
                     return
                 async for line in r.aiter_lines():
                     if not line:
@@ -3164,7 +3272,7 @@ async def _stream_llm_inner(url: str, model: str, messages: List[Dict], temperat
                 if r.status_code != 200:
                     raw = (await r.aread()).decode(errors="replace")
                     friendly = _format_upstream_error(r.status_code, raw, target_url)
-                    yield f'event: error\ndata: {json.dumps({"status": r.status_code, "text": friendly, "raw": raw[:500]})}\n\n'
+                    yield f'event: error\ndata: {json.dumps({"status": r.status_code, "text": friendly})}\n\n'
                     return
                 async for line in r.aiter_lines():
                     # SSE allows "data:value" with no space after the colon
@@ -3348,7 +3456,7 @@ async def _stream_llm_inner(url: str, model: str, messages: List[Dict], temperat
             if r.status_code != 200:
                 raw = (await r.aread()).decode(errors="replace")
                 friendly = _format_upstream_error(r.status_code, raw, target_url)
-                yield f'event: error\ndata: {json.dumps({"status": r.status_code, "text": friendly, "raw": raw[:500]})}\n\n'
+                yield f'event: error\ndata: {json.dumps({"status": r.status_code, "text": friendly})}\n\n'
                 return
 
             first_token_budget = _first_token_timeout(target_url, timeout)
@@ -3556,7 +3664,15 @@ async def _stream_llm_inner(url: str, model: str, messages: List[Dict], temperat
                                             if thinking_part:
                                                 reasoning = (reasoning + thinking_part) if reasoning else thinking_part
                                             content = text_part
-                                        if reasoning and _normalize_thinking_mode(thinking_mode) != "off":
+                                        # DeepSeek may return reasoning_content even when the
+                                        # caller requests thinking=off, and its API requires that
+                                        # exact field on subsequent tool rounds. Preserve it in the
+                                        # reasoning channel for protocol continuity; consumers keep
+                                        # reasoning out of the visible final answer.
+                                        if reasoning and (
+                                            _normalize_thinking_mode(thinking_mode) != "off"
+                                            or "deepseek" in str(model or "").lower()
+                                        ):
                                             _degenerate = degenerate_guard.check(reasoning)
                                             if _degenerate:
                                                 yield _degenerate

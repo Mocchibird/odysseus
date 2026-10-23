@@ -36,6 +36,65 @@ class _FakeErrorResponse:
         )
 
 
+def test_single_article_inside_main_excludes_related_links_and_comment_form(tmp_path, monkeypatch):
+    body = 'The measured storage comparison includes uncertainty and cost limitations. ' * 8
+    html = f'<main><article><h1>Storage comparison</h1><p>{body}</p></article><section>Related posts: home battery storage tags</section><form>Leave a comment</form></main>'
+    monkeypatch.setattr(service_content, 'CONTENT_CACHE_DIR', tmp_path)
+    monkeypatch.setattr(service_content, '_get_public_url', lambda *a, **k: _FakeResponse(html))
+    result = service_content.fetch_webpage_content('https://example.org/article')
+    assert body.strip() in result['content']
+    assert 'Related posts' not in result['content']
+    assert 'Leave a comment' not in result['content']
+
+
+def test_multiple_article_cards_retain_main_context(tmp_path, monkeypatch):
+    html = '<main><h1>Search results for storage</h1><article>First result</article><article>Second result</article></main>'
+    monkeypatch.setattr(service_content, 'CONTENT_CACHE_DIR', tmp_path)
+    monkeypatch.setattr(service_content, '_get_public_url', lambda *a, **k: _FakeResponse(html))
+    result = service_content.fetch_webpage_content('https://example.org/listing')
+    assert 'Search results for storage' in result['content']
+    assert 'First result' in result['content'] and 'Second result' in result['content']
+
+
+@pytest.mark.parametrize('title,body,blocked', [
+    ('Client Challenge', 'A required part of this site couldn’t load. Try using a different browser.', True),
+    ('Just a moment...', 'Checking your browser. Enable JavaScript to continue.', True),
+    ('Understanding browser challenges', 'Checking your browser is a common security message.', False),
+    ('Client Challenge', 'An article about designing client challenges for a programming exercise.', False),
+    ('Client Challenge', 'A required part of this site ' + 'substantive discussion ' * 150, False),
+])
+def test_access_interstitial_is_not_article_evidence(title, body, blocked, tmp_path, monkeypatch):
+    monkeypatch.setattr(service_content, 'CONTENT_CACHE_DIR', tmp_path)
+    html = f'<html><title>{title}</title><body><main>{body}</main></body></html>'
+    monkeypatch.setattr(service_content, '_get_public_url', lambda *a, **k: _FakeResponse(html))
+    result = service_content.fetch_webpage_content('https://example.com/challenge')
+    assert result['success'] is not blocked
+    if blocked:
+        assert result['content'] == ''
+        assert result['error_kind'] == 'access_challenge'
+        assert 'private_browser' in result['error']
+        assert not list(tmp_path.iterdir()), 'Transient challenge must not be cached as article content'
+    else:
+        assert body.strip() in result['content']
+
+
+@pytest.mark.parametrize('wrapper', ['main', 'article', 'div class="content"'])
+def test_extraction_does_not_repeat_nested_content_or_include_navigation(wrapper, tmp_path, monkeypatch):
+    closing = wrapper.split()[0]
+    html = (f'<html><body><nav>{"Navigation item " * 100}</nav><{wrapper}>'
+            '<header>Article title and publication date</header>'
+            '<div class="article-body"><div class="entry-content">'
+            '<p>Unique substantive evidence.</p></div></div>'
+            f'</{closing}><footer>Unrelated links</footer></body></html>')
+    monkeypatch.setattr(service_content, 'CONTENT_CACHE_DIR', tmp_path)
+    monkeypatch.setattr(service_content, '_get_public_url', lambda *a, **k: _FakeResponse(html))
+    result = service_content.fetch_webpage_content('https://example.com/nested')
+    assert result['content'].count('Unique substantive evidence.') == 1
+    assert 'Navigation item' not in result['content']
+    assert 'Unrelated links' not in result['content']
+    assert 'Article title' in result['content']
+
+
 @pytest.mark.parametrize("module", [service_content])
 def test_content_fetcher_extracts_og_image_and_body_fallback(module, tmp_path, monkeypatch):
     html = """

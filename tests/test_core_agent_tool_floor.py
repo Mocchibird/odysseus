@@ -6,8 +6,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def test_compact_router_keeps_basic_agent_tools_available():
     source = (ROOT / "src/agent_loop.py").read_text()
-    assert '_core_agent_tools = {"bash", "web_search", "web_fetch", "ask_user"}' in source
-    assert '_core_agent_tools.add("private_browser")' in source
+    assert '_core_agent_tools = set(CONTRACT_CORE_TOOLS)' in source
     assert "_relevant_tools.update(_core_agent_tools)" in source
     assert "_base_relevant_tools.update(_core_agent_tools)" in source
     assert "_caller_disabled_tools" in source

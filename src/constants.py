@@ -6,6 +6,7 @@ import subprocess
 from src.runtime_paths import get_app_root, get_default_data_dir
 
 APP_VERSION = "1.0.3"
+BUILTIN_SKILLS_DIR = os.path.join(get_app_root(), "resources", "skills")
 # Identifies the private maintainer-preview build without changing the public
 # application semver used by release and readiness checks. Keep the API/UI
 # value tied to HARNESS_VERSION so a version bump cannot leave the running
@@ -175,6 +176,16 @@ LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
 LOCAL_HOSTS = frozenset({"localhost", "127.0.0.1", "0.0.0.0", "::1"})
 
 
+# Scholarly title resolution. These are the only third-party metadata APIs the
+# search path calls directly, so they get named constants rather than literals
+# repeated at each call site. The budget bounds the whole SearXNG -> OpenAlex ->
+# arXiv chain: each hop used to get its own full timeout, so one scholarly query
+# could stall a user-facing search for the sum of all three.
+ARXIV_API_URL = "https://export.arxiv.org/api/query"
+OPENALEX_API_URL = "https://api.openalex.org/works"
+SCHOLARLY_LOOKUP_TIMEOUT = 12.0
+SCHOLARLY_LOOKUP_TOTAL_BUDGET = 20.0
+
 # Cleanup configuration
 CLEANUP_ENABLED = os.getenv("CLEANUP_ENABLED", "True").lower() == "true"
 CLEANUP_INTERVAL_HOURS = int(os.getenv("CLEANUP_INTERVAL_HOURS", "24"))
@@ -203,7 +214,7 @@ def internal_api_base() -> str:
     running server over HTTP. Resolution order:
       1. ODYSSEUS_INTERNAL_BASE  - explicit override (e.g. behind a TLS proxy).
       2. APP_PORT                - http://127.0.0.1:$APP_PORT (docker-compose).
-      3. Fallback http://127.0.0.1:7000 - legacy default.
+      3. Fallback http://127.0.0.1:7011 - matches app.py's bind default.
 
     127.0.0.1 (not "localhost") avoids IPv6/DNS ambiguity for a strictly-local
     call. Without this, loopback tools fail with "All connection attempts
@@ -212,4 +223,4 @@ def internal_api_base() -> str:
     override = os.environ.get("ODYSSEUS_INTERNAL_BASE")
     if override:
         return override.rstrip("/")
-    return f"http://127.0.0.1:{os.environ.get('APP_PORT', '7000')}"
+    return f"http://127.0.0.1:{os.environ.get('APP_PORT', '7011')}"

@@ -2,7 +2,7 @@
  * Calendar Module — CalDAV-backed month/week/year calendar.
  */
 
-import uiModule from './ui.js?v=20260908weekhoverfix1';
+import uiModule from './ui.js?v=20260916largetoolscroll1';
 import spinnerModule from './spinner.js';
 import * as Modals from './modalManager.js';
 import { topPortalZ } from './toolWindowZOrder.js';
@@ -494,7 +494,14 @@ function _eventReminderHtml(ev) {
 }
 
 function _eventSourceHtml(ev) {
-  if (!ev || _calendars.length <= 1) return '';
+  if (!ev) return '';
+  // Email provenance is useful even with only one calendar (or no loaded
+  // calendar name). The calendar-initial badge alone is multi-calendar UI.
+  if (ev.source_email_uid && ev.source_email_folder) {
+    const href = `#email=${encodeURIComponent(ev.source_email_folder)}:${encodeURIComponent(ev.source_email_uid)}`;
+    return `<a class="cal-event-source cal-event-source-email" href="${_e(href)}" title="Open source email" aria-label="Open source email" onclick="event.stopPropagation();"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"></rect><polyline points="3 7 12 13 21 7"></polyline></svg></a>`;
+  }
+  if (_calendars.length <= 1) return '';
   const cal = _calendars.find(c => c.href === ev.calendar_href);
   const name = ev.calendar || cal?.name || '';
   if (!name) return '';
@@ -891,7 +898,7 @@ function _updateDaySearchResults() {
   // Re-wire click handlers on the newly-inserted event rows.
   dayDetail.querySelectorAll('.cal-event-item').forEach(it => {
     it.addEventListener('click', (e) => {
-      if (e.target.closest('.cal-event-more')) return;
+      if (e.target.closest('.cal-event-more, .cal-event-source')) return;
       const ev = _events.find(x => x.uid === it.dataset.uid);
       if (ev) _showEventForm(ev);
     });
@@ -2209,7 +2216,7 @@ async function _renderAgenda() {
           <div class="cal-event-dot" style="background:${_calColor(ev)}"></div>
           <div class="cal-event-info">
             <div class="cal-event-name">${_impMark}${_e(ev.summary)}${_eventReminderHtml(ev)}${_eventSourceHtml(ev)} ${_typeTag}</div>
-            <div class="cal-event-time">${t}${ev.location ? ' · ' + _locHTML(ev.location) : ''}</div>
+            <div class="cal-event-time">${t}${ev.location ? ' · ' + _locHTML(ev.location, ev.description) : ''}</div>
           </div>
           <button class="cal-event-more" data-uid="${_e(ev.uid)}" title="More">${_moreIcon}</button>
         </div>`;
@@ -2225,7 +2232,7 @@ async function _renderAgenda() {
   _wireAll(body);
   _wireQuickDelete(body);
   body.querySelectorAll('.cal-agenda-event').forEach(el => el.addEventListener('click', (e) => {
-    if (e.target.closest('.cal-event-more')) return;
+    if (e.target.closest('.cal-event-more, .cal-event-source')) return;
     const ev = _events.find(e => e.uid === el.dataset.uid);
     if (ev) _showEventForm(ev);
   }));
@@ -2275,8 +2282,8 @@ async function _renderSearch() {
       h += `<div class="cal-agenda-event" data-uid="${_e(ev.uid)}">
         <div class="cal-event-dot" style="background:${_calColor(ev)}"></div>
         <div class="cal-event-info">
-          <div class="cal-event-name">${_e(ev.summary)}${_eventReminderHtml(ev)}</div>
-          <div class="cal-event-time">${_fmtDate(evDate)} · ${t}${ev.location ? ' · ' + _locHTML(ev.location) : ''}</div>
+          <div class="cal-event-name">${_e(ev.summary)}${_eventReminderHtml(ev)}${_eventSourceHtml(ev)}</div>
+          <div class="cal-event-time">${_fmtDate(evDate)} · ${t}${ev.location ? ' · ' + _locHTML(ev.location, ev.description) : ''}</div>
         </div>
         <button class="cal-event-more" data-uid="${_e(ev.uid)}" title="More">${_moreIcon}</button>
       </div>`;
@@ -2290,7 +2297,7 @@ async function _renderSearch() {
   _wireAll(body);
   _wireQuickDelete(body);
   body.querySelectorAll('.cal-agenda-event').forEach(el => el.addEventListener('click', (e) => {
-    if (e.target.closest('.cal-event-more')) return;
+    if (e.target.closest('.cal-event-more, .cal-event-source')) return;
     const ev = _allEvents[el.dataset.uid];
     if (ev) _showEventForm(ev);
   }));
@@ -2405,9 +2412,9 @@ function _dayDetailHTML(dateStr) {
         h += `<div class="cal-event-item${bgStyle ? ' cal-event-item-bg' : ''}" data-uid="${_e(ev.uid)}"${bgStyle ? ` style="${bgStyle}"` : ''}>
           <div class="cal-event-dot" style="background:${_calColor(ev)}"></div>
           <div class="cal-event-info">
-            <div class="cal-event-name">${_e(ev.summary)}${_eventReminderHtml(ev)}</div>
+            <div class="cal-event-name">${_e(ev.summary)}${_eventReminderHtml(ev)}${_eventSourceHtml(ev)}</div>
             <div class="cal-event-time">${_fmtDate(date)} · ${t}</div>
-            ${ev.location ? `<div class="cal-event-loc">${_locHTML(ev.location)}</div>` : ''}
+          ${ev.location ? `<div class="cal-event-loc">${_locHTML(ev.location, ev.description)}</div>` : ''}
           </div>
           <button class="cal-event-more" data-uid="${_e(ev.uid)}" title="More">${_moreIcon}</button>
         </div>`;
@@ -2420,7 +2427,7 @@ function _dayDetailHTML(dateStr) {
   else evs.forEach(ev => {
     const t = ev.all_day ? 'All day' : _fmtTime(ev.dtstart) + ' – ' + _fmtTime(ev.dtend);
     const _bgStyle = _calItemBgStyle(ev);
-    h += `<div class="cal-event-item${_bgStyle ? ' cal-event-item-bg' : ''}" data-uid="${_e(ev.uid)}"${_bgStyle ? ` style="${_bgStyle}"` : ''}><div class="cal-event-dot" style="background:${_calColor(ev)}"></div><div class="cal-event-info"><div class="cal-event-name">${_e(ev.summary)}${_eventReminderHtml(ev)}</div><div class="cal-event-time">${t}</div>${ev.location ? `<div class="cal-event-loc">${_locHTML(ev.location)}</div>` : ''}</div><button class="cal-event-more" data-uid="${_e(ev.uid)}" title="More">${_moreIcon}</button></div>`;
+    h += `<div class="cal-event-item${_bgStyle ? ' cal-event-item-bg' : ''}" data-uid="${_e(ev.uid)}"${_bgStyle ? ` style="${_bgStyle}"` : ''}><div class="cal-event-dot" style="background:${_calColor(ev)}"></div><div class="cal-event-info"><div class="cal-event-name">${_e(ev.summary)}${_eventReminderHtml(ev)}${_eventSourceHtml(ev)}</div><div class="cal-event-time">${t}</div>${ev.location ? `<div class="cal-event-loc">${_locHTML(ev.location, ev.description)}</div>` : ''}</div><button class="cal-event-more" data-uid="${_e(ev.uid)}" title="More">${_moreIcon}</button></div>`;
   });
   return h + '</div>';
 }
@@ -2979,7 +2986,7 @@ function _wireAll(body) {
     _render();
   }));
   body.querySelectorAll('.cal-event-item').forEach(it => it.addEventListener('click', (e) => {
-    if (e.target.closest('.cal-event-more')) return;
+    if (e.target.closest('.cal-event-more, .cal-event-source')) return;
     const ev = _events.find(e => e.uid === it.dataset.uid);
     if (ev) _showEventForm(ev);
   }));
@@ -3634,7 +3641,7 @@ function _showEventForm(existing, defaultDate, defaultEndDate) {
     e.preventDefault();
     const taskId = e.currentTarget?.dataset?.taskId || '';
     try {
-      const m = await import('/static/js/tasks.js?v=20260723tasksbulkfeedback1');
+      const m = await import('/static/js/tasks.js?v=20260914taskmodel1');
       const openTasks = m.openTasks || m.default?.openTasks;
       if (typeof openTasks === 'function') { openTasks(taskId); return; }
     } catch (_) {}
@@ -4194,14 +4201,33 @@ function _eventDurationMinutes(ev) {
 function _e(s) { return uiModule.esc ? uiModule.esc(s || '') : (s || '').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
 
 // Linkify a location string: URLs become clickable, plain addresses get a Maps link.
-function _locHTML(loc) {
+function _locHTML(loc, description = '') {
   if (!loc) return '';
-  const urlRe = /(https?:\/\/[^\s]+)/gi;
+  // Older email imports sometimes stored an OpenStreetMap URL after the
+  // model mistook a virtual meeting for a physical location. Prefer the real
+  // join URL preserved in the event description when one is available.
+  const meetingMatch = String(description || '').match(
+    /https?:\/\/(?:teams\.microsoft\.com|(?:[a-z0-9-]+\.)?zoom\.us|meet\.google\.com|(?:[a-z0-9-]+\.)?webex\.com|meet\.jit\.si)\/[^\s<>]+/i,
+  );
+  if (meetingMatch && !/https?:\/\/(?:teams\.microsoft\.com|(?:[a-z0-9-]+\.)?zoom\.us|meet\.google\.com|(?:[a-z0-9-]+\.)?webex\.com|meet\.jit\.si)\//i.test(String(loc))) {
+    const meetingUrl = meetingMatch[0].replace(/[.,);\]]+$/, '');
+    const safeMeetingUrl = _e(meetingUrl);
+    return `<a href="${safeMeetingUrl}" target="_blank" rel="noopener" onclick="event.stopPropagation();" title="Join meeting">${safeMeetingUrl}</a>`;
+  }
+  const urlRe = /(https?:\/\/[^\s<>"']+)/gi;
   if (urlRe.test(loc)) {
-    return loc.replace(urlRe, (url) => {
+    // Escape every non-link fragment too; locations originate in emails/ICS.
+    urlRe.lastIndex = 0;
+    let html = '';
+    let offset = 0;
+    for (const match of String(loc).matchAll(urlRe)) {
+      const url = match[0];
+      html += _e(String(loc).slice(offset, match.index));
       const safe = _e(url);
-      return `<a href="${safe}" target="_blank" rel="noopener" onclick="event.stopPropagation();">${safe}</a>`;
-    }).replace(/\n/g, '<br>');
+      html += `<a href="${safe}" target="_blank" rel="noopener" onclick="event.stopPropagation();">${safe}</a>`;
+      offset = match.index + url.length;
+    }
+    return (html + _e(String(loc).slice(offset))).replace(/\n/g, '<br>');
   }
   // No URL — link the whole thing to OpenStreetMap.
   const mapUrl = 'https://www.openstreetmap.org/search?query=' + encodeURIComponent(loc);

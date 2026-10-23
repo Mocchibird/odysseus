@@ -216,6 +216,7 @@ class Session(TimestampMixin, Base):
     rag = Column(Boolean, default=False)
     archived = Column(Boolean, default=False)
     memory_extraction_enabled = Column(Boolean, default=True)
+    memory_injection_enabled = Column(Boolean, default=True)
     skill_injection_enabled = Column(Boolean, default=True)
     thinking_mode = Column(String, nullable=True, default="off")
     temperature_override = Column(Float, nullable=True, default=None)
@@ -224,6 +225,12 @@ class Session(TimestampMixin, Base):
     # Organization
     folder = Column(String, nullable=True, default=None)
     cwd = Column(String, nullable=True, default=None)
+    # Registered ModelEndpoint this session is bound to. endpoint_url alone
+    # cannot distinguish two endpoints that share a provider URL but use
+    # different credentials (e.g. two ChatGPT Subscription accounts), so the
+    # exact endpoint id is remembered here. NULL = legacy session; the first
+    # deterministic, owner-scoped resolution persists a binding.
+    endpoint_id = Column(String, nullable=True, index=True)
     
     # Headers stored as JSON
     headers = Column(JSON, default=dict)
@@ -271,6 +278,7 @@ class Session(TimestampMixin, Base):
             'rag': self.rag,
             'archived': self.archived,
             'memory_extraction_enabled': self.memory_extraction_enabled is not False,
+            'memory_injection_enabled': self.memory_injection_enabled is not False,
             'skill_injection_enabled': self.skill_injection_enabled is not False,
             'thinking_mode': self.thinking_mode or '',
             'temperature_override': self.temperature_override,
@@ -1183,6 +1191,28 @@ def _migrate_add_skill_injection_enabled_column():
         except Exception:
             pass
 
+def _migrate_add_memory_injection_enabled_column():
+    """Add per-session memory context injection toggle."""
+    import sqlite3
+    db_path = DATABASE_URL.replace("sqlite:///", "")
+    if not os.path.exists(db_path):
+        return
+    conn = None
+    try:
+        conn = sqlite3.connect(db_path)
+        columns = [row[1] for row in conn.execute("PRAGMA table_info(sessions)").fetchall()]
+        if "memory_injection_enabled" not in columns:
+            conn.execute("ALTER TABLE sessions ADD COLUMN memory_injection_enabled BOOLEAN DEFAULT 1")
+            conn.commit()
+            logging.getLogger(__name__).info("Migrated: added memory_injection_enabled to sessions")
+    except Exception as e:
+        logging.getLogger(__name__).warning(f"memory_injection_enabled migration failed: {e}")
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
 def _migrate_add_session_generation_settings_columns():
     """Add per-chat model generation controls."""
     db_path = DATABASE_URL.replace("sqlite:///", "")
@@ -1626,6 +1656,19 @@ def _migrate_add_session_cwd_column():
         except Exception:
             pass
 
+def _migrate_add_session_endpoint_id_column():
+    """Add the nullable binding and index without rewriting existing sessions."""
+    with engine.begin() as connection:
+        schema = inspect(connection)
+        if not schema.has_table("sessions"):
+            return
+        columns = {column["name"] for column in schema.get_columns("sessions")}
+        if "endpoint_id" not in columns:
+            connection.execute(text("ALTER TABLE sessions ADD COLUMN endpoint_id VARCHAR"))
+        index = next(index for index in Session.__table__.indexes if index.name == "ix_sessions_endpoint_id")
+        index.create(bind=connection, checkfirst=True)
+
+
 def _migrate_add_token_columns():
     """Add cumulative token tracking columns to sessions table."""
     import sqlite3
@@ -1974,6 +2017,29 @@ def _migrate_add_gallery_owner_index():
     except Exception as e:
         logging.getLogger(__name__).warning(f"gallery owner-index migration: {e}")
 
+
+def _migrate_add_calendar_source_email_cols():
+    """Add provenance fields so email-created events can link back to the email."""
+    cols_to_add = {
+        "source_email_uid": "VARCHAR",
+        "source_email_folder": "VARCHAR",
+        "source_email_account_id": "VARCHAR",
+        "source_email_message_id": "VARCHAR",
+    }
+    try:
+        with engine.connect() as conn:
+            existing = {r[1] for r in conn.execute(text("PRAGMA table_info(calendar_events)"))}
+            for col, spec in cols_to_add.items():
+                if col not in existing:
+                    conn.execute(text(f"ALTER TABLE calendar_events ADD COLUMN {col} {spec}"))
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_calendar_events_source_email_message_id "
+                "ON calendar_events (source_email_message_id)"
+            ))
+            conn.commit()
+    except Exception as e:
+        logging.getLogger(__name__).warning(f"calendar source-email migration: {e}")
+
 def _migrate_add_task_automation_columns():
     """Add automation columns to scheduled_tasks table if missing."""
     new_cols = {
@@ -2282,8 +2348,29 @@ class CalendarEvent(TimestampMixin, Base):
     remote_href = Column(String, nullable=True)        # CalDAV object URL for updates/deletes
     remote_etag = Column(String, nullable=True)        # Last seen CalDAV ETag, when available
     caldav_sync_pending = Column(String, nullable=True) # create | update | delete retry marker
+    # Provenance for events extracted from email. UID/folder form the frontend
+    # deep link: #email=<folder>:<imap uid>.
+    source_email_uid = Column(String, nullable=True, index=True)
+    source_email_folder = Column(String, nullable=True)
+    source_email_account_id = Column(String, nullable=True, index=True)
+    source_email_message_id = Column(String, nullable=True, index=True)
 
     calendar = relationship("CalendarCal", back_populates="events")
+
+
+class EmailCalendarInvitation(TimestampMixin, Base):
+    """Revision/tombstone state for one owner's email invitation source."""
+    __tablename__ = "email_calendar_invitations"
+
+    id = Column(String, primary_key=True)
+    owner = Column(String, nullable=False, index=True)
+    sender = Column(String, nullable=False)
+    source_uid = Column(String, nullable=False)
+    recurrence_id = Column(String, nullable=False, default="")
+    event_uid = Column(String, nullable=True)
+    sequence = Column(Integer, nullable=False, default=0)
+    stamp = Column(String, nullable=False, default="")
+    cancelled = Column(Boolean, nullable=False, default=False)
 
 
 class CalendarDeletedEvent(TimestampMixin, Base):
@@ -2636,7 +2723,12 @@ def _migrate_add_notes_reminder_at():
 # _migrate_add_note_gallery_id(), and rewrote the _migrate_chat_messages_fts()
 # backfill. The ORM models declare those columns, so a DB stamped at v3 that
 # skipped them would fail every query touching sessions/notes/model_endpoints.
-SCHEMA_VERSION = 4
+#
+# v5: upstream merge (0e07d9a6, 23rd sync step 2) added
+# _migrate_add_memory_injection_enabled_column(),
+# _migrate_add_session_endpoint_id_column() and
+# _migrate_add_calendar_source_email_cols().
+SCHEMA_VERSION = 5
 
 
 def _get_user_version() -> int:
@@ -2668,6 +2760,7 @@ _REQUIRED_MIGRATED_COLUMNS = {
         "memory_extraction_enabled", "skill_injection_enabled",
         "thinking_mode", "temperature_override", "max_tokens_override",
         "cwd", "total_cost_usd",
+        "memory_injection_enabled", "endpoint_id",
     ),
     "model_endpoints": ("model_tool_modes",),
     "notes": ("gallery_id",),
@@ -2675,7 +2768,11 @@ _REQUIRED_MIGRATED_COLUMNS = {
     "meals": ("sugar_g", "photo_upload_id"),
     "training_sessions": ("kcal_burned", "photo_upload_id"),
     "gallery_images": ("media_type", "hidden"),
-    "calendar_events": ("recurrence_exdates",),
+    "calendar_events": (
+        "recurrence_exdates",
+        "source_email_uid", "source_email_folder",
+        "source_email_account_id", "source_email_message_id",
+    ),
 }
 
 
@@ -2785,10 +2882,12 @@ def init_db():
     _migrate_add_document_archived_column()
     _migrate_add_last_message_at_column()
     _migrate_add_memory_extraction_enabled_column()
+    _migrate_add_memory_injection_enabled_column()
     _migrate_add_skill_injection_enabled_column()
     _migrate_add_session_generation_settings_columns()
     _migrate_add_folder_column()
     _migrate_add_session_cwd_column()
+    _migrate_add_session_endpoint_id_column()
     _migrate_add_token_columns()
     _migrate_add_total_cost_usd()
     _migrate_add_mode_column()
@@ -2800,6 +2899,7 @@ def init_db():
     _migrate_add_tidy_verdict()
     _migrate_add_document_tags_column()
     _migrate_add_doc_source_email_cols()
+    _migrate_add_calendar_source_email_cols()
     _migrate_add_oauth_config()
     _migrate_add_email_oauth_columns()
     _migrate_add_task_automation_columns()

@@ -207,6 +207,29 @@ def _looks_like_youtube_video_id(value: str) -> bool:
     return bool(re.fullmatch(r"[A-Za-z0-9_-]{10,16}", str(value or "").strip()))
 
 
+def _arxiv_listing_api_hint(url: str, error: str) -> str:
+    """Return an explicit recovery path for a blocked arXiv date listing."""
+    if "406" not in str(error or ""):
+        return ""
+    parsed = urllib.parse.urlsplit(str(url or ""))
+    if parsed.hostname not in {"arxiv.org", "www.arxiv.org"}:
+        return ""
+    match = re.fullmatch(r"/list/([A-Za-z0-9.-]+)", parsed.path.rstrip("/"))
+    date = urllib.parse.parse_qs(parsed.query).get("date", [""])[0]
+    if not match or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", date):
+        return ""
+    day = date.replace("-", "")
+    query = f"cat:{match.group(1)} AND submittedDate:[{day}0000 TO {day}2359]"
+    api_url = "https://export.arxiv.org/api/query?" + urllib.parse.urlencode({
+        "search_query": query, "start": "0", "max_results": "100",
+    })
+    return (
+        " arXiv rejected its static listing (HTTP 406). The public Atom API is "
+        f"available for this category/day; call web_fetch on {api_url} to read "
+        "the dated feed, then inspect individual paper sources for details."
+    )
+
+
 class WebSearchTool:
     async def execute(self, content: str, ctx: dict) -> dict:
         from src.search import comprehensive_web_search, searxng_search_results
@@ -231,15 +254,8 @@ class WebSearchTool:
         if not query:
             query = raw.split("\n")[0].strip()
         if time_filter is None:
-            q_lc = query.lower()
-            if any(kw in q_lc for kw in ("today", "latest", "breaking", "this morning", "right now", "currently")):
-                time_filter = "day"
-            elif any(kw in q_lc for kw in ("this week", "past week", "recent news", "last few days")):
-                time_filter = "week"
-            elif any(kw in q_lc for kw in ("this month", "past month")):
-                time_filter = "month"
-            elif " news" in q_lc or q_lc.startswith("news ") or q_lc.endswith(" news"):
-                time_filter = "week"
+            from src.search_intent import inferred_search_publication_window
+            time_filter = inferred_search_publication_window(query)
         loop = asyncio.get_running_loop()
         if progress_cb:
             await progress_cb({
@@ -251,7 +267,7 @@ class WebSearchTool:
                 results = await asyncio.wait_for(
                     loop.run_in_executor(
                         None,
-                        lambda: searxng_search_results(query, max_pages),
+                        lambda: searxng_search_results(query, max_pages, **({'time_filter': time_filter} if time_filter else {})),
                     ),
                     timeout=30,
                 )
@@ -270,6 +286,32 @@ class WebSearchTool:
                     timeout=30,
                 )
         except asyncio.TimeoutError:
+            # Comprehensive search also downloads several result pages. A
+            # slow or hostile publisher must not erase the ranked search
+            # evidence that was already available. Fall back to the metadata
+            # path so the agent can choose a source and continue with
+            # web_fetch/private_browser. Keep this bounded independently: the
+            # abandoned executor thread may still be winding down.
+            try:
+                results = await asyncio.wait_for(
+                    loop.run_in_executor(
+                        None,
+                        lambda: searxng_search_results(query, max_pages, **({'time_filter': time_filter} if time_filter else {})),
+                    ),
+                    timeout=12,
+                )
+                text, sources = _format_search_metadata(query, results)
+                if sources:
+                    output = text[:MAX_OUTPUT_CHARS] if len(text) > MAX_OUTPUT_CHARS else text
+                    output += "\n\n<!-- SOURCES:" + json.dumps(sources) + " -->"
+                    return {
+                        "output": output,
+                        "exit_code": 0,
+                        "evidence_status": "available",
+                        "degraded_mode": "metadata_after_content_timeout",
+                    }
+            except Exception:
+                pass
             return {
                 "error": f"web_search timed out after 30s: {query[:200]}",
                 "exit_code": 1,
@@ -285,6 +327,10 @@ class WebSearchTool:
                 "elapsed_s": 30,
                 "tail": "Search completed; preparing sources.",
             })
+        # Compact the complete report before the transport cap. Otherwise
+        # repeated summaries from early sources permanently erase later pages.
+        from src.search_passages import bounded_search_observation
+        text = bounded_search_observation(text, MAX_OUTPUT_CHARS)
         output = text[:MAX_OUTPUT_CHARS] if len(text) > MAX_OUTPUT_CHARS else text
         if sources:
             output += "\n\n<!-- SOURCES:" + json.dumps(sources) + " -->"
@@ -628,8 +674,9 @@ class WebFetchTool:
 
         if not text:
             if err:
+                arxiv_hint = _arxiv_listing_api_hint(url, str(err))
                 return {
-                    "error": f"web_fetch: {url}: {err}",
+                    "error": f"web_fetch: {url}: {err}{arxiv_hint}",
                     "exit_code": 1,
                     "untrusted_content": True,
                 }
@@ -2190,8 +2237,13 @@ class PrivateBrowserTool:
         "batch",
     }
     _AUTO_SCREENSHOT_ACTIONS = {
+        "open",
         "snapshot",
         "batch",
+        "click",
+        "fill",
+        "press",
+        "scroll",
     }
 
     @staticmethod
@@ -2972,6 +3024,15 @@ class PrivateBrowserTool:
         for command in commands:
             if isinstance(command, list) and command:
                 action = str(command[0]).strip().lower()
+                if action == "wait":
+                    # Compact/OpenAI schemas sometimes preserve an omitted
+                    # selector as null and put the timeout in the next slot:
+                    # ["wait", null, 2500]. agent-browser accepts only arrays
+                    # of strings, so recover the intended timeout instead of
+                    # rejecting the whole browser batch.
+                    wait_args = [value for value in command[1:] if value is not None]
+                    normalized.append(["wait", *[str(value) for value in wait_args]])
+                    continue
                 if action in {"open", "read"} and len(command) >= 2:
                     candidate_url = str(command[1] or "").strip()
                     if (
@@ -2984,6 +3045,15 @@ class PrivateBrowserTool:
                             self._resolve_local_file_url(candidate_url),
                             *command[2:],
                         ])
+                        continue
+                    if action == "read" and not re.match(
+                        r"^(?:https?|file)://", candidate_url, re.IGNORECASE
+                    ):
+                        # The top-level read action treats target/selector as
+                        # DOM text extraction. Keep batch semantics identical;
+                        # agent-browser's bare `read h1` instead interprets h1
+                        # as a URL/path and fails before the model can answer.
+                        normalized.append(["get", "text", candidate_url])
                         continue
                 if action == "evaluate":
                     normalized.append(["eval", *command[1:]])

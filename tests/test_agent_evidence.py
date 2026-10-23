@@ -1,3 +1,5 @@
+import json
+
 from src.agent_evidence import (
     CompletionRequirements,
     CompletionStatus,
@@ -17,6 +19,57 @@ def test_infers_only_explicit_output_or_edit_paths():
     assert requirements.verifier_required is True
 
 
+def test_known_workspace_inputs_are_not_inferred_as_output_artifacts():
+    requirements = infer_completion_requirements(
+        "My clues are saved in /tmp_workspace/inputs/clues.md, the required answer "
+        "template is /tmp_workspace/inputs/template.md, and a post-write verification "
+        "list is /tmp_workspace/inputs/validation_checklist.txt. Read all three first. "
+        "Fill in /tmp_workspace/inputs/template.md exactly and save the completed "
+        "document to /tmp_workspace/results/results.md.",
+        known_input_paths=(
+            "/workspace/inputs/clues.md",
+            "/workspace/inputs/template.md",
+            "/workspace/inputs/validation_checklist.txt",
+        ),
+    )
+
+    assert requirements.required_artifacts == (
+        "/tmp_workspace/results/results.md",
+    )
+
+
+def test_known_workspace_input_remains_required_when_explicitly_updated():
+    requirements = infer_completion_requirements(
+        "Update /tmp_workspace/inputs/config.json and then verify it.",
+        known_input_paths=("/workspace/inputs/config.json",),
+    )
+
+    assert requirements.required_artifacts == (
+        "/tmp_workspace/inputs/config.json",
+    )
+
+
+def test_infers_artifact_from_common_past_participle_request():
+    requirements = infer_completion_requirements(
+        "Build a digest saved to /workspace/results/ops_digest.md."
+    )
+
+    assert requirements.required_artifacts == (
+        "/workspace/results/ops_digest.md",
+    )
+
+
+def test_inference_ignores_negated_edits_and_callable_names():
+    requirements = infer_completion_requirements(
+        "Write /workspace/results/predictions.json serialized with "
+        "`json.dumps(..., indent=2)`. Do not modify `segmenter.py` or `cases.jsonl`."
+    )
+
+    assert requirements.required_artifacts == (
+        "/workspace/results/predictions.json",
+    )
+
+
 def test_inference_ignores_prose_abbreviations_that_look_like_paths():
     requirements = infer_completion_requirements(
         "Generate statistics, e.g. token counts and timing totals."
@@ -25,12 +78,30 @@ def test_inference_ignores_prose_abbreviations_that_look_like_paths():
     assert requirements.required_artifacts == ()
 
 
+def test_inference_ignores_bare_existence_helper_as_artifact():
+    requirements = infer_completion_requirements(
+        "Write /workspace/results/answer.json, then verify it with os.path.exists or ls."
+    )
+
+    assert requirements.required_artifacts == ("/workspace/results/answer.json",)
+
+
 def test_inference_recognizes_named_output_file():
     requirements = infer_completion_requirements(
         "Put the implementation in a file called /workspace/worker.py."
     )
 
     assert requirements.required_artifacts == ("/workspace/worker.py",)
+
+
+def test_inference_recognizes_output_into_a_single_file():
+    requirements = infer_completion_requirements(
+        "Reconcile reliable facts into a single file "
+        "/tmp_workspace/results/profile.md. Save only that file in "
+        "/tmp_workspace/results/."
+    )
+
+    assert requirements.required_artifacts == ("/tmp_workspace/results/profile.md",)
 
 
 def test_output_directory_outranks_relative_example_filenames():
@@ -82,6 +153,36 @@ def test_runtime_requirements_override_instruction_inference():
     assert requirements.required_artifacts == ("/workspace/output.html",)
     assert requirements.executable_verifier_available is True
     assert requirements.verifier_commands == ("./test.sh",)
+
+
+def test_runtime_requirements_drop_media_inputs_misclassified_as_outputs():
+    requirements = requirements_from_runtime_context(
+        {
+            "media_ingress": {
+                "artifacts": [
+                    {"source_path": "/workspace/inputs/clues.md"},
+                    {"source_path": "/workspace/inputs/template.md"},
+                ],
+            },
+            "completion_requirements": {
+                "required_artifacts": [
+                    "/tmp_workspace/inputs/clues.md",
+                    "/tmp_workspace/inputs/template.md",
+                    "/tmp_workspace/results/results.md",
+                ],
+                "verifier_required": True,
+            },
+        },
+        instruction=(
+            "Clues are saved in /tmp_workspace/inputs/clues.md and the template is "
+            "/tmp_workspace/inputs/template.md. Save the completed document to "
+            "/tmp_workspace/results/results.md."
+        ),
+    )
+
+    assert requirements.required_artifacts == (
+        "/tmp_workspace/results/results.md",
+    )
 
 
 def test_available_verifier_is_required_and_declared_command_is_evidence():
@@ -475,6 +576,80 @@ def test_python_artifact_write_is_detected_against_declared_path():
 
     assert ledger.evaluate().status == CompletionStatus.SATISFIED
     assert any(event.kind == EvidenceKind.ARTIFACT_MUTATION for event in ledger.events)
+
+
+def test_json_write_file_then_read_records_required_artifact_mutation():
+    """Native compact tool events carry write_file arguments as JSON."""
+
+    requirements = CompletionRequirements(
+        required_artifacts=("/workspace/results/paper_digest.md",)
+    )
+    ledger = EvidenceLedger.from_tool_events(
+        [
+            {
+                "round": 1,
+                "tool": "write_file",
+                "command": json.dumps({
+                    "path": "/workspace/results/paper_digest.md",
+                    "content": "# Verified digest\n",
+                }),
+                "output": "wrote /workspace/results/paper_digest.md",
+                "exit_code": 0,
+            },
+            {
+                "round": 2,
+                "tool": "read_file",
+                "command": json.dumps({
+                    "path": "/workspace/results/paper_digest.md",
+                }),
+                "output": "# Verified digest\n",
+                "exit_code": 0,
+            },
+        ],
+        requirements,
+    )
+
+    assert ledger.evaluate().status == CompletionStatus.SATISFIED
+    assert any(
+        event.kind == EvidenceKind.ARTIFACT_MUTATION
+        and event.artifact_path == "/workspace/results/paper_digest.md"
+        for event in ledger.events
+    )
+
+
+def test_read_file_after_write_satisfies_required_artifact_validation():
+    requirements = CompletionRequirements(
+        required_artifacts=("/workspace/results/paper_digest.md",),
+        verifier_required=True,
+    )
+    ledger = EvidenceLedger.from_tool_events(
+        [
+            {
+                "round": 1,
+                "tool": "write_file",
+                "command": json.dumps({
+                    "path": "/workspace/results/paper_digest.md",
+                    "content": "# Verified digest\n",
+                }),
+                "output": "wrote /workspace/results/paper_digest.md",
+                "exit_code": 0,
+            },
+            {
+                "round": 2,
+                "tool": "read_file",
+                "command": json.dumps({
+                    "path": "/workspace/results/paper_digest.md",
+                }),
+                "output": "# Verified digest\n",
+                "exit_code": 0,
+            },
+        ],
+        requirements,
+    )
+
+    decision = ledger.evaluate()
+    assert decision.status == CompletionStatus.SATISFIED
+    assert decision.can_complete is True
 
 
 def test_inspect_media_export_satisfies_declared_artifact():

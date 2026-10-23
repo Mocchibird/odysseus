@@ -306,7 +306,7 @@ async def test_write_file_dispatch_rejects_empty_directory_like_workspace_path(m
         security_context=NO_TOOL_SECURITY_CONTEXT,
     )
     assert desc == "write_file: /workspace/papers"
-    assert "refusing to create an empty file at a directory-like path" in (
+    assert "content required; refusing to create an empty file" in (
         result.get("error") or ""
     )
     assert result.get("exit_code") == 1
@@ -340,3 +340,8 @@ async def test_write_file_dispatch_blocks_cron(monkeypatch):
     )
     assert "outside the allowed roots" in (result.get("error") or "")
     assert result.get("exit_code") == 1
+@pytest.mark.parametrize("filename", ["auth.json", "app.db", "settings.json"])
+def test_application_secrets_are_sensitive_paths(filename):
+    from src.tool_execution import _is_sensitive_path
+
+    assert _is_sensitive_path(f"/tmp/odysseus-data/{filename}")

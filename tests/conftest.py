@@ -4,6 +4,7 @@ import os
 import types
 import importlib.util
 from unittest.mock import MagicMock
+import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -126,3 +127,50 @@ def _spill_files_go_to_tmp(tmp_path_factory):
         yield
     finally:
         mp.undo()
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _serve_test_static():
+    """Ensure static assets are available on loopback port 7011 for browser integration tests."""
+    import socket
+    import threading
+    import http.server
+    import socketserver
+    from pathlib import Path
+
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        is_bound = (sock.connect_ex(("127.0.0.1", 7011)) == 0)
+    finally:
+        sock.close()
+
+    if is_bound:
+        raise RuntimeError("port 7011 is already in use; browser tests require this worktree's static server")
+
+    root_dir = Path(__file__).resolve().parent.parent
+
+    class _Handler(http.server.SimpleHTTPRequestHandler):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, directory=str(root_dir), **kwargs)
+
+        def log_message(self, format, *args):
+            pass
+
+        def guess_type(self, path):
+            if path.endswith(".js") or path.endswith(".mjs"):
+                return "application/javascript"
+            if path.endswith(".css"):
+                return "text/css"
+            return super().guess_type(path)
+
+    class _Server(socketserver.TCPServer):
+        allow_reuse_address = True
+
+    server = _Server(("127.0.0.1", 7011), _Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield
+    finally:
+        server.shutdown()
+        server.server_close()

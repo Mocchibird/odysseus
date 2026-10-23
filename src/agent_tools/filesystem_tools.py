@@ -22,6 +22,35 @@ _GREP_STDERR_PREFIX = 20_000
 _STRUCTURED_DOCUMENT_SUFFIXES = frozenset({
     ".doc", ".docx", ".epub", ".pdf", ".pptx", ".xls", ".xlsx",
 })
+_BINARY_ARTIFACT_SUFFIXES = _STRUCTURED_DOCUMENT_SUFFIXES | frozenset({
+    ".bmp", ".gif", ".ico", ".jpeg", ".jpg", ".mp3", ".mp4", ".ogg",
+    ".png", ".wav", ".webm", ".webp", ".zip",
+})
+
+# Models frequently put source artifacts in a Markdown code fence even when a
+# tool schema asks for the raw file body. Persisting that fence makes HTML,
+# CSS, JavaScript, and source files invalid. Restrict normalization to
+# code-like targets so a user can still write a literal fence to Markdown.
+_FENCED_SOURCE_SUFFIXES = frozenset({
+    ".css", ".csv", ".html", ".htm", ".js", ".json", ".jsx", ".mjs",
+    ".py", ".sh", ".sql", ".svg", ".ts", ".tsx", ".xml", ".yaml", ".yml",
+})
+
+
+def _unwrap_fenced_source_body(body: str, path: str) -> str:
+    """Remove an accidental outer Markdown fence from a source artifact.
+
+    An opening fence is enough to normalize: generation can end during a tool
+    call while its argument remains otherwise usable, and retaining the fence
+    corrupts the artifact. This only applies to source-like file extensions.
+    """
+    if os.path.splitext(path)[1].casefold() not in _FENCED_SOURCE_SUFFIXES:
+        return body
+    match = re.match(r"^(\s*)```[^\r\n]*\r?\n", body)
+    if not match:
+        return body
+    unwrapped = body[match.end():]
+    return re.sub(r"\r?\n```\s*$", "", unwrapped)
 
 
 def _glob_to_regex(pat: str) -> "re.Pattern":
@@ -332,7 +361,7 @@ class ReadFileTool:
 
 class WriteFileTool:
     async def execute(self, content: str, ctx: dict) -> dict:
-        from src.tool_execution import _resolve_tool_path
+        from src.tool_execution import _display_tool_path, _resolve_tool_path, _resolve_search_root, _truncate
         lines = content.split("\n", 1)
         raw_path = lines[0].strip()
         body = lines[1] if len(lines) > 1 else ""
@@ -373,6 +402,7 @@ class WriteFileTool:
         _guard = app_store_write_guard(path)
         if _guard:
             return {"error": f"write_file: {_guard}", "exit_code": 1}
+        body = _unwrap_fenced_source_body(body, path)
         # A frequent multimodal artifact failure is writing SVG markup to a
         # path whose extension promises a raster image. The file exists, so
         # ordinary artifact checks pass, but image judges cannot decode it.
@@ -405,6 +435,20 @@ class WriteFileTool:
                 ),
                 "exit_code": 1,
             }
+        # write_file is a UTF-8 text writer. Refuse to silently destroy an
+        # existing PDF, image, archive, or media artifact produced by a
+        # format-aware tool, especially after the agent has verified it.
+        suffix = os.path.splitext(path)[1].casefold()
+        if suffix in _BINARY_ARTIFACT_SUFFIXES:
+            target_existed = os.path.isfile(path)
+            return {
+                "error": (
+                    f"write_file: refusing UTF-8 text for binary artifact path {path}. "
+                    "Use Python or a format-specific creation tool, then inspect the result."
+                ),
+                "exit_code": 1,
+                "binary_artifact_preserved": target_existed,
+            }
         try:
             def _write():
                 old = ""
@@ -425,7 +469,10 @@ class WriteFileTool:
         except OSError as e:
             return {"error": f"write_file: {path}: {e}", "exit_code": 1}
         diff = _unified_diff(old_content, body, path)
-        result = {"output": f"Wrote {size} bytes to {path}", "exit_code": 0}
+        result = {
+            "output": f"Wrote {size} bytes to {_display_tool_path(path)}",
+            "exit_code": 0,
+        }
         if diff:
             result["diff"] = diff
         return result
