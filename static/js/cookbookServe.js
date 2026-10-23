@@ -16,7 +16,7 @@ import {
   topPopupZ,
 } from './escMenuStack.js';
 import { openCookbookDependencies } from './cookbook-diagnosis.js';
-import { _hwfitCache } from './cookbook-hwfit.js?v=440';
+import { _hwfitCache } from './cookbook-hwfit.js';
 import { topPortalZ } from './toolWindowZOrder.js';
 
 // Shared state/functions injected by init()

@@ -133,7 +133,7 @@ function _buildShell() {
     // module is unavailable for any reason.
     let name = null;
     try {
-      const ui = await import('../ui.js');
+      const ui = await import('../ui.js?v=20260916largetoolscroll1');
       name = ui.styledPrompt
         ? await ui.styledPrompt('New folder', '', 'Name, or parent/child to nest')
         : window.prompt('New folder (parent/child to nest)');
@@ -208,7 +208,7 @@ function _syncStatus(s) {
  */
 async function _notify(msg) {
   try {
-    const ui = await import('../ui.js');
+    const ui = await import('../ui.js?v=20260916largetoolscroll1');
     if (ui.showToast) { ui.showToast(msg); return; }
   } catch (_) { /* fall through */ }
   console.warn('[writer]', msg);

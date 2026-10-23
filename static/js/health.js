@@ -3,7 +3,7 @@
  * hand-rolled SVG charts, and a training log. Backed by /api/health/* which the
  * agent's manage_health tool shares, so chat-logged data shows up here too.
  */
-import uiModule from './ui.js';
+import uiModule from './ui.js?v=20260916largetoolscroll1';
 import { makeToolModalDraggable } from './modalFullscreen.js?v=370';
 import * as Modals from './modalManager.js';
 

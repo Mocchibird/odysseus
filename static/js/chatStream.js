@@ -162,7 +162,7 @@ export function handleUIControl(uiData) {
       // the 12s active-poll.
       var rsid = uiData.research_session_id || uiData.session_id;
       if (rsid) {
-        import('./research/jobs.js?v=522').then(function(mod) {
+        import('./research/jobs.js?v=20260910researcherrorpersist1').then(function(mod) {
           var fn = mod.adoptSession || (mod.default && mod.default.adoptSession);
           if (fn) fn(rsid);
         }).catch(function(){});
@@ -176,12 +176,12 @@ export function handleUIControl(uiData) {
     } else if (uiEvent === 'open_panel' || uiData.ui_event === 'open_panel') {
       var panel = uiData.panel;
       if (panel === 'documents') {
-        import('./documentLibrary.js?v=539').then(function(mod) {
+        import('./documentLibrary.js?v=20260911librarybulkdelete1').then(function(mod) {
           var fn = mod.openLibrary || (mod.default && mod.default.openLibrary);
           if (fn) fn();
         }).catch(function(){});
       } else if (panel === 'gallery') {
-        import('./gallery.js?v=563').then(function(mod) {
+        import('./gallery.js?v=20260910promptcopy1').then(function(mod) {
           var fn = mod.openGallery || (mod.default && mod.default.openGallery);
           if (fn) fn();
         }).catch(function(){});

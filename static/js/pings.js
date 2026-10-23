@@ -4,7 +4,7 @@
  * chat session seeded with the ping's context (so Iris can pull the source).
  * Consolidates the old scattered notifications into one place.
  */
-import uiModule from './ui.js';
+import uiModule from './ui.js?v=20260916largetoolscroll1';
 import { makeToolModalDraggable } from './modalFullscreen.js?v=370';
 import { selectSession } from './sessions.js';
 import * as Modals from './modalManager.js';

@@ -49,7 +49,7 @@ function _paintTheme() {
  */
 function _registerWorker() {
   if (!('serviceWorker' in navigator)) return;
-  navigator.serviceWorker.register('/static/sw.js')
+  navigator.serviceWorker.register('/static/sw.js?v=20260916autoscroll1')
     .catch((e) => console.debug('[writer] SW register failed', e));
 }
 

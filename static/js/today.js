@@ -4,7 +4,7 @@
  * but you can tick a habit done and carry overdue reminders forward in place.
  * Aggregates GET /api/today (events + reminders + habits, owner-scoped).
  */
-import uiModule from './ui.js';
+import uiModule from './ui.js?v=20260916largetoolscroll1';
 import { makeToolModalDraggable } from './modalFullscreen.js?v=370';
 import * as Modals from './modalManager.js';
 

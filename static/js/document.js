@@ -14,7 +14,7 @@ import markdownModule from './markdown.js';
 import codeRunnerModule from './codeRunner.js?v=20260831richtexttools91';
 import { langIcon } from './langIcons.js?v=20260831richtexttools91';
 import spinnerModule from './spinner.js';
-import { openLibrary, closeLibrary, isLibraryOpen, initLibrary } from './documentLibrary.js?v=539';
+import { openLibrary, closeLibrary, isLibraryOpen, initLibrary } from './documentLibrary.js?v=20260911librarybulkdelete1';
 import signatureModule from './signature.js';
 import * as Modals from './modalManager.js';
 import { bindMenuDismiss, dismissOrRemove, dismissTopMenu } from './escMenuStack.js';

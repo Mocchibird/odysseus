@@ -35,7 +35,7 @@ import memoryModule from './js/memory.js';
 import voiceRecorderModule from './js/voiceRecorder.js';
 import censorModule from './js/censor.js';
 import galleryModule from './js/gallery.js?v=20260910promptcopy1';
-import pingsModule from './js/pings.js?v=396';
+import pingsModule from './js/pings.js?v=20261023sync23';
 import { UI_VIS_DEFAULT_OFF, resolveVisibility } from './js/ui_visibility.js?v=20260829chatstyle12';
 // tasks.js + calendar.js + gallery.js are imported EAGERLY (not lazy): they
 // run boot-time side effects at module load — tasks.js starts background-task
@@ -52,7 +52,7 @@ import settingsModule from './js/settings.js?v=20260912writingstyle3';
 // FORK: runtime-inject fork-only UI (e.g. the API Tokens panel) into stable
 // upstream anchors, so index.html stays aligned with upstream. Side-effect
 // import — the module self-runs on load. See static/js/fork-ui.js.
-import './js/fork-ui.js?v=563';
+import './js/fork-ui.js';  // bare: revalidated on every load, so no token to bump
 // Eagerly bind unified minimize/restore behavior across all tool modals.
 import './js/modalManager.js';
 import './js/chipScroll.js?v=20260903calendarchips1';
@@ -82,9 +82,9 @@ import { initSectionCollapse, initSectionDrag } from './js/section-management.js
 // re-awaiting. (tasks/calendar are NOT lazy — they have boot side effects and
 // stay eagerly imported above.)
 const _lazyModule = (loader) => { let m; return async () => (m ||= (await loader()).default); };
-const _gallery  = _lazyModule(() => import('./js/gallery.js?v=563'));
-const _health   = _lazyModule(() => import('./js/health.js?v=529'));
-const _today    = _lazyModule(() => import('./js/today.js?v=422'));
+const _gallery  = _lazyModule(() => import('./js/gallery.js?v=20260910promptcopy1'));
+const _health   = _lazyModule(() => import('./js/health.js?v=20261023sync23'));
+const _today    = _lazyModule(() => import('./js/today.js?v=20261023sync23'));
 
 const API_BASE = window.location.origin;
 window.themeModule = themeModule;
@@ -4805,6 +4805,6 @@ if ('serviceWorker' in navigator) {
     });
   }
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/static/sw.js').catch((e) => console.debug('SW register failed', e));
+    navigator.serviceWorker.register('/static/sw.js?v=20260916autoscroll1').catch((e) => console.debug('SW register failed', e));
   });
 }

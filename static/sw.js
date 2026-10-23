@@ -7,7 +7,7 @@
 //   - Other static assets (images/fonts/libs): cache-first with bg refresh.
 //   - API / non-GET: never cached.
 // Bump CACHE_NAME whenever the precache list or SW logic changes.
-const CACHE_NAME = 'odysseus-v659-notes-reference';
+const CACHE_NAME = 'odysseus-v660-fork-sync23';
 
 // KaTeX resolves these from its own stylesheet, so caching the CSS without them
 // gives offline math fallback glyphs instead of proper typesetting.
@@ -92,10 +92,10 @@ const PRECACHE = [
   '/static/js/codeRunner.js?v=20260831richtexttools91',
   '/static/js/chatStream.js?v=20260914pdfstrip1',
   '/static/js/chat.js?v=20260917toolttft1',
-  '/static/js/composerArrowUpRecall.js',
+  '/static/js/composerArrowUpRecall.js?v=20260714promptrecall',
   '/static/js/cookbook.js',
   '/static/js/search-chat.js',
-  '/static/js/compare/index.js?v=563',
+  '/static/js/compare/index.js?v=20260909mobilepaneaddscroll1',
   '/static/js/compare/vote.js?v=20260828resendcaldrag1',
   '/static/js/colorPicker.js?v=20260910eyedropper1',
   '/static/js/panels.js?v=20260909movepicklayer1',
@@ -175,15 +175,15 @@ const PRECACHE = [
   '/static/js/features/notes/infrastructure/storage.js',
   '/static/js/tasks.js?v=20260914taskmodel1',
   '/static/js/calendar.js?v=20260914emailsource11',
-  '/static/js/health.js?v=529',
-  '/static/js/pings.js?v=396',
-  '/static/js/today.js?v=422',
+  '/static/js/health.js?v=20261023sync23',
+  '/static/js/pings.js?v=20261023sync23',
+  '/static/js/today.js?v=20261023sync23',
   '/static/js/modalFullscreen.js?v=370',
   '/static/js/calendar/utils.js',
   '/static/js/calendar/reminders.js',
   '/static/js/group.js',
   '/static/js/keyboard-shortcuts.js?v=20260829chatstyle12',
-  '/static/js/sidebar-layout.js',
+  '/static/js/sidebar-layout.js?v=20260910sidebarbounce1',
   '/static/js/tileManager.js?v=20260910responsivebounds1',
   '/static/js/section-management.js',
   '/static/lib/highlight.min.js',
@@ -207,17 +207,17 @@ const PRECACHE = [
 const PANEL_PRECACHE = [
   // Image editor — galleryEditor.js and its js/editor/ graph.
   '/static/js/galleryEditor.js?v=20260909movepicklayer1',
-  '/static/js/editor/ai-inpaint.js',
-  '/static/js/editor/wire-inpaint-controls.js',
+  '/static/js/editor/ai-inpaint.js?v=20260708match1',
+  '/static/js/editor/wire-inpaint-controls.js?v=20261023sync23',
   '/static/js/editor/ai-models.js',
   '/static/js/editor/ai-operation.js',
   '/static/js/editor/ai-rembg.js',
   '/static/js/editor/ai-tool-runner.js',
   '/static/js/editor/ai-tools-misc.js',
-  '/static/js/editor/build/controls.js',
+  '/static/js/editor/build/controls.js?v=20260830editor2',
   '/static/js/editor/build/popups.js',
   '/static/js/editor/build/right-panel.js',
-  '/static/js/editor/build/toolbar.js',
+  '/static/js/editor/build/toolbar.js?v=20260830editor2',
   '/static/js/editor/build/topbar.js',
   '/static/js/editor/build/transform-popup.js',
   '/static/js/editor/canvas-coords.js',
@@ -292,7 +292,7 @@ const PANEL_PRECACHE = [
   '/static/js/editor/tools/transform-session.js',
   '/static/js/editor/tools/wand.js',
   '/static/js/editor/wire-import.js',
-  '/static/js/editor/wire-inpaint-controls.js?v=20260708match1',
+  '/static/js/editor/wire-inpaint-controls.js?v=20261023sync23',
   '/static/js/editor/wire-merge-buttons.js',
   '/static/js/editor/wire-selection-controls.js',
   '/static/js/editor/wire-topbar-menus.js',

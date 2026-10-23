@@ -23,7 +23,7 @@ import slashCommands, { initSlashCommands, isCommand, handleSlashCommand, handle
 import createResearchSynapse from './researchSynapse.js?v=20260910roundlabels2';
 import { createStreamRenderer } from './streamingRenderer.js';
 import { createTurnRendering, startsContinuationRound } from './turnRendering.js?v=20260910round1stable1';
-import { wireArrowUpRecall, getUserMessagesFromChatHistory } from './composerArrowUpRecall.js';
+import { wireArrowUpRecall, getUserMessagesFromChatHistory } from './composerArrowUpRecall.js?v=20260714promptrecall';
 import {
   createIncrementalDisplayProjector,
   createLiveThinkingThrottle,

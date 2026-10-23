@@ -470,9 +470,9 @@ const SHELL_ASSETS = [
   '/static/js/writer/menus.js',
   '/static/js/writer/localdb.js',
   '/static/js/writer/sync.js',
-  '/static/js/writer/standalone.js',
+  '/static/js/writer/standalone.js?v=20261023sync23',
   '/static/js/escMenuStack.js',
-  '/static/js/ui.js',
+  '/static/js/ui.js?v=20260916largetoolscroll1',
   '/static/vendor/lexical/Lexical.prod.mjs',
   '/static/vendor/lexical/LexicalRichText.prod.mjs',
   '/static/vendor/lexical/LexicalList.prod.mjs',
@@ -492,11 +492,12 @@ const SHELL_ASSETS = [
 async function _shellCache() {
   if (!('caches' in window)) return null;
   const keys = await caches.keys();
-  // CACHE_NAME is 'odysseus-v<N>'; take the highest N so a stale cache mid-update
-  // isn't the one we fill.
+  // CACHE_NAME is 'odysseus-v<N>' or 'odysseus-v<N>-<label>'; take the highest
+  // N so a stale cache mid-update isn't the one we fill.
+  const num = (k) => Number(/^odysseus-v(\d+)(?:-|$)/.exec(k)[1]);
   const mine = keys
-    .filter((k) => /^odysseus-v\d+$/.test(k))
-    .sort((a, b) => Number(a.slice(10)) - Number(b.slice(10)));
+    .filter((k) => /^odysseus-v\d+(?:-|$)/.test(k))
+    .sort((a, b) => num(a) - num(b));
   const name = mine[mine.length - 1];
   return name ? caches.open(name) : null;
 }

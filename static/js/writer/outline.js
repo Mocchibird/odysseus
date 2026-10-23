@@ -292,7 +292,7 @@ function _liveId(doc) {
 }
 
 async function _ui() {
-  try { return await import('../ui.js'); } catch (_) { return null; }
+  try { return await import('../ui.js?v=20260916largetoolscroll1'); } catch (_) { return null; }
 }
 
 async function _prompt(title, defaultValue, placeholder) {
