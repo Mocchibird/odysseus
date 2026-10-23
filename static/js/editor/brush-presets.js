@@ -44,4 +44,3 @@ export function applyBrushPreset(state, preset) {
   state.brushSmoothing = preset.smoothing;
   state.brushBlendMode = preset.blendMode || 'source-over';
 }
-

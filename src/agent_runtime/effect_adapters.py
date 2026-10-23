@@ -156,6 +156,15 @@ def _filesystem_scope(bound: Any) -> tuple[tuple[ResourceRef, ...], tuple[Postco
     obligations: list[Postcondition] = []
     if tool == "write_file":
         expected = _write_file_digest(bound.execution_input, bound.bindings[0].resource.path)
+        intent = bound.write_intent
+        if intent is not None:
+            from src.agent_tools.filesystem_tools import _unwrap_fenced_source_body
+            resource = bound.bindings[0].resource
+            body = _unwrap_fenced_source_body(intent[1], resource.path)
+            if not body.strip() and not intent[3] and resource.identity is not None:
+                pre_state = _pre_state_text(resource, newline=None)
+                expected = hashlib.sha256(b"").hexdigest() if pre_state == "" else ""
+
         if not expected:
             return refs, ()
         obligations.append(Postcondition(refs[0], Predicate.CONTENT_SHA256, expected))

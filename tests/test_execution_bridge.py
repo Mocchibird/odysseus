@@ -1,4 +1,6 @@
 import asyncio
+import json
+import pytest
 import logging
 import src.tool_execution as tool_execution
 from tests.runtime_evidence_helpers import server_authorized_executor
@@ -13,6 +15,60 @@ from src.tool_execution import (
 
 
 execute_tool_block = server_authorized_executor(execute_tool_block)
+
+
+@pytest.mark.parametrize("content", ['{"path":"/workspace/x"}', '{"path":"/workspace/x","content":null}',
+                                   '/workspace/x', '/workspace/x\n', '/workspace/x\n \t',
+                                   json.dumps({'path': '/workspace/x.py', 'content': '```python\n\n```'})])
+def test_bridge_refuses_missing_or_ambiguous_empty_content(monkeypatch, tmp_path, content):
+    async def forbidden(*args, **kwargs):
+        raise AssertionError("ambiguous write reached remote producer")
+    monkeypatch.setattr(tool_execution, "_client_bridge", lambda context: {"url": "http://bridge", "token": "x"})
+    monkeypatch.setattr(tool_execution, "_bridge_post", forbidden)
+    async def invoke():
+        token = tool_execution._active_workspace.set(str(tmp_path))
+        try:
+            return await tool_execution._route_tool_via_bridge("write_file", content, "s", {})
+        finally:
+            tool_execution._active_workspace.reset(token)
+    _, result = asyncio.run(invoke())
+    assert result["exit_code"] == 1
+    assert "content" in result["error"] or "JSON" in result["error"]
+
+
+@pytest.mark.parametrize("body", ["", " \t", "normal source"])
+def test_bridge_honors_explicit_json_string_content(monkeypatch, tmp_path, body):
+    import base64
+    seen = []
+    async def post(bridge, endpoint, payload, **kwargs):
+        seen.append((endpoint, base64.b64decode(payload["content_b64"])))
+        return {"output": "written", "exit_code": 0}
+    monkeypatch.setattr(tool_execution, "_client_bridge", lambda context: {"url": "http://bridge", "token": "x"})
+    monkeypatch.setattr(tool_execution, "_bridge_post", post)
+    async def invoke():
+        token = tool_execution._active_workspace.set(str(tmp_path))
+        try:
+            return await tool_execution._route_tool_via_bridge("write_file", json.dumps({"path": "/workspace/x", "content": body}), "s", {})
+        finally:
+            tool_execution._active_workspace.reset(token)
+    _, result = asyncio.run(invoke())
+    assert result["exit_code"] == 0
+    assert seen == [("/write", body.encode())]
+
+
+@pytest.mark.parametrize("content", ['/workspace/x\n', '{"path":"/workspace/x"}', '/workspace/x\n \t'])
+def test_scoped_bridge_cannot_blindly_write_implicit_empty(content):
+    async def forbidden(*args):
+        raise AssertionError("scoped bridge received an ambiguous destructive write")
+    bridge = AgentExecutionBridge(forbidden, frozenset({'write_file'}), 'empty-intent-test')
+    async def invoke():
+        with bind_execution_bridge(bridge):
+            block = Block(content)
+            block.tool_type = 'write_file'
+            return await execute_tool_block(block, security_context=NO_TOOL_SECURITY_CONTEXT)
+    _, result = asyncio.run(invoke())
+    assert result['exit_code'] == 1
+    assert 'content' in result['error']
 
 
 class Block:
@@ -159,7 +215,7 @@ def test_scoped_execution_bridge_failure_logs_compact_warning(caplog) -> None:
     assert "Scoped execution bridge test-environment failed for tool=host_shell" in caplog.text
 
 
-def test_tui_bridge_write_file_rejects_text_for_binary_artifact(monkeypatch) -> None:
+def test_tui_bridge_write_file_rejects_text_for_binary_artifact(monkeypatch, tmp_path) -> None:
     """The bridge path must preserve rendered media just like local writes."""
     called = False
 
@@ -172,12 +228,17 @@ def test_tui_bridge_write_file_rejects_text_for_binary_artifact(monkeypatch) -> 
     monkeypatch.setattr(tool_execution, "_bridge_post", fake_post)
 
     async def invoke():
-        return await tool_execution._route_tool_via_bridge(
-            "write_file",
-            '{"path":"/tmp_workspace/results/screenshot.png","content":"The screenshot is complete."}',
-            "run-1",
-            {"surface": "odysseus-tui"},
-        )
+        token = tool_execution._active_workspace.set(str(tmp_path))
+        try:
+            return await tool_execution._route_tool_via_bridge(
+                "write_file",
+                '{"path":"/tmp_workspace/results/screenshot.png","content":"The screenshot is complete."}',
+                "run-1",
+                {"surface": "odysseus-tui"},
+            )
+
+        finally:
+            tool_execution._active_workspace.reset(token)
 
     description, result = asyncio.run(invoke())
 

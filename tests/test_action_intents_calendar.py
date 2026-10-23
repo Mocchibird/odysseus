@@ -20,4 +20,3 @@ def test_terse_timed_calendar_create_promotes_to_calendar():
 
     assert intent.needs_tools
     assert intent.category == "calendar"
-

@@ -4958,6 +4958,7 @@ from src.agent_runtime.authority import MISSING_AUTHORITY, with_request_authorit
 async def stream_preview(*, endpoint_url, model, messages, headers, turn_contract,
                          session_id, owner, disabled_tools, tool_policy,
                          history_session=None, external_untrusted_context_seen=False,
+                         delegated_credential=False,
                          active_document=None, active_email=None, workspace=None,
                          client_runtime_context=None, max_tokens=768, max_rounds=8,
                          max_tool_calls=0,
@@ -4993,7 +4994,20 @@ async def stream_preview(*, endpoint_url, model, messages, headers, turn_contrac
             suggestion_only=suggestion_target,
             source_verification=_bound_editor_requests_web_verification(direct_user_text),
         )
-    offered = compact_schemas(turn_contract.schemas(), model=model)
+    from src.tool_security import delegated_credential_blocked_tools
+    from src.tool_capabilities import delegated_tool_is_blocked
+    disabled_tools = set(disabled_tools or ())
+    if delegated_credential:
+        disabled_tools.update(delegated_credential_blocked_tools())
+    hard_disabled = disabled_tools | (set(tool_policy.all_disabled_names()) if tool_policy else set())
+    def permitted_schema(schema):
+        name = schema['function']['name']
+        return (not (tool_policy and tool_policy.block_all_tool_calls)
+                and name not in hard_disabled
+                and not (delegated_credential and delegated_tool_is_blocked(name)))
+
+    offered = [schema for schema in compact_schemas(turn_contract.schemas(), model=model)
+               if permitted_schema(schema)]
     if standalone_social_turn(direct_user_text) or inline_text_transformation(direct_user_text):
         offered = []
     external_schema_by_name = {
@@ -5181,6 +5195,7 @@ async def stream_preview(*, endpoint_url, model, messages, headers, turn_contrac
     initial_length = len(history)
     security = ToolRunSecurityContext(
         external_untrusted_context_seen=bool(external_untrusted_context_seen),
+        delegated_credential=bool(delegated_credential),
         unattended_tools=(
             NATIVE_WORKSPACE_TOOLS if native_workspace_enabled else frozenset()
         ),
@@ -5568,6 +5583,7 @@ async def stream_preview(*, endpoint_url, model, messages, headers, turn_contrac
                     round_offered = artifact_completion_tool_schemas(
                         round_offered, required_artifacts,
                     )
+                round_offered = [schema for schema in round_offered if permitted_schema(schema)]
                 research_choice = None
                 if not required_artifacts:
                     round_offered, research_choice, _ = bounded_research_tool_policy(
@@ -5746,6 +5762,15 @@ async def stream_preview(*, endpoint_url, model, messages, headers, turn_contrac
                 pending, content, round_reasoning = {}, '', ''
                 document_preview_index = None
                 document_preview_content = ''
+                if 'tools' in request:
+                    request['tools'] = [schema for schema in request['tools'] if permitted_schema(schema)]
+                    offered_names = {schema['function']['name'] for schema in request['tools']}
+                    choice = request.get('tool_choice')
+                    if not request['tools']:
+                        for key in ('tools', 'tool_choice', 'parallel_tool_calls'):
+                            request.pop(key, None)
+                    elif isinstance(choice, dict) and choice.get('function', {}).get('name') not in offered_names:
+                        request.pop('tool_choice', None)
                 can_preview_document = any(
                     schema.get('function', {}).get('name') == 'create_document'
                     for schema in request.get('tools', [])

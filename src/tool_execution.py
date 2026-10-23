@@ -13,8 +13,8 @@ import json
 import logging
 import os
 import re
-import secrets
 import stat
+import secrets
 import time
 from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
@@ -33,6 +33,7 @@ from src.tool_approvals import ExactToolApproval
 from src.tool_policy import ToolPolicy
 from src.client_tool_contract import TUI_ROUTED_BRIDGE_TOOL_NAMES
 from src.constants import (
+    DATA_DIR,
     AGENT_WORKSPACE_DIR,
     MAX_DIFF_LINES,
     MAX_OUTPUT_CHARS,
@@ -727,7 +728,7 @@ async def _route_tool_via_bridge(tool: str, content: str, session_id: Optional[s
         path = path_value.strip() if isinstance(path_value, str) else ""
         if "\n" in path or "\r" in path:
             path = ""
-        body_value = args.get("content", "")
+        body_value = args.get("content")
         if not isinstance(body_value, str):
             return "write_file: invalid arguments", {
                 "error": "write_file: content must be a string",
@@ -737,7 +738,7 @@ async def _route_tool_via_bridge(tool: str, content: str, session_id: Optional[s
     else:
         path, _, body = content.partition("\n")
         path = path.strip()
-    if not path:
+    if not path or path.endswith(("/", "\\")):
         return "write_file: invalid arguments", {
             "error": "write_file: path is required",
             "exit_code": 1,
@@ -745,6 +746,17 @@ async def _route_tool_via_bridge(tool: str, content: str, session_id: Optional[s
     rejected = _text_write_to_binary_artifact_result(content)
     if rejected is not None:
         return rejected
+    from src.agent_tools.filesystem_tools import _parse_write_intent, _unwrap_fenced_source_body
+    try:
+        _, original_body, section, explicit_clear = _parse_write_intent(content)
+    except ValueError as error:
+        return "write_file: invalid arguments", {"error": str(error), "exit_code": 1}
+    body = _unwrap_fenced_source_body(body, path)
+    if not section or (not body.strip() and not explicit_clear):
+        return "write_file: ambiguous content", {
+            "error": "write_file: bridge cannot safely enforce implicit empty content; use explicit JSON string content",
+            "exit_code": 1,
+        }
     return f"write_file: {path[:80]}", await _bridge_post(
         bridge,
         "/write",
@@ -926,8 +938,8 @@ def _is_app_state_path(resolved: str) -> bool:
     otherwise put them back in reach.
 
     A containment rule rather than a filename deny list, so state files added
-    later are covered without anyone remembering to list them, and so a user's
-    own settings.json or app.db inside a real workspace is not caught.
+    later are covered without anyone remembering to list them. The composed
+    sensitive-name policy also denies settings.json and app.db in workspaces.
     """
     from src.constants import DATA_DIR
     if not _path_within_conservative(resolved, os.path.realpath(DATA_DIR)):
@@ -949,10 +961,12 @@ def _is_hardlinked_regular_file(resolved: str) -> bool:
 
 def _is_denied_tool_path(resolved: str) -> bool:
     """Apply every path deny to a canonical traversal result."""
+    from src.agent_runtime.resources import _control_plane_path
     return (
         _is_sensitive_path(resolved)
         or _is_app_state_path(resolved)
         or _is_hardlinked_regular_file(resolved)
+        or _control_plane_path(resolved)
     )
 
 
@@ -961,7 +975,8 @@ def _can_traverse_tool_path(resolved: str) -> bool:
     if _is_sensitive_path(resolved):
         return False
     if not _is_app_state_path(resolved):
-        return True
+        from src.agent_runtime.resources import _control_plane_path
+        return not _control_plane_path(resolved)
     return any(
         _path_within(readable, resolved)
         for readable in _agent_readable_data_subdirs()
@@ -1068,7 +1083,10 @@ def _resolve_tool_path(raw_path: str) -> str:
     """
     resource_operation = active_resource_operation()
     if resource_operation is not None:
-        return resource_operation.resolve_path(raw_path)
+        resolved = resource_operation.resolve_path(raw_path)
+        if _is_denied_tool_path(resolved):
+            raise ValueError("bound path is sensitive, application state or a hard-linked file")
+        return resolved
     ws = get_active_workspace()
     if ws:
         return _resolve_tool_path_in_workspace(ws, raw_path)
@@ -1088,6 +1106,9 @@ def _resolve_tool_path(raw_path: str) -> str:
         )
     if _is_hardlinked_regular_file(resolved):
         raise ValueError(f"path '{raw_path}' is a hard-linked file")
+
+    if _is_denied_tool_path(resolved):
+        raise ValueError("path addresses sensitive execution control-plane state")
 
     for root in _tool_path_roots():
         if is_inside(root, resolved):
@@ -1197,7 +1218,7 @@ def vet_workspace(raw: str) -> Optional[str]:
         return None
     # Refuse the bind rather than binding a workspace where every subsequent
     # tool call would fail on the same deny list.
-    if _is_app_state_path(resolved):
+    if _is_denied_tool_path(resolved):
         return None
     # Reject filesystem roots: binding / (or a Windows drive/UNC root) as the
     # workspace would make every absolute path "inside" it, collapsing the
@@ -1210,15 +1231,23 @@ def vet_workspace(raw: str) -> Optional[str]:
 
 def agent_cwd() -> str:
     """Working directory for agent subprocesses (bash/python/background jobs):
-    the active workspace when set, else the persistent data dir."""
+    a validated sealed launch root, active workspace, or agent workspace."""
+    from src.agent_runtime.process_resources import active_process_operation
     bound = active_process_operation()
     if bound is not None and bound.launch is not None:
-        return bound.launch.scope.root.path
+        bound.launch.scope.validate()
+        root = bound.launch.scope.root.path
+        if vet_workspace(root) != root:
+            raise RuntimeError("sealed process root is not a safe real directory")
+        return root
     workspace = get_active_workspace()
     if workspace:
-        return workspace
+        vetted = vet_workspace(workspace)
+        if vetted is None:
+            raise RuntimeError("active workspace is not a safe real directory")
+        return vetted
     resolved = os.path.realpath(_AGENT_WORKDIR)
-    if resolved not in _agent_readable_data_subdirs():
+    if resolved not in _agent_readable_data_subdirs() or vet_workspace(resolved) != resolved:
         raise RuntimeError("agent workspace is not a safe real directory")
     return resolved
 
@@ -1240,7 +1269,10 @@ def _resolve_search_root(raw_path: str) -> str:
     """
     resource_operation = active_resource_operation()
     if resource_operation is not None:
-        return resource_operation.resolve_path(raw_path, search=True)
+        resolved = resource_operation.resolve_path(raw_path, search=True)
+        if _is_denied_tool_path(resolved):
+            raise ValueError("bound search root is sensitive, application state or a hard-linked file")
+        return resolved
     raw = (raw_path or "").strip()
     ws = get_active_workspace()
     if ws:
@@ -1643,6 +1675,14 @@ async def execute_tool_block(
             "security_context must be a ToolRunSecurityContext or "
             "NO_TOOL_SECURITY_CONTEXT"
         )
+
+    # Credential denial precedes authority, exact approval claim and bridges.
+    if (isinstance(security_context, ToolRunSecurityContext)
+            and security_context.delegated_credential):
+        from src.tool_capabilities import delegated_tool_is_blocked
+        if delegated_tool_is_blocked(getattr(block, "tool_type", None)):
+            decision = security_context.decision_for(block.tool_type, block.content)
+            return blocked_tool_result(block.tool_type, decision.reason)
 
     authority = active_request_authority() if request_authority is MISSING_AUTHORITY else request_authority
     parent = active_request_authority()
@@ -2074,6 +2114,17 @@ async def _execute_tool_block_impl(
 
     mark_authorized()
     if bridge_owns_tool:
+        if tool == "write_file":
+            from src.agent_tools.filesystem_tools import _parse_write_intent, _unwrap_fenced_source_body
+            try:
+                path, body, section, explicit_clear = _parse_write_intent(content)
+                if not path or path.endswith(("/", "\\")) or "\n" in path or "\r" in path:
+                    raise ValueError("write_file: valid file path required")
+                body = _unwrap_fenced_source_body(body, path)
+                if not section or (not body.strip() and not explicit_clear):
+                    raise ValueError("write_file: bridge cannot safely enforce implicit empty content; use explicit JSON string content")
+            except ValueError as error:
+                return "write_file: invalid arguments", {"error": str(error), "exit_code": 1}
         try:
             return await dispatched(execution_bridge.route_tool(
                 tool,
@@ -2221,10 +2272,10 @@ async def _execute_tool_block_impl(
         desc = f"search_chats: {query[:80]}"
         result = await dispatched(do_search_chats(query, owner=owner))
     elif tool in ("chat_with_model", "ask_teacher", "list_models"):
-        # Migrated to the agent_tools registry (#3629/#4445): dispatched through
-        # TOOL_HANDLERS (via _document_tool_dispatch) with the owner/session ctx
-        # these tools need, instead of the legacy dispatch_ai_tool elif. The
-        # impls now live in src/agent_tools/model_interaction_tools.py.
+        # Migrated to the agent_tools registry (#3629): dispatched through
+        # TOOL_HANDLERS with the owner/session ctx these tools need, instead
+        # of the legacy dispatch_ai_tool elif. The impls live in
+        # src/agent_tools/model_interaction_tools.py.
         first_line = content.split(chr(10))[0].strip()[:60]
         desc = f"{tool}: {first_line}" if first_line else tool
         result = await dispatched(_document_tool_dispatch(tool, content, session_id, owner)) \

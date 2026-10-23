@@ -6,7 +6,7 @@ import uuid
 import time
 from pathlib import Path
 from datetime import datetime
-from fastapi import APIRouter, Form, HTTPException, Response, Request, Query, Depends
+from fastapi import APIRouter, Form, HTTPException, Response, Request, Depends, Query
 import logging
 
 from core.session_manager import SessionManager
@@ -1611,15 +1611,18 @@ def setup_session_routes(
         # Server-side tool policy: non-admin owners silently lose the computer
         # tools (src/tool_security); surface that so the TUI can show it.
         try:
-            from src.tool_security import blocked_tools_for_owner
+            from src.tool_security import blocked_tools_for_owner, delegated_credential_blocked_tools
 
             _blocked = blocked_tools_for_owner(owner)
+            if is_delegated_credential(request):
+                _blocked.update(delegated_credential_blocked_tools())
         except Exception:
             _blocked = set()
         _computer = {"bash", "python", "read_file", "write_file", "host_shell"}
         _policy = {
             "computer_tools": "restricted" if _computer & _blocked else "full",
-            "reason": "non-admin owner" if _blocked else "single-user or admin",
+            "reason": "API-token caller" if is_delegated_credential(request) else
+                      "non-admin owner" if _blocked else "single-user or admin",
         }
         _workspace = {
             "backend_path": _backend_cwd,

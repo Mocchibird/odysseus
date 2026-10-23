@@ -3,6 +3,7 @@ import json
 import os
 import re
 import difflib
+import secrets
 import shutil
 import time
 import tempfile
@@ -91,6 +92,22 @@ def _glob_to_regex(pat: str) -> "re.Pattern":
     return re.compile("".join(out))
 
 
+def _validate_grep_descriptor(descriptor):
+    """Revalidate an inert parent snapshot without inherited ContextVars."""
+    path, identity, ancestors = descriptor
+    if os.path.islink(path) or os.path.realpath(path) != path:
+        raise ValueError("grep: resource path changed")
+    for parent, observed in ancestors:
+        info = os.stat(parent, follow_symlinks=False)
+        if not os.path.isdir(parent) or (info.st_dev, info.st_ino) != tuple(observed):
+            raise ValueError("grep: resource ancestor changed")
+    info = os.stat(path, follow_symlinks=False)
+    import stat
+    if (not stat.S_ISREG(info.st_mode) or info.st_nlink > 1
+            or (info.st_dev, info.st_ino) != tuple(identity)):
+        raise ValueError("grep: resource identity changed")
+
+
 def _python_grep_worker(payload: dict, output_queue) -> None:
     """Spawn-safe fallback grep worker used when ripgrep is unavailable.
 
@@ -111,95 +128,35 @@ def _python_grep_worker(payload: dict, output_queue) -> None:
             output_queue.put(("error", f"grep: bad pattern: {exc}"))
             return
 
-        requested_root = payload["root"]
-        skip_dirs = set(payload["skip_dirs"])
-        sensitive = {name.casefold() for name in payload["sensitive_names"]}
         max_hits = payload["max_hits"]
         hits = 0
-        # Do not present unreadable files or directories as an empty result.
-        scan_errors: list = []
 
-        def within(path: str, root: str) -> bool:
-            try:
-                return os.path.commonpath(
-                    [os.path.normcase(path), os.path.normcase(root)]
-                ) == os.path.normcase(root)
-            except ValueError:
-                return False
-
-        def safe_file(path: str, target: str) -> Optional[str]:
-            if os.path.islink(path):
-                return None
-            canonical = os.path.realpath(path)
-            if not within(canonical, requested_root) or not within(canonical, target):
-                return None
-            parts = [part.casefold() for part in canonical.split(os.sep)]
-            if any(part in sensitive for part in parts):
-                return None
-            try:
-                if not os.path.isfile(canonical) or os.stat(canonical).st_nlink > 1:
-                    return None
-            except OSError:
-                return None
-            return canonical
-
-        for target in payload["targets"]:
+        for descriptor in payload["files"]:
             if hits >= max_hits:
                 break
-            if os.path.isfile(target):
-                file_iter = iter((target,))
-            else:
-                def walk_files():
-                    for directory, dirnames, filenames in os.walk(
-                        target, followlinks=False, onerror=scan_errors.append
-                    ):
-                        dirnames[:] = [
-                            name
-                            for name in dirnames
-                            if name not in skip_dirs
-                            and name.casefold() not in sensitive
-                            and not os.path.islink(os.path.join(directory, name))
-                        ]
-                        for name in filenames:
-                            yield os.path.join(directory, name)
-
-                file_iter = walk_files()
-
-            for candidate in file_iter:
-                path = safe_file(candidate, target)
-                if path is None:
-                    continue
-                relative = os.path.relpath(path, requested_root).replace(os.sep, "/")
-                if glob_regex and not (
-                    glob_regex.fullmatch(relative)
-                    or glob_regex.fullmatch(os.path.basename(path))
-                ):
-                    continue
-                try:
-                    with open(path, "r", encoding="utf-8", errors="strict") as handle:
-                        for number, line in enumerate(handle, 1):
-                            if regex.search(line):
-                                output_queue.put((
-                                    "match",
-                                    path,
-                                    number,
-                                    line.rstrip()[:_CODENAV_MAX_LINE],
-                                ))
-                                hits += 1
-                                if hits >= max_hits:
-                                    break
-                except UnicodeDecodeError:
-                    continue
-                except OSError as error:
-                    scan_errors.append(error)
-                if hits >= max_hits:
-                    break
-        if scan_errors:
-            output_queue.put((
-                "error",
-                "grep: search incomplete; one or more files or directories could not be read",
-            ))
-            return
+            path, identity, ancestors = descriptor
+            _validate_grep_descriptor(descriptor)
+            relative = os.path.relpath(path, payload["base"]).replace(os.sep, "/")
+            if glob_regex and not (
+                glob_regex.fullmatch(relative) or glob_regex.fullmatch(os.path.basename(path))
+            ):
+                continue
+            try:
+                with open(path, "r", encoding="utf-8", errors="strict") as handle:
+                    info = os.fstat(handle.fileno())
+                    if (info.st_dev, info.st_ino) != tuple(identity) or info.st_nlink > 1:
+                        raise ValueError("grep: resource identity changed before read")
+                    for number, line in enumerate(handle, 1):
+                        if regex.search(line):
+                            output_queue.put(("match", path, number, line.rstrip()[:_CODENAV_MAX_LINE]))
+                            hits += 1
+                            if hits >= max_hits:
+                                break
+            except UnicodeDecodeError:
+                continue
+            except OSError as error:
+                output_queue.put(("error", f"grep: {error}"))
+                return
         output_queue.put(("done",))
     except BaseException as exc:
         try:
@@ -251,7 +208,7 @@ def _edit_file_text(original: str, old: str, new: str, replace_all: bool) -> tup
 
 class EditFileTool:
     async def execute(self, content: str, ctx: dict) -> dict:
-        from src.tool_execution import _resolve_tool_path
+        from src.tool_execution import _resolve_tool_path, _resolve_search_root, _truncate
         try:
             args = json.loads(content) if content.strip().startswith("{") else {}
         except (json.JSONDecodeError, TypeError):
@@ -320,7 +277,7 @@ class EditFileTool:
 
 class ReadFileTool:
     async def execute(self, content: str, ctx: dict) -> dict:
-        from src.tool_execution import _resolve_tool_path
+        from src.tool_execution import _resolve_tool_path, _resolve_search_root, _truncate
         raw_path, offset, limit = content.split("\n", 1)[0].strip(), 0, 0
         _stripped = content.strip()
         if _stripped.startswith("{"):
@@ -387,32 +344,82 @@ class ReadFileTool:
             data = data[:MAX_READ_CHARS] + f"\n... [truncated at {MAX_READ_CHARS} chars]"
         return {"output": data, "exit_code": 0}
 
+
+def _write_new_file_without_overwrite(path: str, body: str) -> None:
+    """Publish a new file without exposing a writable placeholder at its path.
+
+    Stage beside the destination, then hard-link it into place. The link is
+    atomic and fails if another writer created the destination first.
+    """
+    directory = os.path.dirname(path) or "."
+    temporary_path = os.path.join(
+        directory, f".odysseus-write-{secrets.token_hex(16)}.tmp"
+    )
+    fd = os.open(
+        temporary_path,
+        os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+        0o666,
+    )
+
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as temporary_file:
+            fd = None
+            temporary_file.write(body)
+        os.link(temporary_path, path)
+    finally:
+        if fd is not None:
+            os.close(fd)
+        try:
+            os.unlink(temporary_path)
+        except FileNotFoundError:
+            pass
+
+
+class _EmptyBodyWouldTruncate(Exception):
+    """Raised inside the write thread when an undeclared empty body is about to
+    replace a file that holds bytes. Carries the size at risk so the caller can be
+    told what it would have lost (#6414)."""
+
+    def __init__(self, path: str, existing_bytes: int):
+        super().__init__(path)
+        self.path = path
+        self.existing_bytes = existing_bytes
+
+def _parse_write_intent(content: str) -> tuple[str, str, bool, bool]:
+    """Classify the original transport, before binding or source normalization.
+
+    The returned clear flag is derived here, never from a caller-supplied key.
+    """
+    if not isinstance(content, str):
+        raise ValueError("write_file: expected string arguments")
+    if content.lstrip().startswith("{"):
+        try:
+            args = json.loads(content)
+        except (TypeError, ValueError) as error:
+            raise ValueError("write_file: expected valid JSON arguments") from error
+        if not isinstance(args, dict):
+            raise ValueError("write_file: expected a JSON object")
+        path, body = args.get("path"), args.get("content")
+        if not isinstance(body, str):
+            raise ValueError("write_file: content required and must be a string")
+        if not isinstance(path, str):
+            raise ValueError("write_file: path required and must be a string")
+        return path.strip(), body, True, not body.strip()
+    path, delimiter, body = content.partition("\n")
+    return path.strip(), body, bool(delimiter), False
+
+
 class WriteFileTool:
     async def execute(self, content: str, ctx: dict) -> dict:
-        from src.tool_execution import _display_tool_path, _resolve_tool_path, _resolve_search_root, _truncate
-        lines = content.split("\n", 1)
-        raw_path = lines[0].strip()
-        body = lines[1] if len(lines) > 1 else ""
-        # Decode JSON-object args (the fenced inline-args shape
-        # ```write_file {"path": "...", "content": "..."}```), matching
-        # ReadFileTool above. Without this the whole JSON string becomes the
-        # path and the file is written under a garbage name. This is the live
-        # path: there is no filesystem MCP server, so write_file always runs
-        # here via _direct_fallback, not through _build_mcp_args.
-        _stripped = content.strip()
-        if _stripped.startswith("{"):
-            try:
-                _a = json.loads(_stripped)
-                if not isinstance(_a, dict):
-                    return {"error": "write_file: expected a JSON object", "exit_code": 1}
-                raw_path_value = _a.get("path")
-                body_value = _a.get("content")
-                raw_path = raw_path_value.strip() if isinstance(raw_path_value, str) else ""
-                if not isinstance(body_value, str):
-                    return {"error": "write_file: content required", "exit_code": 1}
-                body = body_value
-            except (json.JSONDecodeError, TypeError, ValueError):
-                return {"error": "write_file: expected valid JSON arguments", "exit_code": 1}
+        from src.tool_execution import _display_tool_path, _resolve_tool_path
+        from src.agent_runtime.resource_binding import active_resource_operation
+        bound = active_resource_operation()
+        original = bound.operation.input if bound is not None else content
+        try:
+            _, _, has_section, declared_clear = _parse_write_intent(original)
+            raw_path, body, _, _ = _parse_write_intent(content)
+        except ValueError as error:
+            return {"error": str(error), "exit_code": 1}
         if not raw_path:
             return {"error": "write_file: path required", "exit_code": 1}
         from src.tool_execution import app_store_write_guard
@@ -453,16 +460,6 @@ class WriteFileTool:
                 "exit_code": 1,
                 "artifact_format_error": True,
             }
-        if not body:
-            return {
-                "error": (
-                    f"write_file: {path}: content required; refusing to create an "
-                    "empty file. Call write_file again with the exact filename and "
-                    "non-empty content. If you need a directory, create it from "
-                    "bash/python instead."
-                ),
-                "exit_code": 1,
-            }
         # write_file is a UTF-8 text writer. Refuse to silently destroy an
         # existing PDF, image, archive, or media artifact produced by a
         # format-aware tool, especially after the agent has verified it.
@@ -477,6 +474,10 @@ class WriteFileTool:
                 "exit_code": 1,
                 "binary_artifact_preserved": target_existed,
             }
+        if not has_section:
+            return {"error": "write_file: content required; missing content section", "exit_code": 1}
+        if raw_path.endswith(("/", "\\")) or os.path.isdir(path):
+            return {"error": "write_file: target is a directory", "exit_code": 1}
         # This writer truncates in place. Once that stage is reached, a failure
         # may leave a partial file; report it so effect evidence stays honest.
         attempted = []
@@ -491,21 +492,67 @@ class WriteFileTool:
                 d = os.path.dirname(path)
                 if d:
                     os.makedirs(d, exist_ok=True)
+                if not body.strip() and not declared_clear:
+                    # Empty/whitespace-only writes to an already-empty file are no-ops.
+                    # Avoid reopening in truncating mode: another writer may have added
+                    # data since the read above.
+                    if os.path.isfile(path):
+                        existing_bytes = os.path.getsize(path)
+                        if existing_bytes > 0:
+                            raise _EmptyBodyWouldTruncate(path, existing_bytes)
+                        return old, 0
+
+                    try:
+                        if body:
+                            # Publish whitespace content atomically. Writing it
+                            # after exclusive creation could overwrite bytes from
+                            # a writer that filled the new placeholder meanwhile.
+                            attempted.append(True)
+                            _write_new_file_without_overwrite(path, body)
+                        else:
+                            # An exact empty body needs no staged data, so create
+                            # the file exclusively and never write through it.
+                            attempted.append(True)
+                            with open(path, "x", encoding="utf-8"):
+                                pass
+                    except FileExistsError:
+                        if os.path.isfile(path):
+                            existing_bytes = os.path.getsize(path)
+                            if existing_bytes > 0:
+                                raise _EmptyBodyWouldTruncate(path, existing_bytes)
+                            return old, 0
+                        raise
+                    return old, len(body)
+
                 attempted.append(True)
                 with open(path, "w", encoding="utf-8") as f:
                     f.write(body)
                 return old, len(body)
             old_content, size = await asyncio.to_thread(_write)
+        except _EmptyBodyWouldTruncate as e:
+            clear_call = json.dumps({"path": raw_path, "content": ""})
+            return {
+                "error": (
+                    f"write_file: refused to write an empty body over {e.path} — it holds "
+                    f"{e.existing_bytes} bytes, which the write would have destroyed, so "
+                    f"the file is unchanged. To clear it on purpose, resend with an "
+                    f"explicit empty content: {clear_call}"
+                ),
+                "exit_code": 1,
+            }
         except PermissionError:
             return {"error": f"write_file: {path}: permission denied", "exit_code": 1,
                     **({"mutation_attempted": True} if attempted else {})}
         except OSError as e:
             return {"error": f"write_file: {path}: {e}", "exit_code": 1,
                     **({"mutation_attempted": True} if attempted else {})}
-        diff = _unified_diff(old_content, body, path)
+        committed_body = old_content if size == 0 and not declared_clear and not body.strip() else body
+        diff = _unified_diff(old_content, committed_body, path)
         result = {
-            "output": f"Wrote {size} bytes to {_display_tool_path(path)}",
+            "output": (f"Wrote {size} bytes to {_display_tool_path(path)}" if attempted else
+                       f"No write performed for {_display_tool_path(path)} (implicit empty body)"),
             "exit_code": 0,
+            **({"write_noop": True} if not attempted else {}),
         }
         if diff:
             result["diff"] = diff
@@ -754,12 +801,7 @@ def _apply_patch_hunks(original: str, hunks: List[List[str]], label: str) -> str
 
 class LsTool:
     async def execute(self, content: str, ctx: dict) -> dict:
-        from src.tool_execution import (
-            _display_tool_path,
-            _is_denied_tool_path,
-            _resolve_search_root,
-            _truncate,
-        )
+        from src.tool_execution import _display_tool_path, _is_denied_tool_path, _resolve_search_root, _truncate
         raw_path = ""
         _s = (content or "").strip()
         if _s.startswith("{"):
@@ -783,8 +825,7 @@ class LsTool:
                     for entry in it:
                         if entry.name.startswith("."):
                             continue
-                        if (_is_denied_tool_path(os.path.realpath(entry.path))
-                                or not _visible_bound_resource(entry.path)):
+                        if _is_denied_tool_path(os.path.realpath(entry.path)) or not _visible_bound_resource(entry.path):
                             continue
                         try:
                             is_dir = entry.is_dir(follow_symlinks=False)
@@ -814,8 +855,9 @@ class GlobTool:
         from src.tool_execution import (
             _SENSITIVE_BASENAMES,
             _can_traverse_tool_path,
-            _display_tool_path,
             _is_denied_tool_path,
+            _display_tool_path,
+            _is_sensitive_path,
             _resolve_tool_path,
             _resolve_search_root,
             _truncate,
@@ -858,8 +900,7 @@ class GlobTool:
                 # .ssh/id_rsa, …) falls through to the walk, which skips it —
                 # otherwise glob would surface secret paths that read_file /
                 # grep already refuse to touch.
-                if (inside and os.path.exists(cand) and not _is_denied_tool_path(cand)
-                        and _visible_bound_resource(cand)):
+                if inside and os.path.exists(cand) and not _is_denied_tool_path(cand) and _visible_bound_resource(cand):
                     return [cand], None
                 # Literal not at exact path — fall through to walk so
                 # e.g. "foo.py" still matches at any depth (like rglob).
@@ -888,8 +929,7 @@ class GlobTool:
                         if regex.fullmatch(rel) or regex.fullmatch(name):
                             # Skip deny-listed sensitive files (.env, id_rsa,
                             # known_hosts, …) the same way grep does.
-                            if (_is_denied_tool_path(os.path.realpath(full))
-                                    or not _visible_bound_resource(full)):
+                            if _is_denied_tool_path(os.path.realpath(full)) or not _visible_bound_resource(full):
                                 continue
                             try:
                                 mtime = os.stat(full).st_mtime
@@ -919,8 +959,9 @@ class GrepTool:
             _SENSITIVE_BASENAMES,
             _SENSITIVE_FILE_PATTERNS,
             _agent_readable_data_subdirs,
-            _display_tool_path,
             _is_denied_tool_path,
+            _display_tool_path,
+            _can_traverse_tool_path,
             _is_sensitive_path,
             _path_within,
             _resolve_search_root,
@@ -958,80 +999,88 @@ class GrepTool:
 
             from src.constants import DATA_DIR
 
-            from src.agent_runtime.resource_binding import active_resource_operation
-
-            if not os.path.exists(root):
-                return None, f"grep: search target not found: {_display_tool_path(root)}"
-            # The pathname-only fast path scans before individual resources can
-            # be checked. Bound searches must validate every file before read.
-            rg = None if active_resource_operation() is not None else shutil.which("rg")
+            rg = shutil.which("rg")
             real_root = os.path.realpath(root)
-            data_dir = os.path.realpath(DATA_DIR)
-            spans_state = _path_within(data_dir, real_root)
-
-            def is_top_level_safe(path: str, *, partition_generated: bool) -> bool:
-                lexical = os.path.abspath(path)
-                if os.path.islink(lexical):
-                    return False
-                canonical = os.path.realpath(lexical)
-                if not _path_within(canonical, real_root):
-                    return False
-                if partition_generated and os.path.basename(lexical) in _CODENAV_SKIP_DIRS:
-                    return False
-                if _is_sensitive_path(canonical) or _is_denied_tool_path(canonical):
-                    return False
-                return True
-
-            def safe_targets() -> tuple[list[str], Optional[str]]:
-                candidates: list[tuple[str, bool]] = []
-                if not spans_state:
-                    # Preserve direct-root compatibility: skip-directory policy
-                    # prunes descendants, but an explicitly requested allowed
-                    # root named node_modules remains searchable.
-                    candidates.append((real_root, False))
-                else:
-                    current = real_root
-                    if current != data_dir:
-                        for part in os.path.relpath(data_dir, current).split(os.sep):
-                            try:
-                                with os.scandir(current) as entries:
-                                    for entry in entries:
-                                        if entry.name != part:
-                                            # Reject a sibling link lexically before
-                                            # canonicalizing or treating it as a target.
-                                            if entry.is_symlink():
-                                                continue
-                                            candidates.append((entry.path, True))
-                            except OSError as exc:
-                                return [], f"grep: {exc}"
-                            current = os.path.join(current, part)
-                    for readable in _agent_readable_data_subdirs():
-                        if (
-                            _path_within(readable, data_dir)
-                            and _path_within(readable, real_root)
-                            and os.path.exists(readable)
-                        ):
-                            candidates.append((readable, True))
-
-                targets: list[str] = []
-                seen: set[str] = set()
-                for candidate, partition_generated in candidates:
-                    if not is_top_level_safe(
-                        candidate, partition_generated=partition_generated
-                    ):
-                        continue
-                    canonical = os.path.realpath(candidate)
-                    if canonical not in seen:
-                        seen.add(canonical)
-                        targets.append(canonical)
-                return targets, None
-
-            targets, target_error = safe_targets()
-            if target_error:
-                return None, target_error
-
-            base = real_root if os.path.isdir(real_root) else os.path.dirname(real_root)
             deadline = time.monotonic() + _GREP_TIMEOUT_SECONDS
+            base = real_root if os.path.isdir(real_root) else os.path.dirname(real_root)
+            from src.agent_runtime.resource_binding import active_resource_operation
+            bound = active_resource_operation()
+            if bound is not None:
+                bound.validate()
+            files = []
+
+            def check_deadline():
+                if time.monotonic() >= deadline:
+                    raise TimeoutError("grep: timed out")
+
+            def observe_file(path):
+                check_deadline()
+                if os.path.islink(path):
+                    return
+                canonical = os.path.realpath(path)
+                if not _path_within(canonical, base) or _is_denied_tool_path(canonical):
+                    return
+                if bound is not None:
+                    try:
+                        bound.resolve_path(canonical)
+                    except ValueError:
+                        # Intentionally denied publication control-plane paths
+                        # are omitted before any producer is allowed to read.
+                        return
+                info = os.stat(canonical, follow_symlinks=False)
+                if not os.path.isfile(canonical):
+                    return
+                ancestors = []
+                parent = os.path.dirname(canonical)
+                while _path_within(parent, base):
+                    observed = os.stat(parent, follow_symlinks=False)
+                    ancestors.append((parent, (observed.st_dev, observed.st_ino)))
+                    if parent == base:
+                        break
+                    parent = os.path.dirname(parent)
+                files.append((canonical, (info.st_dev, info.st_ino), tuple(ancestors)))
+                if len(files) > 100_000:
+                    raise ValueError("grep: enumeration limit exceeded; scan incomplete")
+
+            try:
+                if os.path.islink(root):
+                    raise ValueError("grep: symlink search root is not allowed")
+                if os.path.isfile(real_root):
+                    observe_file(real_root)
+                elif os.path.isdir(real_root):
+                    pending_directories = [real_root]
+                    enumerated = 0
+                    while pending_directories:
+                        check_deadline()
+                        directory = pending_directories.pop()
+                        if not _can_traverse_tool_path(directory):
+                            continue
+                        with os.scandir(directory) as entries:
+                            for entry in entries:
+                                check_deadline()
+                                enumerated += 1
+                                if enumerated > 100_000:
+                                    raise ValueError("grep: enumeration limit exceeded; scan incomplete")
+                                if entry.is_symlink():
+                                    continue
+                                canonical = os.path.realpath(entry.path)
+                                if not _path_within(canonical, base):
+                                    raise ValueError("grep: directory identity changed during enumeration")
+                                if entry.is_dir(follow_symlinks=False):
+                                    if (entry.name not in _CODENAV_SKIP_DIRS
+                                            and _can_traverse_tool_path(canonical)
+                                            and (bound is None or _is_denied_tool_path(canonical)
+                                                 or _visible_bound_resource(canonical))):
+                                        pending_directories.append(canonical)
+                                else:
+                                    observe_file(entry.path)
+                else:
+                    raise FileNotFoundError(f"grep: {root}: not found")
+                check_deadline()
+            except (OSError, ValueError) as error:
+                return None, str(error) if str(error).startswith("grep:") else f"grep: {error}"
+            descriptors = {record[0]: record for record in files}
+            targets = list(descriptors)
             lines: list[str] = []
 
             def parse_rg_result(raw: str) -> Optional[str]:
@@ -1049,9 +1098,12 @@ class GrepTool:
                     return None
                 absolute = path if os.path.isabs(path) else os.path.join(base, path)
                 canonical = os.path.realpath(absolute)
-                if not _path_within(canonical, real_root) or _is_denied_tool_path(canonical):
-                    return None
-                return f"{os.path.abspath(absolute)}:{number}:{text_value.rstrip()[:_CODENAV_MAX_LINE]}"
+                if canonical not in descriptors:
+                    raise ValueError("grep: producer returned an undeclared resource")
+                _validate_grep_descriptor(descriptors[canonical])
+                if bound is not None:
+                    bound.resolve_path(canonical)
+                return f"{_display_tool_path(canonical)}:{number}:{text_value.rstrip()[:_CODENAV_MAX_LINE]}"
 
             def run_rg(cmd: list[str]) -> Optional[str]:
                 try:
@@ -1148,7 +1200,7 @@ class GrepTool:
             if rg:
                 # Validate even when policy filtering leaves no search targets.
                 if not targets:
-                    error = run_rg([rg, "--json", "--no-config", "--regexp", pattern])
+                    error = run_rg([rg, "--json", "--no-config", "--regexp", pattern, "--", "-"])
                     return (None, error) if error else ([], None)
                 relative_targets = [os.path.relpath(target, base) for target in targets]
                 for offset in range(0, len(relative_targets), 128):
@@ -1169,7 +1221,15 @@ class GrepTool:
                     for skipped_dir in _CODENAV_SKIP_DIRS:
                         cmd += ["--glob", f"!**/{skipped_dir}/**"]
                     cmd += ["--regexp", pattern, "--", *relative_targets[offset:offset + 128]]
-                    error = run_rg(cmd)
+                    try:
+                        for path in targets[offset:offset + 128]:
+                            check_deadline()
+                            _validate_grep_descriptor(descriptors[path])
+                            if bound is not None:
+                                bound.resolve_path(path)
+                        error = run_rg(cmd)
+                    except (OSError, ValueError) as exc:
+                        return None, f"grep: {exc}"
                     if error:
                         return None, error
                 return lines, None
@@ -1178,8 +1238,9 @@ class GrepTool:
             # multithreaded process and can deadlock. Spawn is platform-safe and
             # PyInstaller-compatible via launcher's early freeze_support().
             payload = {
-                "root": real_root,
-                "targets": targets,
+                "root": base,
+                "base": base,
+                "files": tuple(files),
                 "pattern": pattern,
                 "ignore_case": ignore_case,
                 "glob": glob_pat,
@@ -1238,9 +1299,17 @@ class GrepTool:
                         break
                     _, path, number, text_value = record
                     canonical = os.path.realpath(path)
-                    if not _path_within(canonical, real_root) or _is_denied_tool_path(canonical):
-                        continue
-                    rendered = f"{path}:{number}:{text_value}"
+                    if canonical not in descriptors:
+                        error = "grep: fallback returned an undeclared resource"
+                        break
+                    try:
+                        _validate_grep_descriptor(descriptors[canonical])
+                        if bound is not None:
+                            bound.resolve_path(canonical)
+                    except (OSError, ValueError) as exc:
+                        error = f"grep: {exc}"
+                        break
+                    rendered = f"{_display_tool_path(canonical)}:{number}:{text_value}"
                     if rendered not in lines:
                         lines.append(rendered)
             finally:
@@ -1255,7 +1324,7 @@ class GrepTool:
                 output_queue.close()
             if error:
                 return None, error
-            if worker.exitcode not in (0, None) and len(lines) < max_hits:
+            if (not completed or worker.exitcode not in (0, None)) and len(lines) < max_hits:
                 return None, f"grep: fallback worker exited {worker.exitcode}"
             return lines, None
 

@@ -1419,7 +1419,7 @@ def test_teacher_takeover_inherits_delegated_and_tainted_run_authority(monkeypat
             "http://local.test/v1",
             "qwen-local-model",
             [
-                {"role": "user", "content": "finish it"},
+                {"role": "user", "content": "Explain how a compass works."},
                 untrusted_context_message("stored context", "untrusted"),
             ],
             session_id="session-1",

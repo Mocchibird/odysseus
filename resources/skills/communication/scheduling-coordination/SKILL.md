@@ -37,4 +37,3 @@ Do not create or modify an event when the user asked only for available options 
 - The selected interval satisfies duration, availability, and time-zone constraints.
 - The calendar read-back matches the authorized event details.
 - Notifications describe the same confirmed event and remain drafts unless sending was explicitly authorized.
-

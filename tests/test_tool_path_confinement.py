@@ -315,8 +315,8 @@ async def test_write_file_dispatch_rejects_empty_directory_like_workspace_path(m
         workspace=str(tmp_path),
         security_context=NO_TOOL_SECURITY_CONTEXT,
     )
-    assert desc == "write_file: /workspace/papers"
-    assert "content required; refusing to create an empty file" in (
+    assert "BLOCKED" in desc
+    assert "content required; missing content section" in (
         result.get("error") or ""
     )
     assert result.get("exit_code") == 1

@@ -53,6 +53,14 @@ class BoundFilesystemOperation:
                      or next(b for b in self.bindings if b.role == "source").resource.identity is None)):
             raise ValueError("Move/rename must bind distinct source and destination")
 
+    @property
+    def write_intent(self):
+        """Trusted original intent; execution_input only normalizes the path."""
+        if self.operation.tool != "write_file":
+            return None
+        from src.agent_tools.filesystem_tools import _parse_write_intent
+        return _parse_write_intent(self.operation.input)
+
     def validate(self):
         for binding in self.bindings:
             binding.resource.validate()
@@ -120,6 +128,13 @@ def resolve_filesystem_operation(operation, *, roots, workspace="", request_id="
             or any(not isinstance(r, FilesystemRoot) for r in roots)):
         raise ValueError("Native filesystem operation requires a sealed resource root")
     content = operation.input
+    if operation.tool == "write_file":
+        from src.agent_tools.filesystem_tools import _parse_write_intent
+        original_path, _, section, _ = _parse_write_intent(content)
+        if not section:
+            raise ValueError("write_file: content required; missing content section")
+        if original_path.endswith(("/", "\\")):
+            raise ValueError("write_file: target is a directory")
     args = json.loads(content) if content.lstrip().startswith("{") else None
     if args is not None and not isinstance(args, dict):
         raise ValueError("Filesystem input must be an object")

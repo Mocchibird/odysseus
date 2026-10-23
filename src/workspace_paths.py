@@ -61,4 +61,3 @@ def backend_workspace_path(path: str | None) -> str:
             return container_root
         return str(PurePosixPath(container_root) / rel)
     return expanded
-

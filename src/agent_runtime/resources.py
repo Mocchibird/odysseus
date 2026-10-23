@@ -114,11 +114,9 @@ def _control_plane_snapshot():
     uploader = get_upload_handler()
     if uploader is not None and isinstance(getattr(uploader, "upload_dir", None), (str, os.PathLike)):
         protected.add(canonical_root(Path(uploader.upload_dir) / "uploads.json"))
-    for directory in job_dirs:
-        jobs = Path(directory)
-        if jobs.exists():
-            # Uninspectable state fails closed; hardlinks retain object identity.
-            protected.update(canonical_root(p) for p in jobs.rglob("*") if p.is_file())
+    # Prefix protection covers the complete runtime trees. Public policy denies
+    # every regular hardlink alias, so collecting all child inodes here would
+    # add an unbounded recursive state inventory without widening protection.
     protected.update(canonical_root(getattr(constants, name) + suffix)
                      for name in ("APP_DB", "SCHEDULED_EMAILS_DB", "EMAIL_CACHE_DB")
                      for suffix in ("-wal", "-shm", "-journal"))
@@ -131,7 +129,7 @@ def _control_plane_snapshot():
         except FileNotFoundError:
             continue
         identities.add((observed.st_dev, observed.st_ino))
-    # Effect directories join the prefix set only after the recursive inventory.
+    # Effect directories are protected by prefix without inventorying children.
     return frozenset(job_dirs | effect_dirs), frozenset(protected), frozenset(identities)
 
 
@@ -139,6 +137,11 @@ def _control_plane_path(path, *, snapshot=None):
     # A scan-local snapshot bounds repeated hardlink checks. Ordinary resource
     # resolution always observes fresh state. Neither form is an atomic kernel
     # access policy, and snapshots must never survive a workspace guard call.
+    # Public state and hardlink denial also applies to sealed resources. Lazy
+    # import avoids coupling inert identity definitions to dispatcher startup.
+    from src.tool_execution import _is_app_state_path, _is_hardlinked_regular_file
+    if _is_sensitive_path(path) or _is_app_state_path(path) or _is_hardlinked_regular_file(path):
+        return True
     directories, protected, identities = _control_plane_snapshot() if snapshot is None else snapshot
     if any(Path(path).is_relative_to(directory) for directory in directories) or path in protected:
         return True

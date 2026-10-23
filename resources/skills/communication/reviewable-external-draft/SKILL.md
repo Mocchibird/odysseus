@@ -37,4 +37,3 @@ Do not use this procedure to send immediately unless the user explicitly authori
 - Recipient identity and communication mode match the request.
 - Dates, figures, status, and commitments map to current source evidence.
 - The result remains reviewable unless an explicit send-now instruction authorized delivery.
-

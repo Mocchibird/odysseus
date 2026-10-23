@@ -37,4 +37,3 @@ Do not use when the source material is unavailable or when the user only wants a
 - Every action has a source, status, and explicit or tentative owner and due date.
 - Conflicting values and revisions are resolved or visibly flagged.
 - The output covers decisions, actions, dependencies, risks, and open questions relevant to the request.
-

@@ -737,6 +737,14 @@ def messages_contain_external_untrusted_context(messages: Iterable[dict]) -> boo
     return False
 
 
+def delegated_tool_is_blocked(tool_name: Any) -> bool:
+    # The bridge exposes these spellings for the same filesystem surfaces.
+    if isinstance(tool_name, str):
+        tool_name = tool_name.strip()
+        tool_name = {"list_dir": "ls", "find_files": "glob"}.get(tool_name, tool_name)
+    return is_public_blocked_tool(tool_name)
+
+
 @dataclass
 class ToolRunSecurityContext:
     """Server-owned integrity state for one agent run."""
@@ -765,10 +773,7 @@ class ToolRunSecurityContext:
             # grant sitting in this chat's history (left by the owner's own
             # browser) must not be picked up by a token driving the same chat.
             self.approval_gate_bypassed = False
-            if messages_contain_external_untrusted_context(message_list):
-                self.external_untrusted_context_seen = True
-            return
-        if any(
+        elif any(
             isinstance(message, dict)
             and isinstance(message.get("metadata"), dict)
             and message["metadata"].get(
@@ -796,7 +801,7 @@ class ToolRunSecurityContext:
         # Checked before the bypasses below, because neither may lift it, and
         # kept independent of external_untrusted_context_seen so it holds on a
         # run where that gate never arms and raises no prompt to bypass.
-        if self.delegated_credential and is_public_blocked_tool(tool_name):
+        if self.delegated_credential and delegated_tool_is_blocked(tool_name):
             return ToolGateDecision(
                 False,
                 (

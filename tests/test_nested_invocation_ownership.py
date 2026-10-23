@@ -236,6 +236,10 @@ async def test_teacher_runs_after_parent_gate_and_cannot_change_parent_control_s
         assert not turn_contract.permits('bash')
         assert kwargs['tool_policy'] is policy
         assert kwargs['external_untrusted_context_seen'] is True
+        assert kwargs['delegated_credential'] is True
+        assert kwargs['plan_mode'] is True
+        assert kwargs['disabled_tools'] == {'bash', 'python'}
+        assert observed['parent_closed']
         assert kwargs['client_runtime_context'] == {'completion_requirements': {'verifier_required': True}}
         await tool(ToolBlock('bash', 'python -m unittest'))
         try:
@@ -271,6 +275,7 @@ async def test_teacher_runs_after_parent_gate_and_cannot_change_parent_control_s
                 student_tool_events=[], student_reply="I can't do this.",
                 workspace=workspace, turn_contract=turn_contract, tool_policy=policy,
                 external_untrusted_context_seen=True, client_runtime_context=client_runtime_context,
+                delegated_credential=True, plan_mode=True, disabled_tools={'bash', 'python'},
             )
             yield DONE
         finally:

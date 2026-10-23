@@ -3506,6 +3506,8 @@ def setup_chat_routes(
                                  if s["function"]["name"] != "host_shell"]
             _contract_mgr = get_mcp_manager()
             _owner_blocked = blocked_tools_for_owner(_user)
+            if _delegated_credential:
+                _owner_blocked.update(delegated_credential_blocked_tools())
             if (
                 _workspace_tools_disabled_for_owner(_user)
                 and not _native_workspace_contract

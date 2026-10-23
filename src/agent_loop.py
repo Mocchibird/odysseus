@@ -7550,7 +7550,9 @@ Read a text file or extract readable text from a PDF or Office document. Optiona
 <file path>
 <file contents>
 ```
-Write content to a file. First line is the path, rest is the content.
+Write content to a file. First line is the path, rest is the content. An empty body is
+refused when the target already holds data — to clear a file on purpose, send
+`{"path": "<file path>", "content": ""}` instead.
 NEVER use this to save user content/attachments — a user's uploaded file
 goes through manage_files (action=add), which routes it to the Gallery /
 Books / Files store by type.""",
@@ -20486,28 +20488,21 @@ async def stream_agent_loop(
       - data: [DONE]                                        (end)
     """
 
-    # The immutable turn contract is resolved after request/user/global policy
-    # filtering.  Legacy callers can nevertheless pass a disabled-tool snapshot
-    # captured before that resolution.  Reconcile it at the execution boundary
-    # so an explicitly admitted tool cannot be offered to the model and then
-    # rejected by the dispatcher.  A guide-only/block-all policy remains
-    # absolute, and genuinely denied tools never appear in ``offered``.
-    if turn_contract is not None and not (
-        tool_policy and tool_policy.block_all_tool_calls
-    ):
-        _contract_offered = set(turn_contract.offered or ())
-        if _contract_offered:
-            disabled_tools = set(disabled_tools or ()) - _contract_offered
-            if tool_policy is not None:
-                tool_policy = replace(
-                    tool_policy,
-                    disabled_tools=frozenset(
-                        set(tool_policy.disabled_tools) - _contract_offered
-                    ),
-                    hidden_tools=frozenset(
-                        set(tool_policy.hidden_tools) - _contract_offered
-                    ),
-                )
+    # Caller and credential denials remain absolute across contract routing.
+    disabled_tools = set(disabled_tools or ())
+    if delegated_credential:
+        disabled_tools.update(delegated_credential_blocked_tools())
+        if tool_policy is not None:
+            tool_policy = replace(tool_policy, disabled_tools=frozenset(
+                set(tool_policy.disabled_tools) | disabled_tools))
+
+    if plan_mode:
+        disabled_tools.update(plan_mode_disabled_tools())
+
+    from src.tool_capabilities import delegated_tool_is_blocked
+    _caller_hard_denials = frozenset(disabled_tools | (
+        set(tool_policy.all_disabled_names()) if tool_policy else set()
+    ))
 
     if is_compact_preview_contract(turn_contract):
         from src.clean_agent_preview import stream_preview
@@ -20519,11 +20514,12 @@ async def stream_agent_loop(
         async for chunk in stream_preview(
             endpoint_url=endpoint_url, model=model, messages=messages, headers=headers,
             turn_contract=turn_contract, session_id=session_id, owner=owner,
-            disabled_tools=disabled_tools, tool_policy=tool_policy,
+            disabled_tools=set(disabled_tools) | _caller_hard_denials, tool_policy=tool_policy,
             active_document=active_document,
             active_email=active_email,
             history_session=history_session,
             external_untrusted_context_seen=external_untrusted_context_seen,
+            delegated_credential=delegated_credential,
             workspace=workspace,
             client_runtime_context=client_runtime_context,
             external_tool_schemas=external_tool_schemas,
@@ -20703,10 +20699,7 @@ async def stream_agent_loop(
         }
     if delegated_credential:
         # owner is the admin who minted the token, so the call above returns
-        # nothing. Cap the run regardless of who it acts for. Applied after
-        # the client-schema subtraction so caller-supplied schemas cannot
-        # lift the cap.
-        public_blocked_tools = set(public_blocked_tools)
+        # nothing. Cap the run regardless of who it acts for.
         public_blocked_tools.update(delegated_credential_blocked_tools())
     if public_blocked_tools:
         disabled_tools.update(public_blocked_tools)
@@ -20938,7 +20931,7 @@ async def stream_agent_loop(
         _desc, _result = await execute_tool_block(
             _update_block,
             session_id=session_id,
-            disabled_tools=disabled_tools,
+            disabled_tools=set(disabled_tools) | _caller_hard_denials,
             tool_policy=tool_policy,
             owner=owner,
             workspace=workspace,
@@ -21047,7 +21040,7 @@ async def stream_agent_loop(
         _desc, _result = await execute_tool_block(
             _update_block,
             session_id=session_id,
-            disabled_tools=disabled_tools,
+            disabled_tools=set(disabled_tools) | _caller_hard_denials,
             tool_policy=tool_policy,
             owner=owner,
             workspace=workspace,
@@ -21364,7 +21357,7 @@ async def stream_agent_loop(
         _exact_desc, _exact_result = await execute_tool_block(
             exact_block,
             session_id=session_id,
-            disabled_tools=disabled_tools,
+            disabled_tools=set(disabled_tools) | _caller_hard_denials,
             tool_policy=tool_policy,
             owner=owner,
             workspace=_exact_workspace,
@@ -22324,7 +22317,7 @@ async def stream_agent_loop(
         and str(client_runtime_context.get("surface") or "") == "odysseus-native"
         and client_runtime_context.get("terminal_agent") is True
     )
-    if _native_terminal_runtime:
+    if _native_terminal_runtime and not plan_mode and not guide_only:
         # An isolated Odysseus runtime may start with
         # AUTH_ENABLED=false.  That runtime is intentionally not a public
         # user's server workspace: its task workspace is the execution
@@ -22334,7 +22327,7 @@ async def stream_agent_loop(
         # workspace tools are confined to the runner's isolated task sandbox.
         _native_workspace_tools = set(_BACKEND_LOCAL_COMPUTER_TOOLS)
         _native_workspace_tools.add("manage_bg_jobs")
-        _native_reenabled_tools = set(_native_workspace_tools)
+        _native_reenabled_tools = set(_native_workspace_tools) - _caller_hard_denials
         public_blocked_tools.difference_update(_native_reenabled_tools)
         disabled_tools.difference_update(_native_reenabled_tools)
         _caller_disabled_tools.difference_update(_native_reenabled_tools)
@@ -22974,7 +22967,7 @@ async def stream_agent_loop(
 
     _relevant_tools, _base_relevant_tools, tool_policy = (
         _enforce_caller_disabled_tool_policy(
-            _caller_disabled_tools,
+            set(_caller_disabled_tools) | _caller_hard_denials,
             disabled_tools,
             _relevant_tools,
             _base_relevant_tools,
@@ -23038,7 +23031,7 @@ async def stream_agent_loop(
     # agent-floor branch below is skipped (for example on a narrowly selected
     # artifact surface). Initialize it once at request scope so every route
     # uses the same security boundary.
-    _hard_blocked_tools = set(public_blocked_tools) | _caller_disabled_tools
+    _hard_blocked_tools = set(public_blocked_tools) | _caller_disabled_tools | _caller_hard_denials
 
     # Keep the small, general agent surface stable across compact-router
     # decisions. Domain RAG may add tools, but it must not make the agent
@@ -23773,6 +23766,9 @@ async def stream_agent_loop(
             ]
             for schema in normalized_external_tool_schemas:
                 function = schema["function"]
+                if (function["name"] in _caller_hard_denials
+                        or (delegated_credential and delegated_tool_is_blocked(function["name"]))):
+                    continue
                 contract_lines.append(
                     f"- {function['name']}: {function.get('description') or 'Environment operation'}; "
                     f"arguments={json.dumps(function.get('parameters') or {}, separators=(',', ':'))}"
@@ -24430,7 +24426,11 @@ async def stream_agent_loop(
         # the exact call that the server will seal for user approval.  Schema
         # visibility is not authority: both the loop and dispatcher still gate
         # execution, and only a one-use server record can cross that boundary.
-        return schemas
+        return [schema for schema in schemas or ()
+                if schema.get("function", {}).get("name", schema.get("name")) not in _caller_hard_denials
+                and not (tool_policy and tool_policy.block_all_tool_calls)
+                and not (delegated_credential and delegated_tool_is_blocked(
+                    schema.get("function", {}).get("name", schema.get("name"))))]
 
     def _tool_schemas_for_route(route_state):
         route_mcp_schemas = route_state["mcp_schemas"]
@@ -24489,7 +24489,7 @@ async def stream_agent_loop(
                 if (schema.get("function", {}).get("name") or schema.get("name"))
                 not in disabled_tools
             ]
-            return _apply_tool_surface_to_schemas(contract_schemas, tool_surface)
+            return _filter_route_tool_schemas(_apply_tool_surface_to_schemas(contract_schemas, tool_surface))
         if route_state["is_api_model"]:
             if tool_surface == "full":
                 # Full/regular models own semantic tool choice.  Offer every
@@ -24644,7 +24644,7 @@ async def stream_agent_loop(
                 return await execute_tool_block(
                     approved_block,
                     session_id=session_id,
-                    disabled_tools=disabled_tools,
+                    disabled_tools=set(disabled_tools) | _caller_hard_denials,
                     tool_policy=tool_policy,
                     owner=owner,
                     progress_cb=_push_approved_progress,
@@ -25859,7 +25859,7 @@ async def stream_agent_loop(
                     _preemptive_desc, _preemptive_result = await execute_tool_block(
                         _preemptive_block,
                         session_id=session_id,
-                        disabled_tools=disabled_tools,
+                        disabled_tools=set(disabled_tools) | _caller_hard_denials,
                         tool_policy=tool_policy,
                         owner=owner,
                         workspace=workspace,
@@ -26056,7 +26056,7 @@ async def stream_agent_loop(
                     _preemptive_desc, _preemptive_result = await execute_tool_block(
                         _preemptive_block,
                         session_id=session_id,
-                        disabled_tools=disabled_tools,
+                        disabled_tools=set(disabled_tools) | _caller_hard_denials,
                         tool_policy=tool_policy,
                         owner=owner,
                         workspace=workspace,
@@ -26175,7 +26175,7 @@ async def stream_agent_loop(
                                 _topic_bulk_desc, _topic_bulk_result = await execute_tool_block(
                                     _topic_bulk_block,
                                     session_id=session_id,
-                                    disabled_tools=disabled_tools,
+                                    disabled_tools=set(disabled_tools) | _caller_hard_denials,
                                     tool_policy=tool_policy,
                                     owner=owner,
                                     workspace=workspace,
@@ -26487,7 +26487,7 @@ async def stream_agent_loop(
                         _fallback_desc, _fallback_result = await execute_tool_block(
                             _fallback_block,
                             session_id=session_id,
-                            disabled_tools=disabled_tools,
+                            disabled_tools=set(disabled_tools) | _caller_hard_denials,
                             tool_policy=tool_policy,
                             owner=owner,
                             workspace=workspace,
@@ -26558,7 +26558,7 @@ async def stream_agent_loop(
                                 _fx_desc, _fx_result = await execute_tool_block(
                                     _fx_block,
                                     session_id=session_id,
-                                    disabled_tools=disabled_tools,
+                                    disabled_tools=set(disabled_tools) | _caller_hard_denials,
                                     tool_policy=tool_policy,
                                     owner=owner,
                                     workspace=workspace,
@@ -27190,7 +27190,7 @@ async def stream_agent_loop(
             yield f'data: {json.dumps({"type": "tool_start", "tool": _required_block.tool_type, "command": _required_block.content, "full_command": _required_block.content, "round": round_num, "call_id": _required_call_id})}\n\n'
             _required_desc, _required_result, _required_answer = await _dispatch_required_safe_read(
                 _required_read,
-                session_id=session_id, disabled_tools=disabled_tools,
+                session_id=session_id, disabled_tools=set(disabled_tools) | _caller_hard_denials,
                 tool_policy=tool_policy, owner=owner, workspace=workspace,
                 security_context=run_security,
                 active_document_id=getattr(active_document, "id", None),
@@ -32902,7 +32902,7 @@ async def stream_agent_loop(
                             execute_tool_block, _runtime_action,
                             block,
                             session_id=session_id,
-                            disabled_tools=disabled_tools,
+                            disabled_tools=set(disabled_tools) | _caller_hard_denials,
                             tool_policy=tool_policy,
                             owner=owner,
                             progress_cb=_push_progress,
@@ -33211,7 +33211,7 @@ async def stream_agent_loop(
                         _, _browser_result = await execute_tool_block(
                             _browser_block,
                             session_id=session_id,
-                            disabled_tools=disabled_tools,
+                            disabled_tools=set(disabled_tools) | _caller_hard_denials,
                             tool_policy=tool_policy,
                             owner=owner,
                             workspace=workspace,
@@ -36896,7 +36896,7 @@ async def stream_agent_loop(
                 _retry_desc, _retry_result = await execute_tool_block(
                     _retry_block,
                     session_id=session_id,
-                    disabled_tools=disabled_tools,
+                    disabled_tools=set(disabled_tools) | _caller_hard_denials,
                     tool_policy=tool_policy,
                     owner=owner,
                     workspace=workspace,
@@ -37475,7 +37475,7 @@ async def stream_agent_loop(
             owner=owner,
             session_id=session_id,
             workspace=workspace,
-            disabled_tools=disabled_tools,
+            disabled_tools=set(disabled_tools) | _caller_hard_denials,
             tool_policy=tool_policy,
             active_document=active_document,
             active_email=active_email,
